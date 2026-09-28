@@ -1,12 +1,15 @@
-"""2つのサービスを本当に立ち上げて、取り込み → 分析 → 実験の評価まで通す。
+"""2つのサービスを本当に立ち上げて、取り込み → 分析 → 比較 → 実験の評価まで通す。
 
-ダミーの CSV（testdata/trackman_dummy_session.csv）は答えが分かっている:
-  1〜10 基準（フェース・トゥ・パス +3°前後） / 11〜20 介入（+0.8°前後）
-  21〜25 定着（+1.5°前後） / 26〜30 ヒール打ち（打点が原因の曲がり）
-なので、次の3つが出なければ失敗にする。
+ダミーの CSV は答えが分かっている:
+  trackman_dummy_session.csv（今日・30球）
+    1〜10 基準（フェース・トゥ・パス +3°前後） / 11〜20 介入（+0.8°前後）
+    21〜25 定着（+1.5°前後） / 26〜30 ヒール打ち（打点が原因の曲がり）
+  trackman_dummy_yesterday.csv（前日・20球。+0.8°前後・打点は真ん中）
+なので、次が出なければ失敗にする。
   - 介入の判定が strong か moderate
   - 26〜30 のうち4球以上が「打点が原因」
   - 分析の findings に打点の話が出る
+  - 前日と比べて、スピン軸の変化の説明にフェース・トゥ・パスが入る
 
 使い方: python3 scripts/e2e.py（リポジトリの直下で）
 """
@@ -37,13 +40,13 @@ def free_port() -> int:
 def wait(url: str, proc: subprocess.Popen, name: str) -> None:
     for _ in range(150):
         if proc.poll() is not None:
-            sys.exit(f"{name} が起動せずに終了しました")
+            raise RuntimeError(f"{name} が起動せずに終了しました")
         try:
             OPENER.open(url, timeout=1)
             return
         except OSError:
             time.sleep(0.2)
-    sys.exit(f"{name} が起動しません: {url}")
+    raise RuntimeError(f"{name} が起動しません: {url}")
 
 
 def call(method: str, url: str, body=None, raw: bytes | None = None, ctype: str = "application/json"):
@@ -64,73 +67,113 @@ def multipart(path: str) -> tuple[bytes, str]:
     return body, f"multipart/form-data; boundary={boundary}"
 
 
-def main() -> None:
-    ap, gp = free_port(), free_port()
-    tmp = tempfile.mkdtemp()
-    py = subprocess.Popen(
-        ["uv", "run", "uvicorn", "golf_analysis.app:app", "--port", str(ap), "--log-level", "warning"],
-        cwd=os.path.join(ROOT, "analysis"),
-    )
-    # go run だと止めたときに子のバイナリが残るので、先にビルドして直に動かす
-    binary = os.path.join(tmp, "server")
-    subprocess.run(["go", "build", "-o", binary, "./cmd/server"], cwd=os.path.join(ROOT, "api"), check=True)
-    go = subprocess.Popen(
-        [binary],
-        cwd=os.path.join(ROOT, "api"),
-        env={**os.environ, "PORT": str(gp), "ANALYSIS_URL": f"http://127.0.0.1:{ap}", "DB_PATH": os.path.join(tmp, "e2e.db"), "WEB_DIR": ""},
-    )
-    try:
-        wait(f"http://127.0.0.1:{ap}/healthz", py, "分析サービス")
-        wait(f"http://127.0.0.1:{gp}/healthz", go, "API")
-        base = f"http://127.0.0.1:{gp}/v1"
+class Services:
+    """分析サービスと API（画面つき）を立てて、止める。with で使う。"""
 
-        player = call("POST", f"{base}/players", {"name": "Rita", "handedness": "R"})
-        session = call("POST", f"{base}/sessions", {"player_id": player["id"], "date": "2026-09-27", "location": "練習場"})
-        sid = session["id"]
-        body, ctype = multipart(os.path.join(ROOT, "testdata", "trackman_dummy_session.csv"))
-        imp = call("POST", f"{base}/sessions/{sid}/import", raw=body, ctype=ctype)
-        print(f"取り込み: {imp['imported']}球（飛ばした行 {imp['skipped']}）")
+    def __enter__(self):
+        ap, gp = free_port(), free_port()
+        tmp = tempfile.mkdtemp()
+        # go run だと止めたときに子のバイナリが残るので、先にビルドして直に動かす
+        binary = os.path.join(tmp, "server")
+        subprocess.run(["go", "build", "-o", binary, "./cmd/server"], cwd=os.path.join(ROOT, "api"), check=True)
+        self.py = subprocess.Popen(
+            ["uv", "run", "uvicorn", "golf_analysis.app:app", "--port", str(ap), "--log-level", "warning"],
+            cwd=os.path.join(ROOT, "analysis"),
+        )
+        self.go = subprocess.Popen(
+            [binary],
+            cwd=os.path.join(ROOT, "api"),
+            env={
+                **os.environ,
+                "PORT": str(gp),
+                "ANALYSIS_URL": f"http://127.0.0.1:{ap}",
+                "DB_PATH": os.path.join(tmp, "e2e.db"),
+                "WEB_DIR": os.path.join(ROOT, "web"),
+            },
+        )
+        try:
+            wait(f"http://127.0.0.1:{ap}/healthz", self.py, "分析サービス")
+            wait(f"http://127.0.0.1:{gp}/healthz", self.go, "API")
+        except BaseException:
+            self.__exit__()
+            raise
+        self.root = f"http://127.0.0.1:{gp}"
+        self.base = f"{self.root}/v1"
+        return self
 
-        shots = call("GET", f"{base}/sessions/{sid}/shots")
-        heel = [s["decomposition"]["curve_cause"] for s in shots[25:]]
-        print(f"26〜30球目の曲がりの原因: {heel}")
-
-        analysis = call("GET", f"{base}/sessions/{sid}/analysis")
-        print("findings:")
-        for f in analysis["findings"]:
-            print("  ", json.dumps(f, ensure_ascii=False))
-        club = analysis["clubs"][0]
-        print(f"Good: {club['good']['n_good']} / {club['n']}")
-
-        ex = call("POST", f"{base}/sessions/{sid}/experiments", {
-            "hypothesis": "フェース・トゥ・パスが開いているのでプッシュフェードになる",
-            "intervention": "左手甲を目標に向けたまま振る",
-            "target_metric": "face_to_path",
-            "goal": "reduce_abs",
-        })
-        for kind, a, b in (("baseline", 1, 10), ("intervention", 11, 20), ("retention", 21, 25)):
-            call("POST", f"{base}/experiments/{ex['id']}/blocks", {"kind": kind, "seq_from": a, "seq_to": b})
-        ev = call("GET", f"{base}/experiments/{ex['id']}/evaluation")
-        print("実験の評価:")
-        print(json.dumps(ev, ensure_ascii=False, indent=2))
-
-        errors = []
-        if ev["intervention_vs_baseline"]["grade"] not in ("strong", "moderate"):
-            errors.append(f"介入の判定が {ev['intervention_vs_baseline']['grade']}")
-        if heel.count("strike") < 4:
-            errors.append(f"ヒール打ちのうち打点が原因と出たのが {heel.count('strike')} 球")
-        if not any(f.get("cause") == "strike" for f in analysis["findings"]):
-            errors.append("findings に打点の話が出ない")
-        if errors:
-            sys.exit("失敗: " + " / ".join(errors))
-        print("OK")
-    finally:
-        for p in (go, py):
+    def __exit__(self, *exc):
+        for p in (self.go, self.py):
             p.terminate()
             try:
                 p.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 p.kill()
+
+
+def import_csv(base: str, session_id: int, name: str) -> dict:
+    body, ctype = multipart(os.path.join(ROOT, "testdata", name))
+    return call("POST", f"{base}/sessions/{session_id}/import", raw=body, ctype=ctype)
+
+
+def seed(base: str) -> dict:
+    """選手1人・前日と今日のセッションを作って、ダミーを取り込む。"""
+    player = call("POST", f"{base}/players", {"name": "Rita", "handedness": "R"})
+    yday = call("POST", f"{base}/sessions", {"player_id": player["id"], "date": "2026-09-26", "location": "練習場"})
+    today = call("POST", f"{base}/sessions", {"player_id": player["id"], "date": "2026-09-27", "location": "練習場"})
+    import_csv(base, yday["id"], "trackman_dummy_yesterday.csv")
+    imp = import_csv(base, today["id"], "trackman_dummy_session.csv")
+    return {"player": player, "yesterday": yday["id"], "today": today["id"], "import": imp}
+
+
+def run(base: str) -> None:
+    s = seed(base)
+    sid = s["today"]
+    print(f"取り込み: {s['import']['imported']}球（飛ばした行 {s['import']['skipped']}）")
+
+    shots = call("GET", f"{base}/sessions/{sid}/shots")
+    heel = [x["decomposition"]["curve_cause"] for x in shots[25:]]
+    print(f"26〜30球目の曲がりの原因: {heel}")
+
+    analysis = call("GET", f"{base}/sessions/{sid}/analysis")
+    print("findings:")
+    for f in analysis["findings"]:
+        print("  ", json.dumps(f, ensure_ascii=False))
+
+    cmp = call("GET", f"{base}/sessions/{sid}/compare?with={s['yesterday']}")
+    explanations = cmp["clubs"]["7 Iron"]["explanations"]
+    print("前日との比較:")
+    for e in explanations:
+        print("  ", json.dumps(e, ensure_ascii=False))
+
+    ex = call("POST", f"{base}/sessions/{sid}/experiments", {
+        "hypothesis": "フェース・トゥ・パスが開いているのでプッシュフェードになる",
+        "intervention": "左手甲を目標に向けたまま振る",
+        "target_metric": "face_to_path",
+        "goal": "reduce_abs",
+    })
+    for kind, a, b in (("baseline", 1, 10), ("intervention", 11, 20), ("retention", 21, 25)):
+        call("POST", f"{base}/experiments/{ex['id']}/blocks", {"kind": kind, "seq_from": a, "seq_to": b})
+    ev = call("GET", f"{base}/experiments/{ex['id']}/evaluation")
+    print("実験の評価:", json.dumps({k: ev[k] for k in ("intervention_vs_baseline", "retention_vs_baseline")}, ensure_ascii=False))
+
+    errors = []
+    if ev["intervention_vs_baseline"]["grade"] not in ("strong", "moderate"):
+        errors.append(f"介入の判定が {ev['intervention_vs_baseline']['grade']}")
+    if heel.count("strike") < 4:
+        errors.append(f"ヒール打ちのうち打点が原因と出たのが {heel.count('strike')} 球")
+    if not any(f.get("cause") == "strike" for f in analysis["findings"]):
+        errors.append("findings に打点の話が出ない")
+    axis = next((e for e in explanations if e["outcome"] == "spin_axis"), None)
+    if not axis or "face_to_path" not in [c["metric"] for c in axis["explained_by"]]:
+        errors.append(f"前日との比較でスピン軸の変化をフェース・トゥ・パスで説明していない: {axis}")
+    if errors:
+        sys.exit("失敗: " + " / ".join(errors))
+    print("OK")
+
+
+def main() -> None:
+    with Services() as sv:
+        run(sv.base)
 
 
 if __name__ == "__main__":

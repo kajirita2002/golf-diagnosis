@@ -56,6 +56,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "physics": physics.EngineVersion})
 	})
+	mux.HandleFunc("GET /v1/players", s.listPlayers)
 	mux.HandleFunc("POST /v1/players", s.createPlayer)
 	mux.HandleFunc("GET /v1/players/{id}", s.getPlayer)
 	mux.HandleFunc("GET /v1/players/{id}/sessions", s.listSessions)
@@ -163,6 +164,15 @@ func (s *Server) createPlayer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, p)
+}
+
+func (s *Server) listPlayers(w http.ResponseWriter, r *http.Request) {
+	ps, err := s.Store.ListPlayers(r.Context())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, ps)
 }
 
 func (s *Server) getPlayer(w http.ResponseWriter, r *http.Request) {

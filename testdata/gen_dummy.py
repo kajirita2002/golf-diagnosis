@@ -10,6 +10,10 @@
   26〜30 ヒール打ち  フェース・トゥ・パスは小さいのにスライス回転（打点が原因）
 
 使い方: python3 testdata/gen_dummy.py > testdata/trackman_dummy_session.csv
+
+  python3 testdata/gen_dummy.py yesterday > testdata/trackman_dummy_yesterday.csv
+    前日のセッション（20球・フェース・トゥ・パス +0.8°前後・打点は真ん中）。
+    今日と比べると「スライスが増えたのはフェース・トゥ・パスのせい」になるはず。
 """
 
 import math
@@ -60,6 +64,14 @@ def shot(i, ftp_mu, ftp_sd, offset_in=0.0, gear=0.0):
     ]
 
 
+def yesterday(out=sys.stdout):
+    rows = [HEADER, UNITS]
+    for i in range(1, 21):
+        rows.append(shot(i, 0.8, 1.0, random.gauss(0, 0.12)))
+    for r in rows:
+        out.write(",".join(r).replace("2026-09-27", "2026-09-26") + "\n")
+
+
 def main(out=sys.stdout):
     rows = [HEADER, UNITS]
     i = 0
@@ -82,4 +94,8 @@ def main(out=sys.stdout):
 
 
 if __name__ == "__main__":
-    main()
+    if sys.argv[1:] == ["yesterday"]:
+        random.seed(20260926)
+        yesterday()
+    else:
+        main()

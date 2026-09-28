@@ -142,6 +142,26 @@ func (s *Store) GetPlayer(ctx context.Context, id int64) (*model.Player, error) 
 	return &p, nil
 }
 
+// ListPlayers は選手を作った順に返す。
+func (s *Store) ListPlayers(ctx context.Context) ([]model.Player, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, handedness, created_at FROM players ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []model.Player{}
+	for rows.Next() {
+		var p model.Player
+		var ts string
+		if err := rows.Scan(&p.ID, &p.Name, &p.Handedness, &ts); err != nil {
+			return nil, err
+		}
+		p.CreatedAt = parseTS(ts)
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
 // ---- sessions ----
 
 // CreateSession はセッションを作る。

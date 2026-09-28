@@ -9,7 +9,8 @@ TrackMan × 動画 × 個人履歴から「なぜその球になったか」を�
 
 ```
 api/        Go の API（取り込み・保存・1球ごとの物理分解）
-analysis/   Python の分析サービス（Good 判定・原因の群・ばらつき・実験の評価）
+analysis/   Python の分析サービス（Good 判定・原因の群・ばらつき・前回との比較・実験の評価）
+web/        画面（素の HTML/JS 1ファイル。API が / で配る）
 testdata/   ダミーの TrackMan 風 CSV（実物が届いたら差し替える）
 scripts/    e2e.py（2つのサービスを立てて通しで確かめる）
 docs/       設計
@@ -24,6 +25,9 @@ cd analysis && uv sync && uv run uvicorn golf_analysis.app:app --port 8001
 # API（:8080）
 cd api && go run ./cmd/server
 ```
+
+ブラウザで http://localhost:8080/ を開くと画面が出ます（CSV の取り込み・診断・1球ずつ・前回と比べる・実験）。
+API だけ使うなら:
 
 ```sh
 # 選手とセッションを作る
@@ -66,7 +70,8 @@ curl -s localhost:8080/v1/experiments/1/evaluation
 ```sh
 cd api && go vet ./... && go test ./...
 cd analysis && uv run pytest -q
-python3 scripts/e2e.py   # 2つのサービスを本当に立てて通しで確かめる
+python3 scripts/e2e.py        # 2つのサービスを本当に立てて通しで確かめる
+python3 scripts/ui_check.py   # 画面をブラウザで操作（Playwright。PC幅とスマホ幅・横溢れ・JSエラー）
 ```
 
 ## 約束

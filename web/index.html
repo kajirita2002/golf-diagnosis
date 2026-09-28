@@ -1,0 +1,515 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Swing Lab</title>
+<link rel="icon" href="data:,">
+<!--
+  Phase 0 の画面。素の HTML/JS 1ファイル（ビルド不要・外部CDNなし）。
+  - 文字列はサーバー（＝CSV）から来るので、必ず esc() を通してから HTML に入れる。
+  - 数値は保存が SI。表示の単位だけここで変える（距離は yd / m を切り替え）。
+  - 診断の文は、分析サービスの構造化された結果から決まった型で組む（LLM は使わない）。
+-->
+<style>
+:root{
+  --bg:#f6f7f5;--card:#fff;--ink:#1b1f1c;--sub:#5d665f;--line:#dfe3df;
+  --accent:#1f7a4d;--accent-weak:#e3f1e9;--warn:#b25b00;--warn-weak:#fbefe1;
+  --bad:#b3261e;--bad-weak:#fbe7e5;--info:#2d5da8;--info-weak:#e6eefa;
+  --r:10px;
+}
+@media (prefers-color-scheme: dark){
+  :root{--bg:#121513;--card:#1b1f1c;--ink:#e8ece9;--sub:#9aa39c;--line:#2e3430;
+    --accent:#5cc28e;--accent-weak:#1d3327;--warn:#f0a050;--warn-weak:#3a2a17;
+    --bad:#f28b82;--bad-weak:#3b1f1d;--info:#8ab4f8;--info-weak:#1c2a40;}
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 system-ui,-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif}
+header{padding:14px 16px;border-bottom:1px solid var(--line);display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+header h1{font-size:18px;margin:0;margin-right:auto}
+/* 列を minmax(0,1fr) にする。既定の auto だと広い表が列ごと押し広げ、スマホでページ全体が横に溢れる */
+main{max-width:1100px;margin:0 auto;padding:16px;display:grid;grid-template-columns:minmax(0,1fr);gap:16px}
+section{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:16px}
+h2{font-size:16px;margin:0 0 10px}
+h3{font-size:14px;margin:14px 0 6px;color:var(--sub)}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+input,select,button,textarea{font:inherit;color:inherit}
+input,select,textarea{max-width:100%;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:6px 8px}
+button{background:var(--accent);color:#fff;border:0;border-radius:8px;padding:7px 12px;cursor:pointer}
+button.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+button.small{padding:2px 8px;font-size:12px}
+button:disabled{opacity:.5;cursor:default}
+.muted{color:var(--sub);font-size:13px}
+.err{color:var(--bad);font-size:13px;white-space:pre-wrap}
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13px;font-variant-numeric:tabular-nums}
+th,td{padding:5px 7px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+th{color:var(--sub);font-weight:600;position:sticky;top:0;background:var(--card)}
+td.l,th.l{text-align:left}
+tr.excluded td{opacity:.4;text-decoration:line-through}
+tr.sel td{background:var(--accent-weak)}
+.chip{display:inline-block;padding:0 7px;border-radius:99px;font-size:12px;line-height:20px}
+.c-good{background:var(--accent-weak);color:var(--accent)}
+.c-bad{background:var(--bad-weak);color:var(--bad)}
+.c-warn{background:var(--warn-weak);color:var(--warn)}
+.c-info{background:var(--info-weak);color:var(--info)}
+.c-none{background:var(--bg);color:var(--sub)}
+.finding{padding:10px 12px;border-radius:8px;border:1px solid var(--line);margin:8px 0}
+.finding b{font-weight:600}
+.kpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
+.kpi > div{border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.kpi .v{font-size:20px;font-weight:600}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:12px}
+.tabs button{background:transparent;color:var(--sub);border-radius:8px 8px 0 0;border:1px solid transparent}
+.tabs button.on{color:var(--ink);border-color:var(--line);border-bottom-color:var(--card);margin-bottom:-1px;background:var(--card)}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<header>
+  <h1>Swing Lab <span class="muted">Phase 0 · TrackMan</span></h1>
+  <label class="muted">選手 <select id="player"></select></label>
+  <button class="ghost small" id="newPlayerBtn">＋選手</button>
+  <label class="muted">距離 <select id="distUnit"><option value="yd">yd</option><option value="m">m</option></select></label>
+</header>
+
+<main>
+  <section id="newPlayer" hidden>
+    <h2>選手を追加</h2>
+    <div class="row">
+      <input id="npName" placeholder="名前">
+      <select id="npHand"><option value="R">右打ち</option><option value="L">左打ち</option></select>
+      <button id="npSave">追加</button>
+      <span class="err" id="npErr"></span>
+    </div>
+  </section>
+
+  <section>
+    <h2>セッション</h2>
+    <div class="row">
+      <select id="session"></select>
+      <input type="date" id="nsDate">
+      <input id="nsLoc" placeholder="場所（任意）">
+      <button class="ghost" id="nsSave">新しいセッション</button>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <input type="file" id="csv" accept=".csv,text/csv">
+      <label class="muted">単位の書いていない列 <select id="csvUnits"><option value="imperial">mph・yd・in</option><option value="metric">m/s・m・cm</option></select></label>
+      <button id="importBtn">CSV を取り込む</button>
+    </div>
+    <div class="muted" id="importMsg"></div>
+    <div class="err" id="sessErr"></div>
+  </section>
+
+  <section id="work" hidden>
+    <div class="tabs">
+      <button data-tab="diag" class="on">診断</button>
+      <button data-tab="shots">1球ずつ</button>
+      <button data-tab="compare">前回と比べる</button>
+      <button data-tab="exp">実験</button>
+    </div>
+
+    <div data-pane="diag">
+      <div class="row"><button id="analyzeBtn">分析する</button><span class="muted">分析サービスが動いていないと使えません（1球ずつの分解は使えます）</span></div>
+      <div class="err" id="anErr"></div>
+      <div id="anOut"></div>
+    </div>
+
+    <div data-pane="shots" hidden>
+      <p class="muted">曲がりの原因は物理（D-plane）で分けたもの。打点はインパクトテープの結果を mm で入れられます（トゥ ＋ / ヒール −）。</p>
+      <div class="scroll"><table id="shotTable"></table></div>
+    </div>
+
+    <div data-pane="compare" hidden>
+      <div class="row">
+        <label class="muted">比べる元 <select id="cmpWith"></select></label>
+        <button id="cmpBtn">比べる</button>
+      </div>
+      <div class="err" id="cmpErr"></div>
+      <div id="cmpOut"></div>
+    </div>
+
+    <div data-pane="exp" hidden>
+      <h3>新しい実験</h3>
+      <div class="row">
+        <input id="exHyp" placeholder="仮説（例: フェースが開いてプッシュフェードになる）" style="flex:2;min-width:0;width:100%">
+        <input id="exInt" placeholder="介入（例: 左手甲を目標に向けたまま）" style="flex:2;min-width:0;width:100%">
+      </div>
+      <div class="row" style="margin-top:8px">
+        <select id="exMetric"></select>
+        <select id="exGoal">
+          <option value="reduce_abs">0 に近づける</option>
+          <option value="reduce_sd">ばらつきを減らす</option>
+          <option value="increase">増やす</option>
+          <option value="decrease">減らす</option>
+        </select>
+        <select id="exClub"></select>
+        <button id="exSave">作る</button>
+      </div>
+      <div class="err" id="exErr"></div>
+      <div id="exList"></div>
+    </div>
+  </section>
+</main>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+async function api(method, path, body) {
+  const opt = { method, headers: {} };
+  if (body instanceof FormData) opt.body = body;
+  else if (body !== undefined) { opt.body = JSON.stringify(body); opt.headers["Content-Type"] = "application/json"; }
+  const r = await fetch(path, opt);
+  const t = await r.text();
+  let j = null;
+  try { j = t ? JSON.parse(t) : null; } catch { /* JSON でない応答 */ }
+  if (!r.ok) throw new Error((j && j.error) || t || r.statusText);
+  return j;
+}
+
+// ---- 単位と名前 ----
+const LABEL = {
+  face_angle: "フェース角", club_path: "クラブパス", face_to_path: "フェース・トゥ・パス",
+  attack_angle: "入射角", dynamic_loft: "ダイナミックロフト", spin_loft: "スピンロフト",
+  low_point: "最下点", impact_offset: "打点（左右）", impact_height: "打点（上下）",
+  launch_direction: "打ち出し方向", launch_angle: "打ち出し角", spin_axis: "スピン軸",
+  spin_rate: "スピン量", side: "着地の左右", carry: "キャリー", club_speed: "ヘッドスピード",
+  ball_speed: "ボール初速", smash_factor: "ミート率",
+};
+const KIND = {
+  face_angle: "deg", club_path: "deg", face_to_path: "deg", attack_angle: "deg", dynamic_loft: "deg",
+  spin_loft: "deg", launch_direction: "deg", launch_angle: "deg", spin_axis: "deg",
+  low_point: "mm", impact_offset: "mm", impact_height: "mm", side: "dist", carry: "dist",
+  spin_rate: "rpm", club_speed: "mps", ball_speed: "mps", smash_factor: "ratio",
+};
+const distUnit = () => $("distUnit").value;
+function fmt(metric, v, signed = false) {
+  if (v === null || v === undefined) return "—";
+  const k = KIND[metric];
+  let x = v, u = "", d = 1;
+  if (k === "deg") u = "°";
+  else if (k === "mm") { x = v * 1000; u = "mm"; d = 0; }
+  else if (k === "dist") { x = distUnit() === "yd" ? v / 0.9144 : v; u = distUnit(); }
+  else if (k === "rpm") { u = "rpm"; d = 0; }
+  else if (k === "mps") { u = "m/s"; }
+  else if (k === "ratio") { d = 2; }
+  const s = x.toFixed(d);
+  return (signed && x > 0 ? "+" : "") + s + u;
+}
+const CURVE = { hook: "フック", draw: "ドロー", straight: "まっすぐ", fade: "フェード", slice: "スライス", unknown: "—" };
+const START = { push: "プッシュ", pull: "プル", straight: "まっすぐ", unknown: "—" };
+const CAUSE = { face_to_path: "フェース・トゥ・パス", strike: "打点", mixed: "両方", none: "—", unknown: "—" };
+const causeChip = (c) => `<span class="chip ${c === "strike" ? "c-warn" : c === "face_to_path" ? "c-info" : "c-none"}">${esc(CAUSE[c] || c)}</span>`;
+const GRADE = {
+  strong: ["はっきり効いた", "c-good"], moderate: ["効いた", "c-good"], weak: ["効いたか分からない", "c-none"],
+  none: ["効いていない", "c-none"], worse: ["悪くなった", "c-bad"], insufficient: ["球が足りない", "c-warn"],
+};
+const STRENGTH = { strong: ["強い", "c-good"], moderate: ["中程度", "c-info"], subset: ["一部の球", "c-warn"], info: ["入力のお願い", "c-none"] };
+
+// ---- 状態 ----
+const S = { players: [], player: null, sessions: [], session: null, shots: [], analysis: null };
+
+async function loadPlayers(selectId) {
+  S.players = await api("GET", "/v1/players");
+  const sel = $("player");
+  sel.innerHTML = S.players.map((p) => `<option value="${p.id}">${esc(p.name)}（${p.handedness === "L" ? "左" : "右"}）</option>`).join("")
+    || `<option value="">（選手がいません）</option>`;
+  if (!S.players.length) { $("newPlayer").hidden = false; return; }
+  sel.value = selectId || S.players[0].id;
+  await pickPlayer();
+}
+
+async function pickPlayer() {
+  S.player = S.players.find((p) => String(p.id) === $("player").value) || null;
+  if (!S.player) return;
+  S.sessions = await api("GET", `/v1/players/${S.player.id}/sessions`);
+  renderSessions();
+  await pickSession();
+}
+
+function renderSessions(selectId) {
+  const label = (s) => `${s.date}${s.location ? "・" + s.location : ""}（#${s.id}）`;
+  $("session").innerHTML = S.sessions.map((s) => `<option value="${s.id}">${esc(label(s))}</option>`).join("")
+    || `<option value="">（セッションがありません）</option>`;
+  if (selectId) $("session").value = selectId;
+  const others = S.sessions.filter((s) => String(s.id) !== $("session").value);
+  $("cmpWith").innerHTML = others.map((s) => `<option value="${s.id}">${esc(label(s))}</option>`).join("")
+    || `<option value="">（ほかのセッションがありません）</option>`;
+}
+
+async function pickSession() {
+  S.session = S.sessions.find((s) => String(s.id) === $("session").value) || null;
+  S.analysis = null;
+  $("anOut").innerHTML = ""; $("cmpOut").innerHTML = "";
+  renderSessions(S.session && S.session.id);
+  $("work").hidden = !S.session;
+  if (!S.session) return;
+  await loadShots();
+  await loadExperiments();
+}
+
+async function loadShots() {
+  S.shots = await api("GET", `/v1/sessions/${S.session.id}/shots`);
+  renderShots();
+  const clubs = [...new Set(S.shots.map((s) => s.club).filter(Boolean))];
+  $("exClub").innerHTML = `<option value="">全クラブ</option>` + clubs.map((c) => `<option>${esc(c)}</option>`).join("");
+}
+
+// ---- 1球ずつ ----
+function goodOf(shot) {
+  if (shot.good_override !== undefined && shot.good_override !== null) return { good: shot.good_override, by: "override" };
+  if (!S.analysis) return null;
+  for (const c of S.analysis.clubs) {
+    const j = c.good.shots.find((x) => x.id === shot.id);
+    if (j) return j;
+  }
+  return null;
+}
+
+function renderShots() {
+  const cols = ["carry", "side", "launch_direction", "spin_axis", "face_angle", "club_path", "face_to_path", "attack_angle", "impact_offset"];
+  const head = `<tr><th>#</th><th class="l">クラブ</th>${cols.map((c) => `<th>${esc(LABEL[c])}</th>`).join("")}<th class="l">球筋</th><th class="l">曲がりの原因</th><th class="l">Good</th><th class="l">打点mm</th><th></th></tr>`;
+  const rows = S.shots.map((s) => {
+    const m = s.metrics, d = s.decomposition, g = goodOf(s);
+    const gChip = !g || g.good === null ? `<span class="chip c-none">—</span>`
+      : `<span class="chip ${g.good ? "c-good" : "c-bad"}" title="${esc((g.failed || []).join(", "))}">${g.good ? "Good" : "Miss"}${g.by === "override" ? "✎" : ""}</span>`;
+    const manual = (s.manual || []).includes("impact_offset");
+    return `<tr class="${s.excluded ? "excluded" : ""}" data-id="${s.id}">
+      <td>${s.seq}</td><td class="l">${esc(s.club)}</td>
+      ${cols.map((c) => `<td>${fmt(c, m[c], ["side", "launch_direction", "spin_axis", "face_angle", "club_path", "face_to_path", "impact_offset"].includes(c))}${c === "impact_offset" && manual ? "✎" : ""}</td>`).join("")}
+      <td class="l">${esc(START[d.start_line])}・${esc(CURVE[d.curve])}</td>
+      <td class="l">${causeChip(d.curve_cause)}${(d.notes || []).length ? ` <span title="${esc(d.notes.join("\n"))}">⚠︎</span>` : ""}</td>
+      <td class="l">${gChip} <button class="ghost small" data-act="good">切替</button></td>
+      <td class="l"><input type="number" step="1" min="-60" max="60" style="width:64px" data-act="offset" value="${m.impact_offset != null && manual ? Math.round(m.impact_offset * 1000) : ""}"></td>
+      <td><button class="ghost small" data-act="excl">${s.excluded ? "戻す" : "除外"}</button></td></tr>`;
+  }).join("");
+  $("shotTable").innerHTML = head + rows;
+}
+
+$("shotTable").addEventListener("click", async (ev) => {
+  const b = ev.target.closest("button[data-act]");
+  if (!b) return;
+  const tr = b.closest("tr"), id = Number(tr.dataset.id), s = S.shots.find((x) => x.id === id);
+  let body;
+  if (b.dataset.act === "excl") body = { excluded: !s.excluded };
+  if (b.dataset.act === "good") {
+    // 自動 → Good → Miss → 自動 の順に回す
+    const cur = s.good_override;
+    body = { good_override: cur === undefined || cur === null ? true : cur === true ? false : null };
+  }
+  await patchShot(id, body);
+});
+$("shotTable").addEventListener("change", async (ev) => {
+  const i = ev.target.closest("input[data-act=offset]");
+  if (!i || i.value === "") return;
+  await patchShot(Number(i.closest("tr").dataset.id), { impact_offset_mm: Number(i.value) });
+});
+
+async function patchShot(id, body) {
+  try {
+    const out = await api("PATCH", `/v1/shots/${id}`, body);
+    S.shots = S.shots.map((x) => (x.id === id ? out : x));
+    S.analysis = null;
+    renderShots();
+  } catch (e) { alert(e.message); }
+}
+
+// ---- 診断 ----
+function findingText(f) {
+  const ids = (f.shot_ids || []).length && f.shot_ids.length <= 12 ? `（${f.shot_ids.map((i) => "#" + (S.shots.find((s) => s.id === i) || {}).seq).join(" ")}）` : "";
+  switch (f.kind) {
+    case "curve_cause":
+      if (f.cause === "strike") {
+        return f.strength === "subset"
+          ? `曲がった${f.evidence.of}球のうち<b>${f.evidence.count}球${ids}は打点（ギア効果）</b>が原因です。フェースの向きではなく、当たる場所が変わった球の群があります。`
+          : `曲がった${f.evidence.of}球のうち<b>${f.evidence.count}球は打点（ギア効果）</b>が原因です。フェースを直す前に、当たる場所を揃えるのが先です。`;
+      }
+      return f.strength === "subset"
+        ? `曲がった${f.evidence.of}球のうち<b>${f.evidence.count}球${ids}はフェース・トゥ・パス</b>が原因です。`
+        : `曲がった${f.evidence.of}球のうち<b>${f.evidence.count}球はフェース・トゥ・パス</b>（フェースとクラブの進む向きの差）が原因です。`;
+    case "dispersion_driver":
+      return `左右のばらつきの<b>${Math.round(f.evidence.share * 100)}%は${esc(LABEL[f.metric] || f.metric)}</b>で説明できます（${f.evidence.n}球・R² ${f.evidence.r2.toFixed(2)}）。ばらつきを減らすならここから。`;
+    case "need_data":
+      return `打点のデータが<b>${f.evidence.missing}球ぶん</b>ありません。インパクトテープの結果を「1球ずつ」で入れると、打点が原因かを確かめられます。`;
+    case "insufficient":
+      return `曲がりの原因を言うには球が足りません（${f.n}球 / あと${f.needed - f.n}球）。`;
+  }
+  return esc(JSON.stringify(f));
+}
+
+function renderAnalysis() {
+  const a = S.analysis;
+  let h = "";
+  for (const c of a.clubs) {
+    const fs = a.findings.filter((f) => f.club === c.club);
+    const v = c.variability;
+    h += `<h3>${esc(c.club)}（${c.n}球）</h3>
+      <div class="kpi">
+        <div><div class="muted">Good</div><div class="v">${c.good.n_good} / ${c.n}</div></div>
+        <div><div class="muted">キャリーの中央値</div><div class="v">${fmt("carry", c.carry_median)}</div></div>
+        ${["face_to_path", "face_angle", "club_path"].filter((k) => v[k]).map((k) =>
+          `<div><div class="muted">${esc(LABEL[k])}</div><div class="v">${fmt(k, v[k].mean, true)}</div><div class="muted">ばらつき ±${v[k].sd != null ? v[k].sd.toFixed(1) : "—"}°</div></div>`).join("")}
+      </div>`;
+    h += fs.length ? fs.map((f) => {
+      const [t, cl] = STRENGTH[f.strength] || ["", "c-none"];
+      return `<div class="finding">${t ? `<span class="chip ${cl}">${t}</span> ` : ""}${findingText(f)}</div>`;
+    }).join("") : `<p class="muted">このクラブについて言えることはまだありません。</p>`;
+    h += `<p class="muted">球筋のまとまり: ${c.flight_groups.map((g) => `${esc(g.miss_type)}×${esc(CAUSE[g.curve_cause] || g.curve_cause)} ${g.n}球`).join(" / ")}</p>`;
+  }
+  $("anOut").innerHTML = h || `<p class="muted">球がありません。</p>`;
+}
+
+$("analyzeBtn").addEventListener("click", async () => {
+  $("anErr").textContent = "";
+  try {
+    S.analysis = await api("GET", `/v1/sessions/${S.session.id}/analysis`);
+    renderAnalysis();
+    renderShots();
+  } catch (e) { $("anErr").textContent = e.message; }
+});
+
+// ---- 比べる ----
+function renderCompare(r) {
+  let h = "";
+  for (const [club, c] of Object.entries(r.clubs)) {
+    h += `<h3>${esc(club)}（前回 ${c.n[0]}球 → 今回 ${c.n[1]}球）</h3>`;
+    if (!c.explanations.length) {
+      const ins = Object.values(c.l0).some((x) => x.status === "insufficient");
+      h += `<p class="muted">${ins ? "球が足りないので比べられない項目があります。" : "球筋に意味のある変化はありません。"}</p>`;
+    }
+    for (const e of c.explanations) {
+      const why = e.explained_by.length
+        ? e.explained_by.map((x) => `<b>${esc(LABEL[x.metric] || x.metric)} ${fmt(x.metric, x.diff, true)}</b>`).join("、") + " が変わったため"
+        : `インパクトの測れている値では説明できません${e.unmeasured.length ? `（測れていない: ${e.unmeasured.map((m) => esc(LABEL[m] || m)).join("・")}）` : ""}`;
+      h += `<div class="finding">${esc(LABEL[e.outcome] || e.outcome)}が <b>${fmt(e.outcome, e.diff, true)}</b> 変わりました ―― ${why}。</div>`;
+    }
+    const changed = Object.entries(c.l1).filter(([, x]) => x.status === "changed");
+    if (changed.length) h += `<p class="muted">インパクトで変わったもの: ${changed.map(([k, x]) => `${esc(LABEL[k] || k)} ${fmt(k, x.diff, true)}`).join(" / ")}</p>`;
+  }
+  if (r.only_in_a.length || r.only_in_b.length) h += `<p class="muted">片方にしか無いクラブ: ${[...r.only_in_a, ...r.only_in_b].map(esc).join("、")}</p>`;
+  $("cmpOut").innerHTML = h || `<p class="muted">共通のクラブがありません。</p>`;
+}
+
+$("cmpBtn").addEventListener("click", async () => {
+  $("cmpErr").textContent = "";
+  if (!$("cmpWith").value) return;
+  try { renderCompare(await api("GET", `/v1/sessions/${S.session.id}/compare?with=${$("cmpWith").value}`)); }
+  catch (e) { $("cmpErr").textContent = e.message; }
+});
+
+// ---- 実験 ----
+const TARGETS = ["face_to_path", "face_angle", "club_path", "attack_angle", "dynamic_loft", "spin_loft", "low_point", "impact_offset", "launch_direction", "spin_axis", "side", "carry", "club_speed", "smash_factor"];
+$("exMetric").innerHTML = TARGETS.map((k) => `<option value="${k}">${esc(LABEL[k])}</option>`).join("");
+
+async function loadExperiments() {
+  const es = await api("GET", `/v1/sessions/${S.session.id}/experiments`);
+  $("exList").innerHTML = es.map((e) => `
+    <div class="finding" data-ex="${e.id}">
+      <div><b>${esc(e.hypothesis)}</b></div>
+      <div class="muted">介入: ${esc(e.intervention || "—")} ／ 目標: ${esc(LABEL[e.target_metric] || e.target_metric)} を ${esc($("exGoal").querySelector(`option[value=${e.goal}]`).textContent)}${e.club ? ` ／ ${esc(e.club)}` : ""}</div>
+      <div class="muted">ブロック: ${e.blocks.length ? e.blocks.map((b) => `${{ baseline: "基準", intervention: "介入", retention: "定着" }[b.kind]} #${b.seq_from}〜${b.seq_to}`).join("、") : "まだありません"}</div>
+      <div class="row" style="margin-top:6px">
+        <select data-f="kind"><option value="baseline">基準</option><option value="intervention">介入</option><option value="retention">定着</option></select>
+        <input type="number" min="1" data-f="from" placeholder="何球目から" style="width:110px">
+        <input type="number" min="1" data-f="to" placeholder="何球目まで" style="width:110px">
+        <button class="ghost small" data-act="block">ブロックを足す</button>
+        <button class="small" data-act="eval">評価する</button>
+      </div>
+      <div class="err" data-f="err"></div>
+      <div data-f="out"></div>
+    </div>`).join("") || `<p class="muted">まだ実験がありません。仮説と、意識する1点を決めて始めましょう。</p>`;
+}
+
+$("exSave").addEventListener("click", async () => {
+  $("exErr").textContent = "";
+  try {
+    await api("POST", `/v1/sessions/${S.session.id}/experiments`, {
+      hypothesis: $("exHyp").value, intervention: $("exInt").value,
+      target_metric: $("exMetric").value, goal: $("exGoal").value, club: $("exClub").value,
+    });
+    $("exHyp").value = ""; $("exInt").value = "";
+    await loadExperiments();
+  } catch (e) { $("exErr").textContent = e.message; }
+});
+
+function evalText(label, c, metric) {
+  const [t, cl] = GRADE[c.grade] || [c.grade, "c-none"];
+  if (c.grade === "insufficient") return `<div class="finding"><span class="chip ${cl}">${t}</span> ${label}: 各ブロック${c.needed}球以上が要ります（いま ${c.n.join(" / ")}球）。</div>`;
+  const u = (x) => fmt(metric, x).replace(/^\+/, "");
+  return `<div class="finding"><span class="chip ${cl}">${t}</span> ${label}: 改善 <b>${u(c.improvement)}</b>（95%区間 ${u(c.ci95[0])}〜${u(c.ci95[1])}・意味のある差 ${c.mmd != null ? u(c.mmd) : "未設定"}・${c.n.join(" / ")}球）</div>`;
+}
+
+$("exList").addEventListener("click", async (ev) => {
+  const b = ev.target.closest("button[data-act]");
+  if (!b) return;
+  const box = b.closest("[data-ex]"), id = box.dataset.ex, q = (f) => box.querySelector(`[data-f=${f}]`);
+  q("err").textContent = "";
+  try {
+    if (b.dataset.act === "block") {
+      await api("POST", `/v1/experiments/${id}/blocks`, { kind: q("kind").value, seq_from: Number(q("from").value), seq_to: Number(q("to").value) });
+      await loadExperiments();
+      return;
+    }
+    const r = await api("GET", `/v1/experiments/${id}/evaluation`);
+    const bl = r.blocks, m = r.target_metric;
+    let h = `<p class="muted">${Object.entries(bl).map(([k, x]) => `${{ baseline: "基準", intervention: "介入", retention: "定着" }[k]}: 平均 ${fmt(m, x.mean, true)}・ばらつき ±${x.sd != null ? fmt(m, x.sd) : "—"}（${x.n}球）`).join(" ／ ")}</p>`;
+    h += evalText("介入の効果", r.intervention_vs_baseline, m);
+    if (r.retention_vs_baseline) h += evalText("意識を外しても残ったか", r.retention_vs_baseline, m);
+    h += (r.notes || []).map((n) => `<p class="muted">※ ${esc(n)}</p>`).join("");
+    q("out").innerHTML = h;
+  } catch (e) { q("err").textContent = e.message; }
+});
+
+// ---- 上の段 ----
+$("player").addEventListener("change", pickPlayer);
+$("session").addEventListener("change", pickSession);
+$("distUnit").addEventListener("change", () => { renderShots(); if (S.analysis) renderAnalysis(); });
+$("newPlayerBtn").addEventListener("click", () => { $("newPlayer").hidden = !$("newPlayer").hidden; });
+$("npSave").addEventListener("click", async () => {
+  $("npErr").textContent = "";
+  try {
+    const p = await api("POST", "/v1/players", { name: $("npName").value, handedness: $("npHand").value });
+    $("newPlayer").hidden = true; $("npName").value = "";
+    await loadPlayers(p.id);
+  } catch (e) { $("npErr").textContent = e.message; }
+});
+$("nsDate").valueAsDate = new Date();
+$("nsSave").addEventListener("click", async () => {
+  $("sessErr").textContent = "";
+  if (!S.player) { $("sessErr").textContent = "先に選手を追加してください"; return; }
+  try {
+    const s = await api("POST", "/v1/sessions", { player_id: S.player.id, date: $("nsDate").value, location: $("nsLoc").value });
+    S.sessions = await api("GET", `/v1/players/${S.player.id}/sessions`);
+    renderSessions(s.id);
+    await pickSession();
+  } catch (e) { $("sessErr").textContent = e.message; }
+});
+$("importBtn").addEventListener("click", async () => {
+  $("sessErr").textContent = ""; $("importMsg").textContent = "";
+  const f = $("csv").files[0];
+  if (!S.session) { $("sessErr").textContent = "先にセッションを作ってください"; return; }
+  if (!f) { $("sessErr").textContent = "CSV を選んでください"; return; }
+  const fd = new FormData();
+  fd.append("file", f);
+  try {
+    const r = await api("POST", `/v1/sessions/${S.session.id}/import?units=${$("csvUnits").value}`, fd);
+    $("importMsg").textContent = `${r.imported}球を取り込みました（#${r.seq_from}〜${r.seq_to}・飛ばした行 ${r.skipped}）`
+      + (r.warnings.length ? ` ⚠︎ ${r.warnings.join(" / ")}` : "")
+      + (r.ignored.length ? ` ／ 読まなかった列: ${r.ignored.join("、")}` : "");
+    $("csv").value = "";
+    await loadShots();
+  } catch (e) { $("sessErr").textContent = e.message; }
+});
+document.querySelector(".tabs").addEventListener("click", (ev) => {
+  const b = ev.target.closest("button[data-tab]");
+  if (!b) return;
+  document.querySelectorAll(".tabs button").forEach((x) => x.classList.toggle("on", x === b));
+  document.querySelectorAll("[data-pane]").forEach((p) => { p.hidden = p.dataset.pane !== b.dataset.tab; });
+});
+
+loadPlayers().catch((e) => { $("sessErr").textContent = "API に接続できません: " + e.message; });
+</script>
+</body>
+</html>

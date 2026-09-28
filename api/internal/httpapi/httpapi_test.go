@@ -320,3 +320,16 @@ func Test比較は同じ選手のセッションどうしだけ(t *testing.T) {
 	e.do("GET", fmt.Sprintf("/v1/sessions/%d/compare", today), nil, 400)
 	e.do("GET", fmt.Sprintf("/v1/sessions/%d/compare?with=999", today), nil, 404)
 }
+
+func Test選手の一覧(t *testing.T) {
+	e := newEnv(t)
+	if n := len(e.list("/v1/players")); n != 0 {
+		t.Fatalf("%d", n)
+	}
+	e.setup("R")
+	e.setup("L")
+	ps := e.list("/v1/players")
+	if len(ps) != 2 || ps[1]["handedness"] != "L" {
+		t.Fatalf("%v", ps)
+	}
+}
