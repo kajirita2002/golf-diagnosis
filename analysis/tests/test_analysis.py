@@ -1,0 +1,218 @@
+import random
+
+from fastapi.testclient import TestClient
+
+from golf_analysis import config
+from golf_analysis.app import app
+from golf_analysis.experiment import evaluate
+from golf_analysis.session import analyze_session, judge_good
+
+
+def shot(i, club="7 Iron", cat="iron", override=None, excluded=False, decomposition=None, **metrics):
+    return {
+        "id": i,
+        "seq": i,
+        "club": club,
+        "club_category": cat,
+        "metrics": metrics,
+        "estimated": [],
+        "excluded": excluded,
+        "good_override": override,
+        "decomposition": decomposition or {},
+    }
+
+
+# ---- Good 判定 ----
+
+
+def test_目標の範囲に入ればGood():
+    s = shot(1, side=3.0, carry=150.0, launch_direction=1.0)
+    assert judge_good(s, 150.0, "iron") == {"good": True, "by": "auto", "failed": []}
+
+
+def test_外れた条件を全部返す():
+    s = shot(1, side=15.0, carry=130.0, launch_direction=5.0)
+    j = judge_good(s, 150.0, "iron")
+    assert j["good"] is False
+    assert set(j["failed"]) == {"side", "start_line", "carry"}
+
+
+def test_人の上書きが優先():
+    s = shot(1, side=30.0, carry=100.0, override=True)
+    assert judge_good(s, 150.0, "iron")["by"] == "override"
+    assert judge_good(s, 150.0, "iron")["good"] is True
+
+
+def test_値が無ければ判定しない():
+    assert judge_good(shot(1), None, "iron")["good"] is None
+
+
+def test_左右が無ければ分解の曲がりで見る():
+    s = shot(1, decomposition={"curve": "slice"})
+    assert judge_good(s, None, "iron")["failed"] == ["curve"]
+
+
+# ---- セッション ----
+
+
+def test_打点が原因の曲がりを見つける():
+    shots = [
+        shot(i, side=10.0, carry=150.0, launch_direction=1.0, impact_offset=-0.015,
+             decomposition={"curve": "fade", "curve_cause": "strike", "miss_type": "straight-fade"})
+        for i in range(1, 7)
+    ]
+    res = analyze_session(shots)
+    kinds = [(f["kind"], f.get("cause")) for f in res["findings"]]
+    assert ("curve_cause", "strike") in kinds
+    strike = next(f for f in res["findings"] if f.get("cause") == "strike")
+    assert strike["evidence"] == {"count": 6, "of": 6}
+    assert strike["strength"] == "strong"
+    assert res["clubs"][0]["flight_groups"][0] == {
+        "miss_type": "straight-fade", "curve_cause": "strike", "n": 6, "shot_ids": [1, 2, 3, 4, 5, 6]
+    }
+
+
+def test_少数でもまとまった原因の群は出す():
+    # 曲がった20球のうち15球はフェース、5球は打点。打点の5球を埋もれさせない
+    shots = [shot(i, decomposition={"curve": "fade", "curve_cause": "face_to_path"}) for i in range(1, 16)]
+    shots += [shot(i, impact_offset=-0.015, decomposition={"curve": "fade", "curve_cause": "strike"}) for i in range(16, 21)]
+    res = analyze_session(shots)
+    strike = [f for f in res["findings"] if f.get("cause") == "strike"]
+    assert len(strike) == 1
+    assert strike[0]["strength"] == "subset"
+    assert strike[0]["shot_ids"] == [16, 17, 18, 19, 20]
+    face = next(f for f in res["findings"] if f.get("cause") == "face_to_path")
+    assert face["strength"] == "strong"
+
+
+def test_少数で数も少ない原因は出さない():
+    shots = [shot(i, decomposition={"curve": "fade", "curve_cause": "face_to_path"}) for i in range(1, 18)]
+    shots += [shot(i, decomposition={"curve": "fade", "curve_cause": "strike"}) for i in range(18, 21)]
+    assert not any(f.get("cause") == "strike" for f in analyze_session(shots)["findings"])
+
+
+def test_球が少なければデータ不足と言う():
+    shots = [shot(i, decomposition={"curve": "fade", "curve_cause": "strike"}) for i in range(1, 3)]
+    res = analyze_session(shots)
+    assert res["findings"] == [
+        {"club": "7 Iron", "kind": "insufficient", "what": "curve_cause", "n": 2, "needed": config.MIN_BLOCK_N}
+    ]
+
+
+def test_打点が無い曲がりは入力を促す():
+    shots = [shot(i, decomposition={"curve": "fade", "curve_cause": "mixed"}) for i in range(1, 7)]
+    res = analyze_session(shots)
+    assert any(f["kind"] == "need_data" and f["field"] == "impact_offset" for f in res["findings"])
+
+
+def test_除外した球は数えない():
+    res = analyze_session([shot(1, excluded=True, carry=150.0), shot(2, carry=150.0)])
+    assert res["n_excluded"] == 1
+    assert res["clubs"][0]["n"] == 1
+
+
+def test_左右のばらつきの主因を回帰で出す():
+    rng = random.Random(1)
+    shots = []
+    for i in range(1, 25):
+        face = rng.gauss(2, 2.0)
+        path = rng.gauss(2, 0.3)
+        shots.append(shot(i, face_angle=face, club_path=path, side=2.5 * face + 0.3 * path + rng.gauss(0, 0.5), carry=150.0))
+    res = analyze_session(shots)
+    d = res["clubs"][0]["dispersion_drivers"]
+    assert d["status"] == "ok"
+    assert d["contributions"][0]["metric"] == "face_angle"
+    assert any(f["kind"] == "dispersion_driver" and f["metric"] == "face_angle" for f in res["findings"])
+
+
+def test_回帰は球数が足りなければしない():
+    shots = [shot(i, face_angle=1.0 * i, club_path=0.5, side=1.0 * i) for i in range(1, 6)]
+    d = analyze_session(shots)["clubs"][0]["dispersion_drivers"]
+    assert d["status"] == "insufficient" and d["needed"] == config.MIN_DRIVER_N
+
+
+# ---- 実験 ----
+
+
+def blocks(base, inter, retention=None, metric="face_to_path"):
+    out = [
+        {"kind": "baseline", "shots": [shot(i, **{metric: v}) for i, v in enumerate(base)]},
+        {"kind": "intervention", "shots": [shot(100 + i, **{metric: v}) for i, v in enumerate(inter)]},
+    ]
+    if retention is not None:
+        out.append({"kind": "retention", "shots": [shot(200 + i, **{metric: v}) for i, v in enumerate(retention)]})
+    return out
+
+
+def test_はっきり効いた介入はstrong():
+    rng = random.Random(2)
+    base = [rng.gauss(3.0, 1.0) for _ in range(10)]
+    inter = [rng.gauss(0.5, 1.0) for _ in range(10)]
+    r = evaluate("face_to_path", "reduce_abs", blocks(base, inter))
+    c = r["intervention_vs_baseline"]
+    assert c["grade"] == "strong", c
+    assert c["ci95"][0] > 0
+    assert c["improvement"] >= config.MMD["face_to_path"]
+
+
+def test_差が無ければstrongにしない():
+    rng = random.Random(3)
+    base = [rng.gauss(2.0, 1.5) for _ in range(8)]
+    inter = [rng.gauss(2.0, 1.5) for _ in range(8)]
+    c = evaluate("face_to_path", "reduce_abs", blocks(base, inter))["intervention_vs_baseline"]
+    assert c["grade"] in ("weak", "none", "worse")
+
+
+def test_悪くなればworse():
+    base = [0.5, -0.4, 0.2, 0.1, -0.3, 0.4]
+    inter = [3.1, 2.8, 3.5, 2.9, 3.3, 3.0]
+    c = evaluate("face_to_path", "reduce_abs", blocks(base, inter))["intervention_vs_baseline"]
+    assert c["grade"] == "worse"
+
+
+def test_球が足りなければinsufficient():
+    c = evaluate("face_to_path", "reduce_abs", blocks([3, 3, 3], [0, 0, 0, 0, 0]))["intervention_vs_baseline"]
+    assert c == {"grade": "insufficient", "n": [3, 5], "needed": config.MIN_BLOCK_N}
+
+
+def test_ばらつきを減らす目標():
+    rng = random.Random(4)
+    base = [rng.gauss(1.0, 3.0) for _ in range(12)]
+    inter = [rng.gauss(1.0, 0.5) for _ in range(12)]
+    c = evaluate("face_to_path", "reduce_sd", blocks(base, inter))["intervention_vs_baseline"]
+    assert c["grade"] in ("strong", "moderate")
+
+
+def test_定着も評価する():
+    rng = random.Random(5)
+    r = evaluate(
+        "face_to_path",
+        "reduce_abs",
+        blocks([rng.gauss(3, 1) for _ in range(8)], [rng.gauss(0.5, 1) for _ in range(8)], [rng.gauss(3, 1) for _ in range(6)]),
+    )
+    assert "retention_vs_baseline" in r
+    assert r["retention_vs_baseline"]["grade"] in ("weak", "none", "worse")
+
+
+def test_同じ入力には同じ答え():
+    b = blocks([3.1, 2.5, 3.8, 2.2, 3.0, 2.9], [0.4, 1.1, -0.3, 0.9, 0.2, 0.7])
+    assert evaluate("face_to_path", "reduce_abs", b) == evaluate("face_to_path", "reduce_abs", b)
+
+
+def test_推定値は注意を付ける():
+    b = blocks([3.0] * 5, [0.0] * 5, metric="club_path")
+    b[0]["shots"][0]["estimated"] = ["club_path"]
+    r = evaluate("club_path", "reduce_abs", b)
+    assert any("推定値" in n for n in r["notes"])
+
+
+# ---- HTTP ----
+
+
+def test_HTTPの入口():
+    c = TestClient(app)
+    assert c.get("/healthz").json()["ok"] is True
+    r = c.post("/v1/session", json={"shots": [shot(1, carry=150.0)]})
+    assert r.status_code == 200 and r.json()["n_shots"] == 1
+    assert c.post("/v1/experiment", json={"target_metric": "face_to_path", "goal": "bogus", "blocks": []}).status_code == 400
+    assert c.get("/docs").status_code == 404

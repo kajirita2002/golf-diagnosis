@@ -1,0 +1,28 @@
+# GitHub Actions の CI。.github/workflows/ci.yml にコピーして使う
+# （Claude Code からは .github/workflows/ を push できないことがあるため、ここに置いてある）
+name: ci
+on: [push, pull_request]
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: "1.24" }
+      - run: cd api && go vet ./... && go test ./...
+  analysis:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: cd analysis && uv sync && uv run pytest -q
+  e2e:
+    runs-on: ubuntu-latest
+    needs: [api, analysis]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: "1.24" }
+      - uses: astral-sh/setup-uv@v6
+      - run: cd analysis && uv sync
+      - run: python3 scripts/e2e.py
