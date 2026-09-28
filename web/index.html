@@ -97,6 +97,15 @@ tr.sel td{background:var(--accent-weak)}
       <label class="muted">単位の書いていない列 <select id="csvUnits"><option value="imperial">mph・yd・in</option><option value="metric">m/s・m・cm</option></select></label>
       <button id="importBtn">CSV を取り込む</button>
     </div>
+    <details style="margin-top:10px">
+      <summary class="muted">CSV が無いとき：TrackMan の画面の表をコピーして貼り付ける</summary>
+      <p class="muted">表の見出し（Club Speed など）から最後の行までを選んでコピーし、下に貼り付けます。表にクラブの列が無いので、クラブ名を入れてください。</p>
+      <textarea id="pasteText" rows="6" style="width:100%" placeholder="ここに貼り付け"></textarea>
+      <div class="row" style="margin-top:6px">
+        <input id="pasteClub" placeholder="クラブ（例: 6 Iron）">
+        <button id="pasteBtn">貼り付けたものを取り込む</button>
+      </div>
+    </details>
     <div class="muted" id="importMsg"></div>
     <div class="err" id="sessErr"></div>
   </section>
@@ -486,6 +495,28 @@ $("nsSave").addEventListener("click", async () => {
     await pickSession();
   } catch (e) { $("sessErr").textContent = e.message; }
 });
+function showImport(r) {
+  $("importMsg").textContent = `${r.imported}球を取り込みました（#${r.seq_from}〜${r.seq_to}・飛ばした行 ${r.skipped}）`
+    + (r.warnings.length ? ` ⚠︎ ${r.warnings.join(" / ")}` : "")
+    + (r.ignored.length ? ` ／ 読まなかった列: ${r.ignored.join("、")}` : "");
+}
+
+$("pasteBtn").addEventListener("click", async () => {
+  $("sessErr").textContent = ""; $("importMsg").textContent = "";
+  if (!S.session) { $("sessErr").textContent = "先にセッションを作ってください"; return; }
+  const text = $("pasteText").value;
+  if (!text.trim()) { $("sessErr").textContent = "表を貼り付けてください"; return; }
+  try {
+    const q = new URLSearchParams({ units: $("csvUnits").value, club: $("pasteClub").value.trim() });
+    const r = await fetch(`/v1/sessions/${S.session.id}/import?${q}`, { method: "POST", headers: { "Content-Type": "text/plain; charset=utf-8" }, body: text });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || r.statusText);
+    showImport(j);
+    $("pasteText").value = "";
+    await loadShots();
+  } catch (e) { $("sessErr").textContent = e.message; }
+});
+
 $("importBtn").addEventListener("click", async () => {
   $("sessErr").textContent = ""; $("importMsg").textContent = "";
   const f = $("csv").files[0];
@@ -495,9 +526,7 @@ $("importBtn").addEventListener("click", async () => {
   fd.append("file", f);
   try {
     const r = await api("POST", `/v1/sessions/${S.session.id}/import?units=${$("csvUnits").value}`, fd);
-    $("importMsg").textContent = `${r.imported}球を取り込みました（#${r.seq_from}〜${r.seq_to}・飛ばした行 ${r.skipped}）`
-      + (r.warnings.length ? ` ⚠︎ ${r.warnings.join(" / ")}` : "")
-      + (r.ignored.length ? ` ／ 読まなかった列: ${r.ignored.join("、")}` : "");
+    showImport(r);
     $("csv").value = "";
     await loadShots();
   } catch (e) { $("sessErr").textContent = e.message; }

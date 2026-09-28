@@ -249,6 +249,7 @@ func (s *Server) getSession(w http.ResponseWriter, r *http.Request) {
 //
 //	?source=trackman（既定） ?units=imperial|metric（CSV に単位が無い列に使う）
 //	?impact_offset_toe_negative=1（計測器の打点がトゥ = マイナスのとき）
+//	?club=6 Iron（クラブの列が無いときに全部の球へ付ける。画面の表の貼り付け用）
 func (s *Server) importCSV(w http.ResponseWriter, r *http.Request) {
 	id, err := pathID(r)
 	if err != nil {
@@ -306,6 +307,7 @@ func (s *Server) importCSV(w http.ResponseWriter, r *http.Request) {
 	res, err := ad.Parse(body, ingest.Options{
 		Units:                   sys,
 		Handedness:              pl.Handedness,
+		Club:                    strings.TrimSpace(q.Get("club")),
 		ImpactOffsetToeNegative: q.Get("impact_offset_toe_negative") == "1",
 	})
 	if err != nil {

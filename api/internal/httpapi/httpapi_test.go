@@ -333,3 +333,22 @@ func Test選手の一覧(t *testing.T) {
 		t.Fatalf("%v", ps)
 	}
 }
+
+func Test画面の表を貼り付けて取り込む(t *testing.T) {
+	e := newEnv(t)
+	sid := e.setup("R")
+	b, err := os.ReadFile("../../../testdata/trackman_screen_6i.tsv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, _ := http.NewRequest("POST", fmt.Sprintf("%s/v1/sessions/%d/import?units=metric&club=6%%20Iron", e.ts.URL, sid), bytes.NewReader(b))
+	req.Header.Set("Content-Type", "text/plain; charset=utf-8")
+	res := e.send(req, 201)
+	if res["imported"].(float64) != 8 || len(res["warnings"].([]any)) != 0 {
+		t.Fatalf("%v", res)
+	}
+	shots := e.list(fmt.Sprintf("/v1/sessions/%d/shots", sid))
+	if shots[0]["club"] != "6 Iron" || shots[0]["club_category"] != "iron" {
+		t.Fatalf("%v / %v", shots[0]["club"], shots[0]["club_category"])
+	}
+}

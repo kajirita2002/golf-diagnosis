@@ -18,6 +18,9 @@ type Options struct {
 	Units units.System
 	// Handedness が左なら、左右の角度・距離の符号を反転して右打ちに揃える。
 	Handedness model.Handedness
+	// Club は CSV にクラブの列が無いときに全部の球へ付けるクラブ名。
+	// TrackMan の画面の表はクラブ名を表の上にだけ出すので、貼り付けだと列が無い。
+	Club string
 	// ImpactOffsetToeNegative は、計測器の打点の左右が「トゥ = マイナス」のとき true。
 	// 実物の CSV で確かめるまで既定（トゥ = プラス）のまま扱う。
 	ImpactOffsetToeNegative bool
@@ -60,6 +63,7 @@ var horizontalFields = []func(*model.Metrics) **float64{
 	func(m *model.Metrics) **float64 { return &m.LaunchDirection },
 	func(m *model.Metrics) **float64 { return &m.SpinAxis },
 	func(m *model.Metrics) **float64 { return &m.Side },
+	func(m *model.Metrics) **float64 { return &m.Curve },
 }
 
 // Canonicalize は左打ちの値を右打ちの座標に揃える。右打ちなら何もしない。

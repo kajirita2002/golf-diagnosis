@@ -20,6 +20,7 @@ const (
 	Angle                // → 度
 	Spin                 // → rpm
 	Ratio                // 単位なし
+	Time                 // → 秒
 )
 
 // System は単位の指定が無いときに使う既定の単位系。
@@ -52,6 +53,8 @@ func DefaultUnit(k Kind, s System) string {
 		return "deg"
 	case Spin:
 		return "rpm"
+	case Time:
+		return "s"
 	}
 	return ""
 }
@@ -84,6 +87,8 @@ func Normalize(u string) string {
 		return "deg"
 	case "rpm":
 		return "rpm"
+	case "s", "sec", "secs", "seconds":
+		return "s"
 	case "", "-":
 		return ""
 	}
@@ -93,7 +98,7 @@ func Normalize(u string) string {
 // Known は単位として読めるか（単位の行を見分けるのに使う）。
 func Known(u string) bool {
 	switch Normalize(u) {
-	case "mph", "km/h", "m/s", "yds", "m", "ft", "in", "cm", "mm", "deg", "rpm":
+	case "mph", "km/h", "m/s", "yds", "m", "ft", "in", "cm", "mm", "deg", "rpm", "s":
 		return true
 	}
 	return false
@@ -133,6 +138,10 @@ func ToSI(v float64, unit string, k Kind) (float64, error) {
 		}
 	case Spin:
 		if u == "rpm" || u == "" {
+			return v, nil
+		}
+	case Time:
+		if u == "s" || u == "" {
 			return v, nil
 		}
 	case Ratio:

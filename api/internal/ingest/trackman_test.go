@@ -149,3 +149,56 @@ func TestFillは計算で埋めた項目を返す(t *testing.T) {
 	Fill(&m2)
 	near(t, "face_to_path（実測を残す）", m2.FaceToPath, 2.5, 1e-9)
 }
+
+// 画面の表（2026-09-28 にもらったスクリーンショットの6番アイアン8球）を
+// そのまま書き写したもの。本物の書き出しではないが、列名・単位・R/L・「-」・
+// 集計行（Average / Consistency）は実物の形。
+func Test画面の表の形を読める(t *testing.T) {
+	f, err := os.Open("../../../testdata/trackman_screen_6i.tsv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	res, err := TrackMan{}.Parse(f, Options{Units: units.Metric, Club: "6 Iron"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Shots) != 8 || res.Skipped != 2 {
+		t.Fatalf("8球・集計行2つのはずが %d 球・%d 行", len(res.Shots), res.Skipped)
+	}
+	if len(res.Warnings) != 0 {
+		t.Fatalf("クラブを指定したのに警告: %v", res.Warnings)
+	}
+	s := res.Shots[0]
+	if s.Club != "6 Iron" {
+		t.Fatalf("club=%q", s.Club)
+	}
+	near(t, "attack_angle（Attack Ang.）", s.Metrics.AttackAngle, -0.4, 1e-9)
+	near(t, "side（40.7R）", s.Metrics.Side, 40.7, 1e-9)
+	// 4球目はクラブの値が「-」
+	if res.Shots[3].Metrics.ClubSpeed != nil || res.Shots[3].Metrics.BallSpeed == nil {
+		t.Fatal("「-」は欠けとして扱い、ほかの値は読む")
+	}
+}
+
+func Test画面の省略した列名を読む(t *testing.T) {
+	csv := "Face Ang.,Club Path,Dyn. Loft,Launch Dir.,Launch Ang.,Smash Fac.,Swing Dir.,Swing Pl.,Imp. Offset,Imp. Height,Low Point,Dyn. Lie,Curve,Land. Ang.,Hang Time\n" +
+		"2.1,-1.5,24.3,1.2L,18.0,1.33,-0.8,61.0,-12,3,4.5,58.1,12.3L,45.0,6.1\n"
+	m := parse(t, csv, Options{Units: units.Metric}).Shots[0].Metrics
+	near(t, "face_angle", m.FaceAngle, 2.1, 1e-9)
+	near(t, "club_path", m.ClubPath, -1.5, 1e-9)
+	near(t, "dynamic_loft", m.DynamicLoft, 24.3, 1e-9)
+	near(t, "launch_direction", m.LaunchDirection, -1.2, 1e-9)
+	near(t, "launch_angle", m.LaunchAngle, 18.0, 1e-9)
+	near(t, "smash_factor", m.SmashFactor, 1.33, 1e-9)
+	near(t, "swing_direction", m.SwingDirection, -0.8, 1e-9)
+	near(t, "swing_plane", m.SwingPlane, 61.0, 1e-9)
+	// 単位が書いていないとき、打点は mm・最下点は cm（画面の単位）で読む
+	near(t, "impact_offset", m.ImpactOffset, -0.012, 1e-12)
+	near(t, "impact_height", m.ImpactHeight, 0.003, 1e-12)
+	near(t, "low_point", m.LowPoint, 0.045, 1e-12)
+	near(t, "dynamic_lie", m.DynamicLie, 58.1, 1e-9)
+	near(t, "curve", m.Curve, -12.3, 1e-9)
+	near(t, "landing_angle", m.LandingAngle, 45.0, 1e-9)
+	near(t, "hang_time", m.HangTime, 6.1, 1e-9)
+}

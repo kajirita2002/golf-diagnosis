@@ -31,6 +31,10 @@ type fieldSpec struct {
 	kind    units.Kind
 	aliases []string // 正規化した列名（小文字の英数字だけ）。前にあるほど優先
 	set     func(*model.Metrics, float64)
+	// metricUnit は、単位が書いていない列をメートル法で読むときの単位。
+	// 空なら種類ごとの既定（units.DefaultUnit）。TrackMan の画面では
+	// 打点が mm・最下点が cm で、種類の既定（cm）と揃っていない。
+	metricUnit string
 }
 
 func setter(f func(*model.Metrics) **float64) func(*model.Metrics, float64) {
@@ -38,28 +42,32 @@ func setter(f func(*model.Metrics) **float64) func(*model.Metrics, float64) {
 }
 
 var trackmanFields = []fieldSpec{
-	{"club_speed", units.Speed, []string{"clubspeed"}, setter(func(m *model.Metrics) **float64 { return &m.ClubSpeed })},
-	{"ball_speed", units.Speed, []string{"ballspeed"}, setter(func(m *model.Metrics) **float64 { return &m.BallSpeed })},
-	{"smash_factor", units.Ratio, []string{"smashfactor", "smash"}, setter(func(m *model.Metrics) **float64 { return &m.SmashFactor })},
-	{"attack_angle", units.Angle, []string{"attackangle"}, setter(func(m *model.Metrics) **float64 { return &m.AttackAngle })},
-	{"club_path", units.Angle, []string{"clubpath"}, setter(func(m *model.Metrics) **float64 { return &m.ClubPath })},
-	{"face_angle", units.Angle, []string{"faceangle"}, setter(func(m *model.Metrics) **float64 { return &m.FaceAngle })},
-	{"face_to_path", units.Angle, []string{"facetopath"}, setter(func(m *model.Metrics) **float64 { return &m.FaceToPath })},
-	{"dynamic_loft", units.Angle, []string{"dynamicloft", "dynloft"}, setter(func(m *model.Metrics) **float64 { return &m.DynamicLoft })},
-	{"spin_loft", units.Angle, []string{"spinloft"}, setter(func(m *model.Metrics) **float64 { return &m.SpinLoft })},
-	{"swing_plane", units.Angle, []string{"swingplane"}, setter(func(m *model.Metrics) **float64 { return &m.SwingPlane })},
-	{"swing_direction", units.Angle, []string{"swingdirection"}, setter(func(m *model.Metrics) **float64 { return &m.SwingDirection })},
-	{"low_point", units.Small, []string{"lowpoint", "lowpointdistance"}, setter(func(m *model.Metrics) **float64 { return &m.LowPoint })},
-	{"impact_offset", units.Small, []string{"impactoffset"}, setter(func(m *model.Metrics) **float64 { return &m.ImpactOffset })},
-	{"impact_height", units.Small, []string{"impactheight"}, setter(func(m *model.Metrics) **float64 { return &m.ImpactHeight })},
-	{"launch_angle", units.Angle, []string{"launchangle", "launchv", "verticallaunch"}, setter(func(m *model.Metrics) **float64 { return &m.LaunchAngle })},
-	{"launch_direction", units.Angle, []string{"launchdirection", "launchh", "horizontallaunch"}, setter(func(m *model.Metrics) **float64 { return &m.LaunchDirection })},
-	{"spin_rate", units.Spin, []string{"spinrate", "totalspin"}, setter(func(m *model.Metrics) **float64 { return &m.SpinRate })},
-	{"spin_axis", units.Angle, []string{"spinaxis"}, setter(func(m *model.Metrics) **float64 { return &m.SpinAxis })},
-	{"carry", units.Distance, []string{"carry", "carrydistance", "carryflat"}, setter(func(m *model.Metrics) **float64 { return &m.Carry })},
-	{"total", units.Distance, []string{"total", "totaldistance", "totalflat"}, setter(func(m *model.Metrics) **float64 { return &m.Total })},
-	{"side", units.Distance, []string{"side", "carryside", "sidecarry"}, setter(func(m *model.Metrics) **float64 { return &m.Side })},
-	{"height", units.Distance, []string{"height", "maxheight"}, setter(func(m *model.Metrics) **float64 { return &m.Height })},
+	{"club_speed", units.Speed, []string{"clubspeed"}, setter(func(m *model.Metrics) **float64 { return &m.ClubSpeed }), ""},
+	{"ball_speed", units.Speed, []string{"ballspeed"}, setter(func(m *model.Metrics) **float64 { return &m.BallSpeed }), ""},
+	{"smash_factor", units.Ratio, []string{"smashfactor", "smashfac", "smash"}, setter(func(m *model.Metrics) **float64 { return &m.SmashFactor }), ""},
+	{"attack_angle", units.Angle, []string{"attackangle", "attackang"}, setter(func(m *model.Metrics) **float64 { return &m.AttackAngle }), ""},
+	{"club_path", units.Angle, []string{"clubpath"}, setter(func(m *model.Metrics) **float64 { return &m.ClubPath }), ""},
+	{"face_angle", units.Angle, []string{"faceangle", "faceang"}, setter(func(m *model.Metrics) **float64 { return &m.FaceAngle }), ""},
+	{"face_to_path", units.Angle, []string{"facetopath"}, setter(func(m *model.Metrics) **float64 { return &m.FaceToPath }), ""},
+	{"dynamic_loft", units.Angle, []string{"dynamicloft", "dynloft"}, setter(func(m *model.Metrics) **float64 { return &m.DynamicLoft }), ""},
+	{"spin_loft", units.Angle, []string{"spinloft"}, setter(func(m *model.Metrics) **float64 { return &m.SpinLoft }), ""},
+	{"swing_plane", units.Angle, []string{"swingplane", "swingpl"}, setter(func(m *model.Metrics) **float64 { return &m.SwingPlane }), ""},
+	{"swing_direction", units.Angle, []string{"swingdirection", "swingdir"}, setter(func(m *model.Metrics) **float64 { return &m.SwingDirection }), ""},
+	{"low_point", units.Small, []string{"lowpoint", "lowpointdistance"}, setter(func(m *model.Metrics) **float64 { return &m.LowPoint }), "cm"},
+	{"impact_offset", units.Small, []string{"impactoffset", "impoffset"}, setter(func(m *model.Metrics) **float64 { return &m.ImpactOffset }), "mm"},
+	{"impact_height", units.Small, []string{"impactheight", "impheight"}, setter(func(m *model.Metrics) **float64 { return &m.ImpactHeight }), "mm"},
+	{"launch_angle", units.Angle, []string{"launchangle", "launchang", "launchv", "verticallaunch"}, setter(func(m *model.Metrics) **float64 { return &m.LaunchAngle }), ""},
+	{"launch_direction", units.Angle, []string{"launchdirection", "launchdir", "launchh", "horizontallaunch"}, setter(func(m *model.Metrics) **float64 { return &m.LaunchDirection }), ""},
+	{"spin_rate", units.Spin, []string{"spinrate", "totalspin"}, setter(func(m *model.Metrics) **float64 { return &m.SpinRate }), ""},
+	{"spin_axis", units.Angle, []string{"spinaxis"}, setter(func(m *model.Metrics) **float64 { return &m.SpinAxis }), ""},
+	{"carry", units.Distance, []string{"carry", "carrydistance", "carryflat"}, setter(func(m *model.Metrics) **float64 { return &m.Carry }), ""},
+	{"total", units.Distance, []string{"total", "totaldistance", "totalflat"}, setter(func(m *model.Metrics) **float64 { return &m.Total }), ""},
+	{"side", units.Distance, []string{"side", "carryside", "sidecarry"}, setter(func(m *model.Metrics) **float64 { return &m.Side }), ""},
+	{"height", units.Distance, []string{"height", "maxheight"}, setter(func(m *model.Metrics) **float64 { return &m.Height }), ""},
+	{"curve", units.Distance, []string{"curve"}, setter(func(m *model.Metrics) **float64 { return &m.Curve }), ""},
+	{"landing_angle", units.Angle, []string{"landingangle", "landang"}, setter(func(m *model.Metrics) **float64 { return &m.LandingAngle }), ""},
+	{"hang_time", units.Time, []string{"hangtime"}, setter(func(m *model.Metrics) **float64 { return &m.HangTime }), ""},
+	{"dynamic_lie", units.Angle, []string{"dynamiclie", "dynlie"}, setter(func(m *model.Metrics) **float64 { return &m.DynamicLie }), ""},
 }
 
 var (
@@ -122,6 +130,9 @@ func (t TrackMan) Parse(r io.Reader, opt Options) (*Result, error) {
 	}
 
 	cols, clubIdx, dateIdx := mapColumns(header, unitRow, res)
+	if clubIdx < 0 && opt.Club != "" {
+		res.Warnings = res.Warnings[:0] // クラブは指定で補うので、列が無い警告は出さない
+	}
 
 	for _, row := range rows[start:] {
 		if blankRow(row) {
@@ -140,6 +151,9 @@ func (t TrackMan) Parse(r io.Reader, opt Options) (*Result, error) {
 		}
 		if clubIdx >= 0 && clubIdx < len(row) {
 			in.Club = strings.TrimSpace(row[clubIdx])
+		}
+		if in.Club == "" {
+			in.Club = opt.Club
 		}
 		if dateIdx >= 0 && dateIdx < len(row) {
 			if ts, ok := parseTime(row[dateIdx]); ok {
@@ -160,6 +174,9 @@ func (t TrackMan) Parse(r io.Reader, opt Options) (*Result, error) {
 				continue
 			}
 			unit := c.unit
+			if unit == "" && opt.Units == units.Metric && c.spec.metricUnit != "" {
+				unit = c.spec.metricUnit
+			}
 			if unit == "" {
 				unit = units.DefaultUnit(c.spec.kind, opt.Units)
 			}

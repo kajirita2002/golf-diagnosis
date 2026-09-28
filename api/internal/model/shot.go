@@ -41,6 +41,10 @@ type Metrics struct {
 	Total           *float64 `json:"total,omitempty"`            // m
 	Side            *float64 `json:"side,omitempty"`             // m（着地の左右）
 	Height          *float64 `json:"height,omitempty"`           // m（最高到達点）
+	Curve           *float64 `json:"curve,omitempty"`            // m（曲がり幅。+ = 右）
+	LandingAngle    *float64 `json:"landing_angle,omitempty"`    // 度
+	HangTime        *float64 `json:"hang_time,omitempty"`        // 秒
+	DynamicLie      *float64 `json:"dynamic_lie,omitempty"`      // 度（インパクトのライ角）
 }
 
 // Handedness は利き手。保存する値は常に右打ちの座標。
