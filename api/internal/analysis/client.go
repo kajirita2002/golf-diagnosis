@@ -61,6 +61,11 @@ func (c *Client) Session(ctx context.Context, shots []ShotPayload) (json.RawMess
 	return c.post(ctx, "/v1/session", map[string]any{"shots": shots})
 }
 
+// Compare は2つのセッションの比較を頼む。a が比べる元（昨日）、b が今回。
+func (c *Client) Compare(ctx context.Context, a, b []ShotPayload) (json.RawMessage, error) {
+	return c.post(ctx, "/v1/compare", map[string]any{"a": a, "b": b})
+}
+
 // Experiment は実験の評価を頼む。
 func (c *Client) Experiment(ctx context.Context, e *model.Experiment, blocks []BlockPayload) (json.RawMessage, error) {
 	return c.post(ctx, "/v1/experiment", map[string]any{

@@ -216,3 +216,60 @@ def test_HTTPの入口():
     assert r.status_code == 200 and r.json()["n_shots"] == 1
     assert c.post("/v1/experiment", json={"target_metric": "face_to_path", "goal": "bogus", "blocks": []}).status_code == 400
     assert c.get("/docs").status_code == 404
+
+
+# ---- セッションの比較 ----
+
+from golf_analysis.compare import compare_sessions  # noqa: E402
+
+
+def _session(n, rng, ftp_mu, offset_mu=0.0, start=0):
+    out = []
+    for i in range(n):
+        ftp = rng.gauss(ftp_mu, 0.8)
+        off = rng.gauss(offset_mu, 0.002)
+        axis = 2.2 * ftp - 400 * off + rng.gauss(0, 0.6)  # 粗い模型: ヒール（マイナス）でスライス側
+        out.append(shot(start + i, face_to_path=ftp, impact_offset=off, spin_axis=axis, face_angle=ftp + 1, club_path=1.0))
+    return out
+
+
+def test_スライスが増えた理由をフェーストゥパスで説明する():
+    rng = random.Random(7)
+    a = _session(12, rng, 0.5)
+    b = _session(12, rng, 3.0, start=100)
+    r = compare_sessions(a, b)["clubs"]["7 Iron"]
+    assert r["l0"]["spin_axis"]["status"] == "changed"
+    ex = next(e for e in r["explanations"] if e["outcome"] == "spin_axis")
+    assert ex["explained_by"][0]["metric"] == "face_to_path"
+    assert r["l1"]["impact_offset"]["status"] == "same"
+
+
+def test_フェースが同じならスライスの理由は打点():
+    rng = random.Random(8)
+    a = _session(12, rng, 0.5, offset_mu=0.0)
+    b = _session(12, rng, 0.5, offset_mu=-0.015, start=100)  # ヒールに15mm
+    r = compare_sessions(a, b)["clubs"]["7 Iron"]
+    ex = next(e for e in r["explanations"] if e["outcome"] == "spin_axis")
+    assert [c["metric"] for c in ex["explained_by"]] == ["impact_offset"]
+
+
+def test_インパクトで説明できない変化はそう言う():
+    rng = random.Random(9)
+    a = [shot(i, spin_axis=rng.gauss(0, 0.5), face_to_path=rng.gauss(0.5, 0.5)) for i in range(8)]
+    b = [shot(100 + i, spin_axis=rng.gauss(6, 0.5), face_to_path=rng.gauss(0.5, 0.5)) for i in range(8)]
+    ex = compare_sessions(a, b)["clubs"]["7 Iron"]["explanations"][0]
+    assert ex["unexplained"] is True
+    assert "impact_offset" in ex["unmeasured"]
+
+
+def test_比較も球が足りなければ言わない():
+    a = [shot(i, spin_axis=0.0) for i in range(3)]
+    b = [shot(100 + i, spin_axis=8.0) for i in range(3)]
+    r = compare_sessions(a, b)["clubs"]["7 Iron"]
+    assert r["l0"]["spin_axis"]["status"] == "insufficient"
+    assert r["explanations"] == []
+
+
+def test_片方にしか無いクラブは分ける():
+    r = compare_sessions([shot(1)], [shot(2, club="Driver", cat="driver")])
+    assert r["clubs"] == {} and r["only_in_a"] == ["7 Iron"] and r["only_in_b"] == ["Driver"]

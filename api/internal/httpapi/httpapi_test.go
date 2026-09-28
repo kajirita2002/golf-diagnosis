@@ -20,6 +20,8 @@ import (
 
 // fakeAnalyzer は渡された中身を覚えて、決まった JSON を返す。
 type fakeAnalyzer struct {
+	compareA     []analysis.ShotPayload
+	compareB     []analysis.ShotPayload
 	sessionShots []analysis.ShotPayload
 	blocks       []analysis.BlockPayload
 	down         bool
@@ -31,6 +33,11 @@ func (f *fakeAnalyzer) Session(_ context.Context, shots []analysis.ShotPayload) 
 	}
 	f.sessionShots = shots
 	return json.RawMessage(`{"fake":"session"}`), nil
+}
+
+func (f *fakeAnalyzer) Compare(_ context.Context, a, b []analysis.ShotPayload) (json.RawMessage, error) {
+	f.compareA, f.compareB = a, b
+	return json.RawMessage(`{"fake":"compare"}`), nil
 }
 
 func (f *fakeAnalyzer) Experiment(_ context.Context, _ *model.Experiment, blocks []analysis.BlockPayload) (json.RawMessage, error) {
@@ -292,4 +299,24 @@ func Test知らないidは404(t *testing.T) {
 	e.do("POST", "/v1/sessions", map[string]any{"player_id": 99, "date": "2026-09-27"}, 404)
 	e.do("POST", "/v1/players", map[string]any{"name": "x", "handedness": "X"}, 400)
 	e.do("POST", "/v1/players", map[string]any{"name": "x", "unknown": 1}, 400)
+}
+
+func Test比較は同じ選手のセッションどうしだけ(t *testing.T) {
+	e := newEnv(t)
+	yesterday := e.setup("R") // 選手1
+	p := e.do("GET", fmt.Sprintf("/v1/sessions/%d", yesterday), nil, 200)["player_id"]
+	today := int(e.do("POST", "/v1/sessions", map[string]any{"player_id": p, "date": "2026-09-28"}, 201)["id"].(float64))
+	e.importCSV(yesterday, "Club,Club Speed [mph],Carry [yds]\n7i,80,150\n", "", 201)
+	e.importCSV(today, "Club,Club Speed [mph],Carry [yds]\n7i,80,150\n7i,81,151\n", "", 201)
+
+	out := e.do("GET", fmt.Sprintf("/v1/sessions/%d/compare?with=%d", today, yesterday), nil, 200)
+	if out["fake"] != "compare" || len(e.an.compareA) != 1 || len(e.an.compareB) != 2 {
+		t.Fatalf("昨日を a・今日を b に渡していない: %d / %d", len(e.an.compareA), len(e.an.compareB))
+	}
+
+	other := e.setup("R") // 選手2
+	e.do("GET", fmt.Sprintf("/v1/sessions/%d/compare?with=%d", today, other), nil, 400)
+	e.do("GET", fmt.Sprintf("/v1/sessions/%d/compare?with=%d", today, today), nil, 400)
+	e.do("GET", fmt.Sprintf("/v1/sessions/%d/compare", today), nil, 400)
+	e.do("GET", fmt.Sprintf("/v1/sessions/%d/compare?with=999", today), nil, 404)
 }

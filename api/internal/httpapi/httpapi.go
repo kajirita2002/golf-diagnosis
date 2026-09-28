@@ -28,6 +28,7 @@ const MaxUploadBytes = 10 << 20
 type Analyzer interface {
 	Session(ctx context.Context, shots []analysis.ShotPayload) (json.RawMessage, error)
 	Experiment(ctx context.Context, e *model.Experiment, blocks []analysis.BlockPayload) (json.RawMessage, error)
+	Compare(ctx context.Context, a, b []analysis.ShotPayload) (json.RawMessage, error)
 }
 
 // Server は API のハンドラをまとめる。
@@ -63,6 +64,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/sessions/{id}/import", s.importCSV)
 	mux.HandleFunc("GET /v1/sessions/{id}/shots", s.listShots)
 	mux.HandleFunc("GET /v1/sessions/{id}/analysis", s.sessionAnalysis)
+	mux.HandleFunc("GET /v1/sessions/{id}/compare", s.compareSessions)
 	mux.HandleFunc("POST /v1/sessions/{id}/experiments", s.createExperiment)
 	mux.HandleFunc("GET /v1/sessions/{id}/experiments", s.listExperiments)
 	mux.HandleFunc("PATCH /v1/shots/{id}", s.patchShot)
@@ -486,16 +488,73 @@ func (s *Server) sessionAnalysis(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	shots, err := s.Store.ListShots(r.Context(), id)
+	ps, err := s.payloads(r.Context(), id)
 	if err != nil {
 		s.fail(w, err)
 		return
+	}
+	out, err := s.Analyzer.Session(r.Context(), ps)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeRaw(w, http.StatusOK, out)
+}
+
+func (s *Server) payloads(ctx context.Context, sessionID int64) ([]analysis.ShotPayload, error) {
+	shots, err := s.Store.ListShots(ctx, sessionID)
+	if err != nil {
+		return nil, err
 	}
 	ps := make([]analysis.ShotPayload, 0, len(shots))
 	for _, sh := range shots {
 		ps = append(ps, payload(sh))
 	}
-	out, err := s.Analyzer.Session(r.Context(), ps)
+	return ps, nil
+}
+
+// compareSessions は「今日（{id}）は、?with= のセッションと何が違ったか」を返す。
+// 同じ選手のセッションどうしだけ比べる（別の人と比べても原因の話にならない）。
+func (s *Server) compareSessions(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	other, err := strconv.ParseInt(r.URL.Query().Get("with"), 10, 64)
+	if err != nil || other <= 0 {
+		s.fail(w, bad("with に比べるセッションの id が要ります"))
+		return
+	}
+	if other == id {
+		s.fail(w, bad("同じセッションどうしは比べられません"))
+		return
+	}
+	cur, err := s.Store.GetSession(r.Context(), id)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	prev, err := s.Store.GetSession(r.Context(), other)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	if cur.PlayerID != prev.PlayerID {
+		s.fail(w, bad("別の選手のセッションとは比べられません"))
+		return
+	}
+	a, err := s.payloads(r.Context(), prev.ID)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	b, err := s.payloads(r.Context(), cur.ID)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	out, err := s.Analyzer.Compare(r.Context(), a, b)
 	if err != nil {
 		s.fail(w, err)
 		return

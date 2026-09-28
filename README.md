@@ -56,6 +56,7 @@ curl -s localhost:8080/v1/experiments/1/evaluation
 | GET | `/v1/sessions/{id}/shots` | 球と1球ごとの分解 |
 | PATCH | `/v1/shots/{id}` | `club` / `excluded` / `good_override`（null で自動） / `impact_offset_mm` / `impact_height_mm` |
 | GET | `/v1/sessions/{id}/analysis` | セッションの分析（分析サービスへ） |
+| GET | `/v1/sessions/{id}/compare?with={id}` | 前のセッションと何が違ったか（L0 の変化を L1 で説明） |
 | POST | `/v1/sessions/{id}/experiments` | 実験（`goal`: reduce_abs / reduce_sd / increase / decrease） |
 | POST | `/v1/experiments/{id}/blocks` | ブロック（baseline / intervention / retention、打った順の範囲） |
 | GET | `/v1/experiments/{id}/evaluation` | 実験の評価 |
