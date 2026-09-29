@@ -17,7 +17,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -71,12 +70,19 @@ func (t *txn) QueryRowContext(ctx context.Context, q string, args ...any) *sql.R
 	return t.Tx.QueryRowContext(ctx, rebind(t.pg, q), args...)
 }
 
-// rebind は ? を $1, $2, ... に置き換える（PostgreSQL のときだけ）。
-// SQL の中に文字としての ? は書かない約束（書くと置き換わる）。
+// rebind は SQL を保存先に合わせる。
+//   - {s}（テーブル名の前に付ける印）→ PostgreSQL では "golf."、SQLite では消す
+//   - ? → $1, $2, ...（PostgreSQL のときだけ）
+//
+// **スキーマは SQL の中で名指しする。** 接続の設定（search_path）で切り替えていたら、
+// 公開先の PostgreSQL の接続プーラーがそれを無視し、english-tts の public.sessions に
+// ぶつかって起動できなかった（2026-09-29。SQLSTATE 42804）。
+// SQL の中に文字としての ? と {s} は書かない約束（書くと置き換わる）。
 func rebind(pg bool, q string) string {
 	if !pg {
-		return q
+		return strings.ReplaceAll(q, "{s}", "")
 	}
+	q = strings.ReplaceAll(q, "{s}", PGSchema+".")
 	var b strings.Builder
 	n := 0
 	for _, r := range q {
@@ -91,23 +97,23 @@ func rebind(pg bool, q string) string {
 }
 
 const schema = `
-CREATE TABLE IF NOT EXISTS players (
+CREATE TABLE IF NOT EXISTS {s}players (
 	id          {{ID}},
 	name        TEXT NOT NULL,
 	handedness  TEXT NOT NULL CHECK (handedness IN ('R','L')),
 	created_at  TEXT NOT NULL
 );
-CREATE TABLE IF NOT EXISTS sessions (
+CREATE TABLE IF NOT EXISTS {s}sessions (
 	id          {{ID}},
-	player_id   INTEGER NOT NULL REFERENCES players(id),
+	player_id   INTEGER NOT NULL REFERENCES {s}players(id),
 	date        TEXT NOT NULL,
 	location    TEXT NOT NULL DEFAULT '',
 	source      TEXT NOT NULL DEFAULT '',
 	created_at  TEXT NOT NULL
 );
-CREATE TABLE IF NOT EXISTS shots (
+CREATE TABLE IF NOT EXISTS {s}shots (
 	id              {{ID}},
-	session_id      INTEGER NOT NULL REFERENCES sessions(id),
+	session_id      INTEGER NOT NULL REFERENCES {s}sessions(id),
 	seq             INTEGER NOT NULL,
 	club            TEXT NOT NULL DEFAULT '',
 	club_category   TEXT NOT NULL DEFAULT 'unknown',
@@ -122,9 +128,9 @@ CREATE TABLE IF NOT EXISTS shots (
 	adapter_version TEXT NOT NULL DEFAULT '',
 	UNIQUE (session_id, seq)
 );
-CREATE TABLE IF NOT EXISTS experiments (
+CREATE TABLE IF NOT EXISTS {s}experiments (
 	id             {{ID}},
-	session_id     INTEGER NOT NULL REFERENCES sessions(id),
+	session_id     INTEGER NOT NULL REFERENCES {s}sessions(id),
 	hypothesis     TEXT NOT NULL,
 	intervention   TEXT NOT NULL DEFAULT '',
 	target_metric  TEXT NOT NULL,
@@ -132,9 +138,9 @@ CREATE TABLE IF NOT EXISTS experiments (
 	club           TEXT NOT NULL DEFAULT '',
 	created_at     TEXT NOT NULL
 );
-CREATE TABLE IF NOT EXISTS blocks (
+CREATE TABLE IF NOT EXISTS {s}blocks (
 	id             {{ID}},
-	experiment_id  INTEGER NOT NULL REFERENCES experiments(id),
+	experiment_id  INTEGER NOT NULL REFERENCES {s}experiments(id),
 	kind           TEXT NOT NULL,
 	seq_from       INTEGER NOT NULL,
 	seq_to         INTEGER NOT NULL
@@ -160,7 +166,7 @@ func Open(dsn string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	if _, err := db.Exec(strings.ReplaceAll(schema, "{{ID}}", "INTEGER PRIMARY KEY AUTOINCREMENT")); err != nil {
+	if _, err := db.Exec(rebind(false, strings.ReplaceAll(schema, "{{ID}}", "INTEGER PRIMARY KEY AUTOINCREMENT"))); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("テーブルを作れません: %w", err)
 	}
@@ -171,15 +177,7 @@ func Open(dsn string) (*Store, error) {
 const PGSchema = "golf"
 
 func openPostgres(dsn string) (*Store, error) {
-	u, err := url.Parse(dsn)
-	if err != nil {
-		return nil, fmt.Errorf("DATABASE_URL を読めません")
-	}
-	// 接続ごとに golf スキーマを見るようにする（pgx は知らないパラメータを接続時の設定として送る）
-	q := u.Query()
-	q.Set("search_path", PGSchema)
-	u.RawQuery = q.Encode()
-	db, err := sql.Open("pgx", u.String())
+	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		return nil, err
 	}
@@ -191,7 +189,7 @@ func openPostgres(dsn string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("スキーマを作れません: %w", err)
 	}
-	if _, err := db.ExecContext(ctx, strings.ReplaceAll(schema, "{{ID}}", "BIGSERIAL PRIMARY KEY")); err != nil {
+	if _, err := db.ExecContext(ctx, rebind(true, strings.ReplaceAll(schema, "{{ID}}", "BIGSERIAL PRIMARY KEY"))); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("テーブルを作れません: %w", err)
 	}
@@ -216,7 +214,7 @@ func (s *Store) CreatePlayer(ctx context.Context, p *model.Player) error {
 		return fmt.Errorf("handedness は R か L")
 	}
 	ts := now()
-	if err := s.db.QueryRowContext(ctx, `INSERT INTO players(name, handedness, created_at) VALUES(?,?,?) RETURNING id`, p.Name, p.Handedness, ts).Scan(&p.ID); err != nil {
+	if err := s.db.QueryRowContext(ctx, `INSERT INTO {s}players(name, handedness, created_at) VALUES(?,?,?) RETURNING id`, p.Name, p.Handedness, ts).Scan(&p.ID); err != nil {
 		return err
 	}
 	p.CreatedAt = parseTS(ts)
@@ -227,7 +225,7 @@ func (s *Store) CreatePlayer(ctx context.Context, p *model.Player) error {
 func (s *Store) GetPlayer(ctx context.Context, id int64) (*model.Player, error) {
 	var p model.Player
 	var ts string
-	err := s.db.QueryRowContext(ctx, `SELECT id, name, handedness, created_at FROM players WHERE id=?`, id).
+	err := s.db.QueryRowContext(ctx, `SELECT id, name, handedness, created_at FROM {s}players WHERE id=?`, id).
 		Scan(&p.ID, &p.Name, &p.Handedness, &ts)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -241,7 +239,7 @@ func (s *Store) GetPlayer(ctx context.Context, id int64) (*model.Player, error) 
 
 // ListPlayers は選手を作った順に返す。
 func (s *Store) ListPlayers(ctx context.Context) ([]model.Player, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name, handedness, created_at FROM players ORDER BY id`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, handedness, created_at FROM {s}players ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -267,7 +265,7 @@ func (s *Store) CreateSession(ctx context.Context, se *model.Session) error {
 		return err
 	}
 	ts := now()
-	if err := s.db.QueryRowContext(ctx, `INSERT INTO sessions(player_id, date, location, source, created_at) VALUES(?,?,?,?,?) RETURNING id`,
+	if err := s.db.QueryRowContext(ctx, `INSERT INTO {s}sessions(player_id, date, location, source, created_at) VALUES(?,?,?,?,?) RETURNING id`,
 		se.PlayerID, se.Date, se.Location, se.Source, ts).Scan(&se.ID); err != nil {
 		return err
 	}
@@ -279,7 +277,7 @@ func (s *Store) CreateSession(ctx context.Context, se *model.Session) error {
 func (s *Store) GetSession(ctx context.Context, id int64) (*model.Session, error) {
 	var se model.Session
 	var ts string
-	err := s.db.QueryRowContext(ctx, `SELECT id, player_id, date, location, source, created_at FROM sessions WHERE id=?`, id).
+	err := s.db.QueryRowContext(ctx, `SELECT id, player_id, date, location, source, created_at FROM {s}sessions WHERE id=?`, id).
 		Scan(&se.ID, &se.PlayerID, &se.Date, &se.Location, &se.Source, &ts)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -293,7 +291,7 @@ func (s *Store) GetSession(ctx context.Context, id int64) (*model.Session, error
 
 // ListSessions は選手のセッションを新しい順に返す。
 func (s *Store) ListSessions(ctx context.Context, playerID int64) ([]model.Session, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, player_id, date, location, source, created_at FROM sessions WHERE player_id=? ORDER BY date DESC, id DESC`, playerID)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, player_id, date, location, source, created_at FROM {s}sessions WHERE player_id=? ORDER BY date DESC, id DESC`, playerID)
 	if err != nil {
 		return nil, err
 	}
@@ -322,7 +320,7 @@ func (s *Store) AppendShots(ctx context.Context, sessionID int64, shots []model.
 	}
 	defer tx.Rollback()
 	var maxSeq int
-	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(seq),0) FROM shots WHERE session_id=?`, sessionID).Scan(&maxSeq); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(seq),0) FROM {s}shots WHERE session_id=?`, sessionID).Scan(&maxSeq); err != nil {
 		return nil, err
 	}
 	out := make([]model.Shot, 0, len(shots))
@@ -341,7 +339,7 @@ func (s *Store) AppendShots(ctx context.Context, sessionID int64, shots []model.
 		if sh.HitAt != nil {
 			hit = sh.HitAt.UTC().Format(time.RFC3339)
 		}
-		err := tx.QueryRowContext(ctx, `INSERT INTO shots(session_id, seq, club, club_category, hit_at, metrics_json, estimated_json, derived_json, manual_json, excluded, good_override, raw_json, adapter_version)
+		err := tx.QueryRowContext(ctx, `INSERT INTO {s}shots(session_id, seq, club, club_category, hit_at, metrics_json, estimated_json, derived_json, manual_json, excluded, good_override, raw_json, adapter_version)
 			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id`,
 			sh.SessionID, sh.Seq, sh.Club, sh.ClubCategory, hit, string(mj), string(ej), string(dj), string(manj), boolInt(sh.Excluded), nullBool(sh.GoodOverride), string(raw), sh.AdapterVersion).Scan(&sh.ID)
 		if err != nil {
@@ -388,7 +386,7 @@ func scanShot(sc interface{ Scan(...any) error }) (model.Shot, error) {
 
 // ListShots はセッションの球を打った順に返す。
 func (s *Store) ListShots(ctx context.Context, sessionID int64) ([]model.Shot, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+shotCols+` FROM shots WHERE session_id=? ORDER BY seq`, sessionID)
+	rows, err := s.db.QueryContext(ctx, `SELECT `+shotCols+` FROM {s}shots WHERE session_id=? ORDER BY seq`, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -406,7 +404,7 @@ func (s *Store) ListShots(ctx context.Context, sessionID int64) ([]model.Shot, e
 
 // GetShot は1球を読む。
 func (s *Store) GetShot(ctx context.Context, id int64) (*model.Shot, error) {
-	sh, err := scanShot(s.db.QueryRowContext(ctx, `SELECT `+shotCols+` FROM shots WHERE id=?`, id))
+	sh, err := scanShot(s.db.QueryRowContext(ctx, `SELECT `+shotCols+` FROM {s}shots WHERE id=?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -420,7 +418,7 @@ func (s *Store) GetShot(ctx context.Context, id int64) (*model.Shot, error) {
 func (s *Store) UpdateShot(ctx context.Context, sh *model.Shot) error {
 	mj, _ := json.Marshal(sh.Metrics)
 	manj, _ := json.Marshal(nonNil(sh.Manual))
-	res, err := s.db.ExecContext(ctx, `UPDATE shots SET club=?, club_category=?, metrics_json=?, manual_json=?, excluded=?, good_override=? WHERE id=?`,
+	res, err := s.db.ExecContext(ctx, `UPDATE {s}shots SET club=?, club_category=?, metrics_json=?, manual_json=?, excluded=?, good_override=? WHERE id=?`,
 		sh.Club, sh.ClubCategory, string(mj), string(manj), boolInt(sh.Excluded), nullBool(sh.GoodOverride), sh.ID)
 	if err != nil {
 		return err
@@ -442,7 +440,7 @@ func (s *Store) CreateExperiment(ctx context.Context, e *model.Experiment) error
 		return fmt.Errorf("goal %q は使えません", e.Goal)
 	}
 	ts := now()
-	if err := s.db.QueryRowContext(ctx, `INSERT INTO experiments(session_id, hypothesis, intervention, target_metric, goal, club, created_at) VALUES(?,?,?,?,?,?,?) RETURNING id`,
+	if err := s.db.QueryRowContext(ctx, `INSERT INTO {s}experiments(session_id, hypothesis, intervention, target_metric, goal, club, created_at) VALUES(?,?,?,?,?,?,?) RETURNING id`,
 		e.SessionID, e.Hypothesis, e.Intervention, e.TargetMetric, e.Goal, e.Club, ts).Scan(&e.ID); err != nil {
 		return err
 	}
@@ -459,7 +457,7 @@ func (s *Store) AddBlock(ctx context.Context, b *model.Block) error {
 	if b.SeqFrom < 1 || b.SeqTo < b.SeqFrom {
 		return fmt.Errorf("seq の範囲が不正です（%d〜%d）", b.SeqFrom, b.SeqTo)
 	}
-	if err := s.db.QueryRowContext(ctx, `INSERT INTO blocks(experiment_id, kind, seq_from, seq_to) VALUES(?,?,?,?) RETURNING id`, b.ExperimentID, b.Kind, b.SeqFrom, b.SeqTo).Scan(&b.ID); err != nil {
+	if err := s.db.QueryRowContext(ctx, `INSERT INTO {s}blocks(experiment_id, kind, seq_from, seq_to) VALUES(?,?,?,?) RETURNING id`, b.ExperimentID, b.Kind, b.SeqFrom, b.SeqTo).Scan(&b.ID); err != nil {
 		return err
 	}
 	return nil
@@ -469,7 +467,7 @@ func (s *Store) AddBlock(ctx context.Context, b *model.Block) error {
 func (s *Store) GetExperiment(ctx context.Context, id int64) (*model.Experiment, error) {
 	var e model.Experiment
 	var ts string
-	err := s.db.QueryRowContext(ctx, `SELECT id, session_id, hypothesis, intervention, target_metric, goal, club, created_at FROM experiments WHERE id=?`, id).
+	err := s.db.QueryRowContext(ctx, `SELECT id, session_id, hypothesis, intervention, target_metric, goal, club, created_at FROM {s}experiments WHERE id=?`, id).
 		Scan(&e.ID, &e.SessionID, &e.Hypothesis, &e.Intervention, &e.TargetMetric, &e.Goal, &e.Club, &ts)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -478,7 +476,7 @@ func (s *Store) GetExperiment(ctx context.Context, id int64) (*model.Experiment,
 		return nil, err
 	}
 	e.CreatedAt = parseTS(ts)
-	rows, err := s.db.QueryContext(ctx, `SELECT id, experiment_id, kind, seq_from, seq_to FROM blocks WHERE experiment_id=? ORDER BY seq_from, id`, id)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, experiment_id, kind, seq_from, seq_to FROM {s}blocks WHERE experiment_id=? ORDER BY seq_from, id`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -496,7 +494,7 @@ func (s *Store) GetExperiment(ctx context.Context, id int64) (*model.Experiment,
 
 // ListExperiments はセッションの実験を返す。
 func (s *Store) ListExperiments(ctx context.Context, sessionID int64) ([]model.Experiment, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id FROM experiments WHERE session_id=? ORDER BY id`, sessionID)
+	rows, err := s.db.QueryContext(ctx, `SELECT id FROM {s}experiments WHERE session_id=? ORDER BY id`, sessionID)
 	if err != nil {
 		return nil, err
 	}
