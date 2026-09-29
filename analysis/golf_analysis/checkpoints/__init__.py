@@ -57,6 +57,16 @@ def etag() -> str:
     return _CACHE["etag"]
 
 
+def stamp() -> str:
+    """測った条件のうち、分析サービスの側の指紋（カタログの中身と判定の版）。
+
+    Go はこれと利き手・向き・コマとタップのハッシュをまとめてスイングに残し、違えば測り直す
+    （版の文字列を変えずにカタログを直したとき・判定の版を上げたときも、古い判定を出し続けない）。"""
+    from .. import config
+
+    return hashlib.sha256(f"{etag()}|{config.JUDGE_VERSION}".encode("utf-8")).hexdigest()[:16]
+
+
 def items() -> list[dict]:
     return load()["items"]
 

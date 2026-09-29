@@ -272,7 +272,7 @@ PLAIN_LABEL_PATTERNS = {
 
 # ---- 動画のチェックポイント（docs/DESIGN_v2.md §5・§6）。どれも初期値・要較正 ----
 # 版（§13.4）。カタログの版はカタログの中（checkpoints/catalog.json の version）が持ち主。
-JUDGE_VERSION = "judge/1.0"
+JUDGE_VERSION = "judge/1.1"
 VIDEO_VERSION = "video/0.2"
 # 初期の誤差（§5.5）。姿勢推定とタップの誤差の予算を実測するまで、画面の上の角度は ±5°、位置はボール ±0.5個。
 CP_ANGLE_ERR_DEG = 5.0
@@ -302,3 +302,7 @@ CP_FOCUS_MIN_VISUAL = 2
 # 構えの両肩の横の開き（胴の長さとの比）で向きを確かめる（§6.1）。これ以上なら正面、これ以下なら後ろ（仮・要較正）
 CP_VIEW_FO_SPREAD = 0.45
 CP_VIEW_DTL_SPREAD = 0.25
+# クラブの線（握りの端 → 先のタップ）がこれより短く写っていたら、傾きの項目は測らない（ボール何個ぶん・無ければ胴の長さの割合）。
+# 後ろからの P6・P4 はクラブがカメラの方を向いて数画素になり、1画素のずれで角度が何十も動くため（仮・要較正）
+CP_MIN_CLUB_LINE_BALL = 2.0
+CP_MIN_CLUB_LINE_L = 0.3

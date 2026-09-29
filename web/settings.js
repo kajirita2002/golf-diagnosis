@@ -36,7 +36,7 @@
       <section class="card">
         ${seg("hand", "利き手", [["R", "右打ち"], ["L", "左打ち"]], p ? p.handedness : App.pendingHand())}
         ${seg("unit", "距離の単位", [["yd", "ヤード"], ["m", "メートル"]], App.distUnit())}
-        ${seg("priority", "課題の選び方で優先すること", [["accuracy", "狙いの精度"], ["distance", "飛距離"]], (p && p.prefs && p.prefs.priority) || "accuracy")}
+        ${seg("priority", "課題の選び方で優先すること", [["accuracy", "狙いの精度"], ["distance", "飛距離"]], (p && p.prefs && p.prefs.priority) || (!p && LS.get("golf.priorityPending")) || "accuracy")}
         ${seg("theme", "表示", [["auto", "自動"], ["light", "ライト"], ["dark", "ダーク"]], themeNow())}
         <div data-err></div>
       </section>
@@ -66,7 +66,7 @@
       $("[data-err]", el).innerHTML = "";
       if (name === "theme") { applyTheme(v); mark(); return; }
       if (name === "unit") LS.set("golf.distUnit", v);
-      if (name === "priority" && !S.player) { mark(); return; }
+      if (name === "priority" && !S.player) { LS.set("golf.priorityPending", v); App.toast("最初の記録を入れるとき、この設定で始めます"); mark(); return; }
       if (!S.player) {
         // 使う人がまだいない: 端末に置き、最初の記録を入れるとき（どの画面から入れても）この利き手で作る
         if (name === "hand") { App.setPendingHand(v); App.toast("最初の記録を入れるとき、この利き手で始めます"); }

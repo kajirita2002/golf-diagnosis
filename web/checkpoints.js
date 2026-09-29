@@ -66,13 +66,35 @@ const Checks = (() => {
       ${src ? `<img src="${esc(src)}" alt="${esc(pLabel(it.p))} のあなたのコマ" loading="lazy">` : `<span class="noimg" aria-hidden="true">${icon("video")}</span>`}
       <span class="grow1"><span class="cph">${/^P\d/.test(it.p || "") ? lab("p", pLabel(it.p)) + " " : ""}${esc(it.title)}</span>
         <span class="cpf">${esc(it.fault_label || it.look_at)}</span>
-        <span class="cpstate">${stateChip(it)} <span class="caption">${esc(basisText(it))}</span></span></span>${icon("chevron-right", "chev")}</a>`;
+        <span class="cpstate">${kind === "focus" ? "" : stateChip(it)} <span class="caption">${esc(basisText(it))}</span></span></span>${icon("chevron-right", "chev")}</a>`;
   }
 
-  function fold(title, items, sid, attrs = "") {
+  function fold(title, items, sid, attrs = "", lead = "") {
     if (!items.length) return "";
-    return `<details class="folded cpfold" ${attrs}><summary>${title}</summary><ul class="navlist cplist">${items.map((it) => rowHtml(sid, it)).join("")}</ul></details>`;
+    return `<details class="folded cpfold" ${attrs}><summary>${title}</summary>${lead}<ul class="navlist cplist">${items.map((it) => rowHtml(sid, it)).join("")}</ul></details>`;
   }
+
+  // 項目の畳み（項目1つの画面の「前の項目／次の項目」は、同じ畳みの中だけを回る）
+  function groupOf(it) {
+    if (it.optional) return "opt";
+    if (it.derived) return "power";
+    if (it.state === "out_range") return "out";
+    if (it.state === "in_range") return "in";
+    if (it.state === "reference") return "ref";
+    return "unk";
+  }
+  const GROUP_WORD = { out: "範囲の外", in: "範囲の中", unk: "判断できない", ref: "参考", opt: "フォロー（任意）", power: "飛ぶ力" };
+  // 判断できない理由ごとの「こうすれば見られる」（最初の面は言葉だけ）
+  const HOWTO = {
+    view_dtl: "後ろから撮ると見られます", view_fo: "正面から撮ると見られます", view_mismatch: "撮った向きを直すと見られます",
+    no_tap: "このコマでクラブの握りの端と先を押すと見られます", no_frame: "このコマを選ぶと見られます", no_ball: "構えのコマでボールの両端を押すと見られます",
+    no_head_width: "クラブの先の両端を押すと見られます", camera: "撮り方ガイドの置き方で撮ると見られます", camera_unknown: "構えのコマを選ぶと、撮り方を確かめて見られます",
+    fps: "スローモーションで撮ると見られます", fps_unknown: "スローモーションで撮ると見られます", low_visibility: "体全体が明るく写るように撮ると見られます",
+    club_short: "この向きではクラブが短く写り、向きを測れません", border: "範囲の境目なので、どちらとも言えません。もう何本か選ぶと決まることがあります",
+    split: "スイングによって分かれています。もう何本か選ぶと決まることがあります", vision_pending: "見た目の評価（これから）で見られます",
+    scale: "ボールの両端を押し直すと見られます", unclear: "ガイドの読み方を確かめているところです", ref_club: "この番手の基準はガイドにありません",
+  };
+  const howto = (it) => it.needs_note && it.reason === "not_in_2d" ? `見るには、${it.needs_note}が要ります` : HOWTO[it.reason] || "";
 
   function pStrip(data) {
     const sw = (data.swings || []).find((s) => (s.frames || []).length) || null;
@@ -101,57 +123,97 @@ const Checks = (() => {
       return;
     }
     const items = c.items || [];
-    const main = items.filter((x) => !x.optional);
+    const main = items.filter((x) => !x.optional && !x.derived);
     const focus = items.find((x) => x.focus), next = items.find((x) => x.next);
     const outs = main.filter((x) => x.state === "out_range" && !x.focus && !x.next);
     const ins = main.filter((x) => x.state === "in_range");
     const unk = main.filter((x) => x.state === "unknown");
     const refs = main.filter((x) => x.state === "reference");
-    const dist = main.filter((x) => (x.tags || []).includes("distance"));
+    const dist = items.filter((x) => !x.optional && (x.tags || []).includes("distance"));
     const opt = items.filter((x) => x.optional);
     const sw = data.swings || [];
-    const views = [...new Set(sw.map((s) => s.view))];
-    const clubs = [...new Set(sw.map((s) => s.club).filter(Boolean))];
+    const judgedSw = sw.filter((s) => (s.frames || []).length);
+    const views = [...new Set(judgedSw.map((s) => s.view))];
+    const clubs = [...new Set(judgedSw.map((s) => s.club).filter(Boolean))];
     const reasons = {};
     for (const x of unk) reasons[x.reason_text || x.reason] = (reasons[x.reason_text || x.reason] || 0) + 1;
     const rs = Object.entries(reasons).sort((a, b) => b[1] - a[1]);
     const cams = sw.map((s) => s.measure && s.measure.camera).filter((m) => m && m.ok === false);
-    let h = `<p class="sub" data-cond>${lab("date", App.dateJa(se.date, false))}・${views.map((v) => esc(VIEW[v] || v)).join("と")}${clubs.length ? "・" + clubs.map((x) => lab("club", App.clubJa(x))).join("・") : ""}・スイング${lab("count", sw.filter((s) => (s.frames || []).length).length + "本")}</p>
-      <p class="t-headline" data-summary>見られた${lab("count", c.counts.judged + "件")}のうち、範囲の外${lab("count", c.counts.out_range + "件")}</p>`;
+    // 見出しは言葉で（件数・内訳は畳みの中。判断できない数を一番大きく見せない）
+    const outN = c.counts.out_range;
+    const summary = focus ? "気になる所が一つあります" : outN ? "範囲の外の所があります（まだ課題は決めていません）" : c.counts.judged ? "いまは大きな外れはありません" : "まだ判断できた所がありません";
+    let h = `<p class="sub" data-cond>${lab("date", App.dateJa(se.date, false))}・${views.map((v) => esc(VIEW[v] || v)).join("と")}${clubs.length ? "・" + clubs.map((x) => lab("club", App.clubJa(x))).join("・") : ""}・スイング${lab("count", judgedSw.length + "本")}</p>
+      <p class="t-headline" data-summary>${esc(summary)}</p>
+      <details class="folded" data-counts><summary class="textbtn">件数を見る</summary><p class="caption">見られた${lab("count", c.counts.judged + "件")}のうち、範囲の外${lab("count", outN + "件")}。判断できない${lab("count", c.counts.unknown + "件")}（${rs.slice(0, 4).map(([t, n]) => `${esc(t)} ${lab("count", n + "件")}`).join("・")}）。</p></details>`;
     if (c.unchecked) h += `<p class="caption" data-unchecked>基準の読み取りは、まだ人がガイドと突き合わせていません。</p>`;
     if (cams.length) {
       const hints = [...new Set(cams.flatMap((m) => (m.checks || []).filter((x) => !x.ok).map((x) => x.hint)))];
       h += `<div class="note warn" data-camera>撮り方がガイドの置き方から外れています（${hints.map(esc).join("・")}）。傾きの項目は判断できないにしています。<a href="#/guide/${esc(views[0] || "dtl")}">撮り方ガイド</a></div>`;
     }
-    // 向き（構えの形と、選んだ向きの食い違い）とコマの速さ（§6.1・§6.2）
-    const vmis = sw.filter((s) => s.measure && s.measure.view_check && s.measure.view_check.ok === false);
-    if (vmis.length) h += `<div class="note warn" data-viewcheck>構えの形から見ると、${esc(VIEW[vmis[0].measure.view_check.guess] || "")}撮った動画かもしれません。向きが違うと、ほとんどの項目がずれます。向きを選び直すときは、もう一度選んでください。</div>`;
-    if (sw.some((s) => (s.frames || []).length && s.fps > 0 && s.fps < 50)) h += `<div class="note" data-fps>コマの少ない動画です。下ろしから当たる瞬間のクラブの項目は判断できません（スローモーションで撮ると見られます）。</div>`;
-    else if (sw.some((s) => (s.frames || []).length && !s.fps)) h += `<div class="note" data-fps>コマの速さが分かりませんでした。</div>`;
+    // 向き（構えの形と、選んだ向きの食い違い。§6.1）: そのスイングの向きのある項目は判断できないにしてある。直すか消すかを選べる
+    const vmis = judgedSw.filter((s) => s.measure && s.measure.view_check && s.measure.view_check.ok === false);
+    if (vmis.length) {
+      h += `<div class="note warn" data-viewcheck><p style="margin:0">構えの形から見ると、選んだ向きと違う向きで撮った動画かもしれません。向きが違うと項目がずれるので、そのスイングの項目は判断できないにしています。</p>
+        ${vmis.map((s) => { const g = s.measure.view_check.guess; const n = judgedSw.indexOf(s) + 1;
+          return `<div class="stack" style="margin-top:var(--s2)" data-vm="${s.id}"><p style="margin:0"><b>スイング${lab("count", n + "本")}目</b>（${esc(VIEW[s.view] || s.view)}として選んだもの）</p>
+          ${g && g !== s.view ? `<button type="button" class="btn primary block" data-fix-view="${s.id}" data-to="${esc(g)}">向きを「${esc(VIEW[g])}」に直す</button>` : ""}
+          <button type="button" class="btn block danger" data-del-swing="${s.id}">このスイングを消す</button></div>`; }).join("")}</div>`;
+    }
+    if (judgedSw.some((s) => s.fps > 0 && s.fps < 50)) h += `<div class="note" data-fps>コマの少ない動画です。下ろしから当たる瞬間のクラブの項目は判断できません（スローモーションで撮ると見られます）。</div>`;
+    else if (judgedSw.some((s) => !s.fps)) h += `<div class="note" data-fps>コマの速さが分からない動画です。下ろしから当たる瞬間のクラブの項目は判断できないにしています。</div>`;
     h += pStrip(data);
     if (focus) {
       h += `<section class="block" aria-labelledby="h-first"><h2 id="h-first" class="label">まずここ</h2>${bigCard(sid, data, focus, "focus")}</section>`;
       if (next) h += `<section class="block" aria-labelledby="h-next"><h2 id="h-next" class="label">次に見る</h2>${bigCard(sid, data, next, "next")}</section>`;
     } else {
       const singles = main.some((x) => x.single && x.state === "out_range");
-      h += `<div class="note" data-nofocus>${singles ? "範囲の外の項目は、まだ一本だけの見立てなので課題にしていません。同じ向きで三本以上のスイングを選ぶと、課題を一つ選べます。" : "いま課題にできる項目はありません。"}</div>`;
+      const byView = {};
+      for (const s of judgedSw) byView[s.view] = (byView[s.view] || 0) + 1;
+      const most = Math.max(0, ...Object.values(byView));
+      const need = Math.max(0, 3 - most);
+      const word = ["", "一本", "二本"][need] || "";
+      h += `<div class="note" data-nofocus><p style="margin:0">${need ? `範囲の外の項目は、まだ${singles ? "一本だけの見立て" : "本数が足りない見立て"}なので課題にしていません。同じ向きで、もう${word}選ぶと、課題を一つ選べます。` : "いま課題にできる項目はありません。"}</p>
+        ${need ? `<a class="btn primary block" style="margin-top:var(--s2)" data-add-swing href="#/video/${esc(se.date)}?session=${sid}">${icon("video")}あと${word}選ぶ</a>` : ""}</div>`;
     }
+    const unkLead = rs.length ? `<p class="caption" data-unk-why>${rs.map(([t, n]) => `${esc(t)} ${lab("count", n + "件")}`).join("・")}</p>` : "";
     h += `<div class="block">
       ${fold(`ほかに範囲の外 ${lab("count", outs.length + "件")}`, outs, sid, "data-fold=out")}
       ${fold(`飛ぶ力（見られた ${lab("count", dist.filter((x) => x.state === "in_range" || x.state === "out_range").length + "件")}／判断できない ${lab("count", dist.filter((x) => x.state === "unknown").length + "件")}）`, dist, sid, "data-fold=power")}
       ${fold(`範囲の中 ${lab("count", ins.length + "件")}`, ins, sid, "data-fold=in")}
-      ${fold(`判断できない ${lab("count", unk.length + "件")}（${rs.slice(0, 3).map(([t, n]) => `${esc(t)} ${lab("count", n + "件")}`).join("・")}）`, unk, sid, "data-fold=unknown")}
+      ${fold(`判断できない ${lab("count", unk.length + "件")}`, unk, sid, "data-fold=unknown", unkLead)}
       ${fold(`参考 ${lab("count", refs.length + "件")}`, refs, sid, "data-fold=ref")}
       ${fold(`フォロー（任意）${lab("count", opt.length + "件")}`, opt, sid, "data-fold=opt")}</div>
-      <div class="stack block"><a class="btn block" data-more-swing href="#/video/${esc(se.date)}?session=${sid}">${icon("video")}もう一本選ぶ</a></div>
+      ${focus ? `<div class="stack block"><a class="btn block" data-more-swing href="#/video/${esc(se.date)}?session=${sid}">${icon("video")}もう一本選ぶ</a></div>` : ""}
       <ul class="navlist block">${App.navItem(`#/guide/${esc(views[0] || "dtl")}`, "撮り方ガイド", "カメラの置き方")}</ul>`;
     body.innerHTML = h;
+    body.addEventListener("click", async (ev) => {
+      const fx = ev.target.closest("[data-fix-view]");
+      const del = ev.target.closest("[data-del-swing]");
+      if (!fx && !del) return;
+      const id = Number((fx || del).dataset.fixView || (fx || del).dataset.delSwing);
+      try {
+        if (fx) {
+          await api("PATCH", `/v1/swings/${id}`, { view: fx.dataset.to });
+          App.toast("向きを直して、測り直しました");
+        } else {
+          const ok = await App.ask({ title: "このスイングを消しますか", text: "このスイングの判定は、課題の選び方に数えなくなります。", ok: "消す", cancel: "やめる", danger: true });
+          if (!ok) return;
+          await api("DELETE", `/v1/swings/${id}`);
+          App.toast("スイングを消しました");
+        }
+        invalidate(sid);
+        App.invalidate(sid);
+        App.render();
+      } catch (e) {
+        (fx || del).insertAdjacentHTML("afterend", App.errOf(e, { what: fx ? "向きを直せませんでした" : "消せませんでした", saved: "スイングは前のままです。" }));
+      }
+    });
   }
 
   // ---- C-1 項目1つ ----
   async function renderItem({ el, params, alive }) {
     const sid = Number(params.id), iid = params.item;
-    el.innerHTML = `<div class="pagehead"><a class="iconbtn" href="#/session/${sid}/check" aria-label="チェックへ戻る">${icon("chevron-left")}</a><span class="grow1"></span><span data-nav></span></div><div data-body></div>`;
+    el.innerHTML = `<div class="pagehead"><a class="iconbtn" href="#/session/${sid}/check" aria-label="チェックへ戻る">${icon("chevron-left")}</a><span class="grow1"></span></div><div data-body></div>`;
     const body = $("[data-body]", el);
     const stop = App.loading(body);
     let data;
@@ -160,18 +222,28 @@ const Checks = (() => {
     const items = (data.checks && data.checks.items) || [];
     const i = items.findIndex((x) => x.id === iid);
     if (i < 0) { body.innerHTML = App.errorHtml({ what: "この項目は見つかりませんでした", next: "チェックの一覧から開き直してください。" }); return; }
-    const it = items[i], prev = items[i - 1], nxt = items[i + 1];
-    $("[data-nav]", el).innerHTML = `${prev ? `<a class="iconbtn" href="#/session/${sid}/check/${encodeURIComponent(prev.id)}" aria-label="前の項目">${icon("chevron-left")}</a>` : ""}${nxt ? `<a class="iconbtn" href="#/session/${sid}/check/${encodeURIComponent(nxt.id)}" aria-label="次の項目">${icon("chevron-right")}</a>` : ""}`;
+    const it = items[i];
+    // 前後は同じ畳みの中だけを回る（範囲の外を見ているときに、判断できない項目へ飛ばない）
+    const g = groupOf(it), same = items.filter((x) => groupOf(x) === g), k = same.indexOf(it);
+    const prev = same[k - 1], nxt = same[k + 1];
     const src = thumbOf(data, it);
-    const say = it.state === "out_range" ? it.fault_label : it.state === "in_range" ? it.ok_text : it.look_at;
+    const unknown = it.state === "unknown";
+    const say = it.state === "out_range" ? it.fault_label : it.state === "in_range" ? it.ok_text : unknown ? `判断できません（${it.reason_text || ""}）` : it.look_at;
+    const how = unknown ? howto(it) : "";
     body.innerHTML = `
       ${/^P\d/.test(it.p || "") ? `<p class="label" data-pname>${lab("p", pLabel(it.p))}</p>` : ""}
       <h1 data-title>${esc(it.title)}</h1>
       <figure class="cpfig">${src ? `<img src="${esc(src)}" alt="${esc(say)}">` : `<div class="noimg" role="img" aria-label="コマの写真はありません">${icon("video")}</div>`}</figure>
       <p class="cpstate">${stateChip(it)} <span class="caption">${esc(basisText(it))}</span></p>
       <p class="t-headline" data-say>${esc(say)}</p>
-      <p data-range><span class="label">ガイドの範囲</span><br>${esc(it.ok_text)}</p>
-      <button type="button" class="textbtn" data-why>${icon("info")}なぜそう言える？</button>`;
+      ${how ? `<p data-howto>${esc(how)}</p>` : ""}
+      <p class="sub">${esc(it.look_at)}</p>
+      <div class="cprange" data-range><span class="label">目安（こうなら範囲の中）</span>${esc(it.ok_text)}</div>
+      <button type="button" class="textbtn" data-why>${icon("info")}なぜそう言える？</button>
+      <nav class="itemnav" aria-label="${esc(GROUP_WORD[g])}の項目">
+        ${prev ? `<a class="btn" data-prev href="#/session/${sid}/check/${encodeURIComponent(prev.id)}">${icon("chevron-left")}前の項目</a>` : "<span></span>"}
+        ${nxt ? `<a class="btn" data-next href="#/session/${sid}/check/${encodeURIComponent(nxt.id)}">次の項目${icon("chevron-right")}</a>` : "<span></span>"}</nav>
+      ${prev || nxt ? `<p class="caption" style="text-align:center">${esc(GROUP_WORD[g])}の項目だけを順に見ます（${lab("count", (k + 1) + " / " + same.length)}）</p>` : ""}`;
     $("[data-why]", body).addEventListener("click", () => openWhy(data, it));
   }
 
@@ -198,11 +270,13 @@ const Checks = (() => {
     const c = data.checks || {};
     const g = it.guide || {};
     const rows = [];
-    rows.push(`<li><b>基準</b>: PGA スイングガイド p${esc(g.pages)}（${esc(g.section)}${g.page_exact ? "" : "。ページはノートの節の範囲"}）・カタログ ${esc(c.catalog_version)}・判定 ${esc(c.judge_version)}</li>`);
+    rows.push(`<li><b>基準</b>: PGA スイングガイド p${esc(g.pages)}（${esc(g.section)}${g.page_exact ? "" : "。ページはノートの節の範囲"}）</li>`);
     if (it.focus && c.rationale) rows.push(`<li><b>先に直す理由</b>: ${esc(c.rationale)}</li>`);
     if (it.next && c.next_why) rows.push(`<li><b>次に見る理由</b>: ${esc(c.next_why)}</li>`);
     if (it.state === "in_range" || it.state === "out_range") rows.push(`<li><b>何本から</b>: ${it.n_judged}本中${it.n_out}本が範囲の外${it.single ? "（一本だけの見立てなので、課題にはしていません）" : ""}</li>`);
     if (it.state === "unknown") rows.push(`<li><b>判断できない理由</b>: ${esc(it.reason_text)}${it.detail ? `（${esc(it.detail)}）` : ""}${it.needs_note ? `。見るには: ${esc(it.needs_note)}` : ""}</li>`);
+    if (it.tight) rows.push(`<li><b>この項目の見え方</b>: 範囲の幅が、いまの誤差の見積もり（初期の値）と同じくらいなので、「範囲の中」と言えることはほとんどありません。外れていることは言えます。誤差を実測して決め直すまで、このままです</li>`);
+    if ((it.also || []).length) rows.push(`<li><b>ガイドの別の節でも</b>: ${it.also.map((a) => esc(a.title)).join("・")}（同じ外れを一回だけ数えています）</li>`);
     if (it.state === "reference") rows.push(`<li><b>参考</b>: 合否は出していません${it.note ? `。${esc(it.note)}` : ""}</li>`);
     if (BASIS[it.basis]) rows.push(`<li><b>根拠</b>: ${esc(BASIS[it.basis])}${it.proxy ? `（代わりの点: ${esc(it.proxy)}）` : ""}</li>`);
     if (it.conflict) rows.push(`<li><b>食い違い</b>: 見た目の答えと向きが逆でした。あなたが押した点を採っています</li>`);
@@ -212,7 +286,8 @@ const Checks = (() => {
     const vals = (it.values || []).filter((x) => x.value).map((x, i) => `<li>スイング ${i + 1}: ${esc(STATE[x.state] ? STATE[x.state].text : x.state)}・${num(x.value.v, x.value.unit)}</li>`).join("");
     const sh = App.openSheet({ title: "なぜそう言える？", size: "half", label: "why", html: `<ul class="parts">${rows.join("")}</ul>
       <details class="folded" data-numbers><summary>数字を見る</summary><ul class="parts">${valueHtml(it.value)}${vals}
-      <li>画面の上で測った傾きと位置です（体の三次元の角度ではありません）</li></ul></details>` });
+      <li>画面の上で測った傾きと位置です（体の三次元の角度ではありません）</li>
+      <li class="caption">カタログ ${esc(c.catalog_version)}・判定 ${esc(c.judge_version)}</li></ul></details>` });
     return sh;
   }
 
@@ -235,7 +310,7 @@ const Checks = (() => {
   }
   async function renderGuide({ el, params, alive }) {
     const view = params.view === "fo" ? "fo" : "dtl";
-    el.innerHTML = `<div class="pagehead"><a class="iconbtn" href="#/record" aria-label="記録へ戻る">${icon("chevron-left")}</a><h1>撮り方ガイド</h1></div>
+    el.innerHTML = `<div class="pagehead"><a class="iconbtn" data-gback href="#/record" aria-label="戻る">${icon("chevron-left")}</a><h1>撮り方ガイド</h1></div>
       <div class="seg" role="group" aria-label="向き"><a href="#/guide/dtl" ${view === "dtl" ? `aria-current="page"` : ""}>後ろから</a><a href="#/guide/fo" ${view === "fo" ? `aria-current="page"` : ""}>正面から</a></div>
       <div class="block">${guideArt(view)}</div>
       <section class="card block"><h2>置き方</h2><ul class="plain">
@@ -248,6 +323,10 @@ const Checks = (() => {
       <section class="card block"><h2>試し撮りの確かめ方</h2>
         <p>一本目の構えのコマで、腰の高さと手元（正面ならスタンスの真ん中）が画面の真ん中の線から離れていないかを自動で確かめます。外れていれば、チェックの画面に「カメラをもう少し右へ」のように直す向きが出ます。外れたままだと、傾きの項目は判断できないにします。</p></section>
       <p class="sub block" data-other></p>`;
+    // 戻るは来た画面へ（動画の段から開いたら、動画の段へ）。履歴が無いときだけ記録の画面へ
+    $("[data-gback]", el).addEventListener("click", (ev) => {
+      if (App.cameInApp()) { ev.preventDefault(); history.back(); }
+    });
     try {
       const cat = await Video.catalog();
       if (!alive()) return;

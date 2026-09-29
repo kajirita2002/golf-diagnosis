@@ -210,9 +210,15 @@ func (s *Server) patchSwing(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Club      *string `json:"club"`
 		ClubClass *string `json:"club_class"`
+		View      *string `json:"view"`
 	}
 	if err := decode(r, &in); err != nil {
 		s.fail(w, err)
+		return
+	}
+	// 向きを直す（構えの形が選んだ向きと食い違ったとき。§6.1）。直したら測り直す
+	if in.View != nil && *in.View != "dtl" && *in.View != "fo" {
+		s.fail(w, bad("view は dtl（後ろから）か fo（正面から）"))
 		return
 	}
 	if in.ClubClass != nil && !clubClasses[*in.ClubClass] {
@@ -225,7 +231,7 @@ func (s *Server) patchSwing(w http.ResponseWriter, r *http.Request) {
 	if in.ClubClass != nil && in.Club == nil {
 		in.Club = &sw.Club
 	}
-	if err := s.Store.UpdateSwing(r.Context(), sw.ID, store.UpdateSwingInput{Club: in.Club, Class: in.ClubClass}); err != nil {
+	if err := s.Store.UpdateSwing(r.Context(), sw.ID, store.UpdateSwingInput{Club: in.Club, Class: in.ClubClass, View: in.View}); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -525,6 +531,7 @@ func (s *Server) measureAndStore(r *http.Request, swingID int64) (map[string]any
 
 type measureResult struct {
 	CatalogVersion string            `json:"catalog_version"`
+	Stamp          string            `json:"stamp"`
 	Camera         json.RawMessage   `json:"camera"`
 	Scale          json.RawMessage   `json:"scale"`
 	ViewCheck      json.RawMessage   `json:"view_check"`
@@ -544,12 +551,7 @@ func (s *Server) measureSwing(r *http.Request, sw *model.Swing) (json.RawMessage
 	if err != nil {
 		return nil, err
 	}
-	in := analysis.CheckpointSwing{View: sw.View, Club: sw.Club, ClubClass: sw.ClubClass, Handedness: pl.Handedness, FPS: sw.FPS,
-		Width: sw.Width, Height: sw.Height, Ball: sw.Ball, Frames: map[string]json.RawMessage{}, Missing: sw.Missing}
-	for _, f := range fs {
-		b, _ := json.Marshal(map[string]any{"t": f.T, "landmarks": f.Landmarks, "taps": f.Taps})
-		in.Frames[f.Checkpoint] = b
-	}
+	in := swingInput(sw, pl.Handedness, fs)
 	raw, err := s.Analyzer.CheckpointsMeasure(r.Context(), in)
 	if err != nil {
 		return nil, err
@@ -585,11 +587,45 @@ func (s *Server) measureSwing(r *http.Request, sw *model.Swing) (json.RawMessage
 		}
 		checks = append(checks, model.SwingCheck{SwingID: sw.ID, ItemID: h.ID, CatalogVersion: m.CatalogVersion, State: st, FaultID: h.Fault, Basis: h.Basis, Reason: h.Reason, Evidence: it})
 	}
-	meta, _ := json.Marshal(map[string]any{"camera": m.Camera, "scale": m.Scale, "view_check": m.ViewCheck})
+	// fp: 測った条件の指紋（分析サービスの指紋・利き手・向き・番手・コマとタップ）。GET のときに違えば測り直す
+	meta, _ := json.Marshal(map[string]any{"camera": m.Camera, "scale": m.Scale, "view_check": m.ViewCheck, "fp": swingFingerprint(m.Stamp, in)})
 	if err := s.Store.PutSwingChecks(r.Context(), sw.ID, m.CatalogVersion, meta, checks); err != nil {
 		return nil, err
 	}
 	return raw, nil
+}
+
+// swingInput は分析サービスに渡す1スイング（測る入力）。指紋もこの形から作る（渡した中身＝測った条件）。
+func swingInput(sw *model.Swing, hand model.Handedness, fs []model.SwingFrame) analysis.CheckpointSwing {
+	in := analysis.CheckpointSwing{View: sw.View, Club: sw.Club, ClubClass: sw.ClubClass, Handedness: hand, FPS: sw.FPS,
+		Width: sw.Width, Height: sw.Height, Ball: sw.Ball, Frames: map[string]json.RawMessage{}, Missing: sw.Missing}
+	for _, f := range fs {
+		b, _ := json.Marshal(map[string]any{"t": f.T, "landmarks": f.Landmarks, "taps": f.Taps})
+		in.Frames[f.Checkpoint] = b
+	}
+	return in
+}
+
+// swingFingerprint は測った条件の指紋。stamp は分析サービスの側（カタログの中身と判定の版）。
+// 利き手を変えた・タップを直したのに保存のあとの測り直しが失敗した・カタログを直した、のどれでも指紋が変わり、
+// 次に一覧を開いたときに測り直す（古い判定を出し続けない）。
+func swingFingerprint(stamp string, in analysis.CheckpointSwing) string {
+	if stamp == "" {
+		return ""
+	}
+	b, _ := json.Marshal(in) // map のキーは並べ替えて書き出されるので、同じ中身なら同じ文字列
+	h := sha256.New()
+	h.Write([]byte(stamp + "|"))
+	h.Write(b)
+	return hex.EncodeToString(h.Sum(nil)[:12])
+}
+
+func storedFingerprint(sw *model.Swing) string {
+	var m struct {
+		FP string `json:"fp"`
+	}
+	_ = json.Unmarshal(sw.Measure, &m)
+	return m.FP
 }
 
 // sessionChecks は記録のスイング全部の判定をまとめ、課題を1つ選んで返す（§4.4）。まだ測っていないスイングはここで測る。
@@ -610,6 +646,7 @@ func (s *Server) sessionChecks(w http.ResponseWriter, r *http.Request) {
 	}
 	var payload []json.RawMessage
 	outs := []swingOut{}
+	stamp := ""
 	for i := range ss {
 		sw := &ss[i]
 		fs, err := s.Store.ListSwingFrames(r.Context(), sw.ID)
@@ -621,7 +658,17 @@ func (s *Server) sessionChecks(w http.ResponseWriter, r *http.Request) {
 			outs = append(outs, swingOut{*sw, fs})
 			continue
 		}
-		if sw.CPCatalogVersion == "" {
+		stale := sw.CPCatalogVersion == ""
+		if !stale {
+			if stamp == "" {
+				if stamp, err = s.Analyzer.CheckpointsStamp(r.Context()); err != nil {
+					s.fail(w, err)
+					return
+				}
+			}
+			stale = storedFingerprint(sw) != swingFingerprint(stamp, swingInput(sw, pl.Handedness, fs))
+		}
+		if stale {
 			if _, err := s.measureSwing(r, sw); err != nil {
 				s.fail(w, err)
 				return

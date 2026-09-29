@@ -329,7 +329,10 @@ const App = (() => {
       document.title = (h1 ? h1.textContent.trim() + " - " : "") + "Swing Lab";
     }
   }
-  window.addEventListener("hashchange", render);
+  // このタブの中で画面を移ったことがあるか（戻るを history.back() にしてよいか。外から直に開いたときは戻る先が無い）
+  let movedInApp = false;
+  window.addEventListener("hashchange", () => { movedInApp = true; render(); });
+  const cameInApp = () => movedInApp && history.length > 1;
   // 横に動かせるセグメント（診断のクラブなど）: 続きがある側の端を薄くし、選んでいるものを見える所へ動かす
   function watchSeg(sg) {
     if (sg.dataset.watched) return;
@@ -372,6 +375,11 @@ const App = (() => {
     const r = await api("POST", "/v1/me", { handedness: (hand || pendingHand()) === "L" ? "L" : "R" });
     setPlayer(r.player);
     LS.del("golf.handPending");
+    // 使う人がいないうちに設定で選んだ「優先」も、作ったらすぐ残す（端末だけに置いたまま消さない）
+    const pri = LS.get("golf.priorityPending");
+    if (pri === "accuracy" || pri === "distance") {
+      try { setPlayer(await api("PATCH", `/v1/players/${S.player.id}`, { prefs: { priority: pri } })); LS.del("golf.priorityPending"); } catch (e) { console.warn(e); }
+    }
     return S.player;
   }
   function setOffline(on) {
@@ -452,6 +460,6 @@ const App = (() => {
   return {
     APP_VERSION, APP_UPDATED, $, $$, esc, icon, lab, LS, S, api, request, fmt, LABEL, KIND, distUnit, clubJa, textJa, localDate, dateJa, localTime,
     toast, say, errorHtml, errOf, loading, openSheet, ask: confirmSheet, loadFigures, route, go, render, parseHash,
-    ensurePlayer, pendingHand, setPendingHand, setPlayer, sessions, invalidate, report, shots, backBtn, navItem, setOffline, netDown,
+    ensurePlayer, pendingHand, setPendingHand, cameInApp, setPlayer, sessions, invalidate, report, shots, backBtn, navItem, setOffline, netDown,
   };
 })();

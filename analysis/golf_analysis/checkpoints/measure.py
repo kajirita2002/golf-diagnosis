@@ -20,7 +20,7 @@ import math
 from typing import Any
 
 from .. import config
-from . import by_id, fill, items, version
+from . import by_id, fill, items, stamp, version
 
 # MediaPipe Pose の33点のうち使うもの（体の左右＝解剖学の左右）
 LM = {
@@ -42,6 +42,12 @@ REASON_TEXT = {
     "low_visibility": "体の点が見えない",
     "camera": "カメラの置き方",
     "fps": "コマの速さが足りない",
+    "fps_unknown": "コマの速さが分からない",
+    "camera_unknown": "カメラの置き方を確かめられない",
+    "view_mismatch": "向きを確かめてください",
+    "club_short": "クラブが短く写っている",
+    "cross": "クラブが垂直の向こうへ倒れている（読み方を確かめ中）",
+    "combo": "ガイドに基準の無い組み合わせ",
     "border": "境目",
     "scale": "物差しの食い違い",
     "band_narrow": "範囲が狭く写っている",
@@ -256,6 +262,17 @@ def _ang_v_signed(a, b) -> float:
     return math.degrees(math.atan2(dx, -dy))
 
 
+def _ang_side(a, b, side: int) -> float:
+    """線 a-b と垂直のなす角を、b が a から side の向き（+1 は +x・-1 は -x）に倒れているとき正で返す（-90〜90）。
+
+    向きを捨てる _ang_v だと、垂直を越えて反対側へ倒れた線を「ちょうどよい」や逆の言葉で判定してしまう
+    （後ろからのシャフトは、垂直を越えてボールの側へ倒れるほど立っている）。"""
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    if dx == 0 and dy == 0:
+        raise Invalid("no_tap", "二点が重なっている")
+    return math.degrees(math.atan2(side * dx, abs(dy)))
+
+
 def _joint(a, b, c) -> float:
     v1 = (a[0] - b[0], a[1] - b[1])
     v2 = (c[0] - b[0], c[1] - b[1])
@@ -381,6 +398,9 @@ def compute(ctx: Ctx, spec: dict) -> dict:
     k = spec["kind"]
     p = spec.get("p")
     ang_err = config.CP_ANGLE_ERR_DEG
+    if k in CLUB_LINE_KINDS and _uses_club(spec):
+        for q in [x for x in (spec.get("p0"), p) if x]:
+            _club_line_ok(ctx, q)
     if k in ("band_x", "band_y"):
         ax = 0 if k == "band_x" else 1
         P = ctx.pt(p, spec["pt"])
@@ -392,9 +412,12 @@ def compute(ctx: Ctx, spec: dict) -> dict:
         t = (P[ax] - A[ax]) / (B[ax] - A[ax])
         err = ctx.pos_err_px(p) / width
         extra = {}
+        lo_x, hi_x = sorted((A[ax], B[ax]))
+        if ax == 0 and spec.get("fault_x") and not lo_x <= P[ax] <= hi_x:
+            # 外れの語を画面の向き（+x / -x）で決める（A と B の並びが体の形で入れ替わっても、語が逆にならない）
+            extra["fault_id"] = spec["fault_x"]["+x" if P[ax] > hi_x else "-x"]
         if ctx.ball:
             # 範囲の端からボール何個ぶん外か（数字を見るの中だけ）
-            lo_x, hi_x = sorted((A[ax], B[ax]))
             out = 0.0 if lo_x <= P[ax] <= hi_x else (lo_x - P[ax] if P[ax] < lo_x else P[ax] - hi_x)
             extra["edge_ball"] = round(out / ctx.ball["d"], 2)
         return {"v": t, "err": err, "unit": "ratio", "extra": extra}
@@ -415,7 +438,7 @@ def compute(ctx: Ctx, spec: dict) -> dict:
         err = reach * math.tan(math.radians(ang_err)) / abs(height)
         return {"v": t, "err": err, "unit": "ratio", "extra": {}}
     if k == "offset_x":
-        P, R = ctx.pt(p, spec["pt"]), ctx.pt(p, spec["ref"])
+        P, R = ctx.pt(p, spec["pt"]), ctx.ref(p, spec["ref"])
         d = ctx.ball_d()
         return {"v": (P[0] - R[0]) / d, "err": config.CP_POS_ERR_BALL, "unit": "ball", "extra": {}}
     if k == "dist":
@@ -424,11 +447,18 @@ def compute(ctx: Ctx, spec: dict) -> dict:
         d = _unit_len(ctx, p, unit)
         # 外れた向き（後ろからは +x がボールの側＝外側）。範囲の side と名前を分ける
         way = "inside" if P[0] < Q[0] else "outside"
-        return {"v": _dist(P, Q) / d, "err": config.CP_POS_ERR_BALL, "unit": unit, "extra": {"dir": way}}
+        # axis: x は左右の離れだけ（ドライバーのトップの「手元から左右にヘッド一個」）
+        gap = abs(P[0] - Q[0]) if spec.get("axis") == "x" else _dist(P, Q)
+        return {"v": gap / d, "err": config.CP_POS_ERR_BALL, "unit": unit, "extra": {"dir": way}}
     if k == "dy":
         P, R = ctx.pt(p, spec["pt"]), ctx.pt(p, spec["ref"])
         d = _unit_len(ctx, p, spec.get("unit", "ball"))
         return {"v": (R[1] - P[1]) / d, "err": config.CP_POS_ERR_BALL, "unit": spec.get("unit", "ball"), "extra": {}}
+    if k == "shaft_v":
+        v = _ang_side(ctx.pt(p, spec["a"]), ctx.pt(p, spec["b"]), int(spec.get("side", 1)))
+        if spec.get("cross") == "unknown" and v < -ang_err:
+            raise Invalid("cross")
+        return {"v": v, "err": ang_err, "unit": "deg", "extra": {}}
     if k == "ang_v":
         return {"v": _ang_v(ctx.pt(p, spec["a"]), ctx.pt(p, spec["b"])), "err": ang_err, "unit": "deg", "extra": {}}
     if k == "ang_h":
@@ -474,6 +504,20 @@ def compute(ctx: Ctx, spec: dict) -> dict:
             raise Invalid("low_visibility")
         return {"v": b / a, "err": 0.1 * b / a, "unit": "ratio", "extra": {}}
     raise Invalid("not_built", k)
+
+
+# クラブの線の向きを使う測り方（線が短く写ると、1画素で角度が大きく動く）
+CLUB_LINE_KINDS = ("shaft_v", "ang_v", "ang_h", "ang_v_signed", "ang_between", "line_change", "butt_dir")
+
+
+def _club_line_ok(ctx: "Ctx", p: str) -> None:
+    f = ctx.frame(p)
+    if "grip" not in f.taps or "head" not in f.taps:
+        raise Invalid("no_tap")
+    n = _dist(f.taps["grip"], f.taps["head"])
+    need = config.CP_MIN_CLUB_LINE_BALL * ctx.ball["d"] if ctx.ball else config.CP_MIN_CLUB_LINE_L * max(f.torso() if f.has_pose else 0.0, 1.0)
+    if n < need:
+        raise Invalid("club_short", "クラブが画面の上で短く写っていて、向きを測れない")
 
 
 def _spec_ps(spec: dict | None) -> list[str]:
@@ -585,6 +629,8 @@ def _fault_for(it: dict, res: str, extra: dict, part_fault: str | None = None) -
     fs = it.get("faults") or []
     if part_fault:
         return part_fault
+    if extra.get("fault_id") and any(f["id"] == extra["fault_id"] for f in fs):
+        return extra["fault_id"]
     want = {"out_lo": "lo", "out_hi": "hi"}.get(res)
     if extra.get("dir"):
         for f in fs:
@@ -611,10 +657,18 @@ def _measure_item(ctx: Ctx, it: dict, cam: dict, scale: dict) -> dict:
     for p in ps:
         ctx.frame(p)
     unit = r.get("unit")
-    if cam.get("ok") is False and (unit == "deg" or spec.get("kind") in ("butt_dir",) or any(pp.get("kind", "").startswith("ang") for pp in spec.get("parts") or [])):
+    angle = unit == "deg" or spec.get("kind") in ("butt_dir",) or any(pp.get("unit") == "deg" or pp.get("kind", "").startswith(("ang", "joint", "shaft")) for pp in spec.get("parts") or [])
+    # 角度はガイドのカメラの合わせ方に通ったときだけ（§5.4）。確かめられなかったとき（構えのコマ・体の点が無い）も通ったことにしない
+    if angle and cam.get("ok") is False:
         raise Invalid("camera")
-    if ctx.fps and ctx.fps < config.CP_MIN_FPS_CLUB and _uses_club(spec) and any(p in ("P5", "P5_5", "P6", "P6_5", "P7") for p in ps):
-        raise Invalid("fps")
+    if angle and cam.get("ok") is None:
+        raise Invalid("camera_unknown")
+    # 下ろし〜当たる瞬間のクラブはコマの速さが要る（§6.2）。速さが分からないときも足りたことにしない
+    if _uses_club(spec) and any(p in ("P5", "P5_5", "P6", "P6_5", "P7") for p in ps):
+        if not ctx.fps:
+            raise Invalid("fps_unknown")
+        if ctx.fps < config.CP_MIN_FPS_CLUB:
+            raise Invalid("fps")
     if "ball" in how and scale.get("ok") is False:
         raise Invalid("scale")
     ctx.used_pose = ctx.used_tap = ctx.used_ball = False
@@ -637,10 +691,10 @@ def _measure_item(ctx: Ctx, it: dict, cam: dict, scale: dict) -> dict:
             res = outs[0][0]
         elif all(x[0] == "in" for x in results):
             res = "in"
-        elif any(x[0] == "invalid" for x in results):
-            raise Invalid(next(x[1] for x in results if x[0] == "invalid"))
-        else:
+        elif any(x[0] == "border" for x in results):
             res = "border"
+        else:
+            raise Invalid(next(x[1] for x in results if x[0] == "invalid"))
         value = {"q": r.get("quantity"), "parts": values}
         fault = faults[0] if faults else None
     else:
@@ -648,13 +702,22 @@ def _measure_item(ctx: Ctx, it: dict, cam: dict, scale: dict) -> dict:
         side = r.get("side", "both")
         res = judge_value(c["v"], c["err"], r.get("lo"), r.get("hi"), side) if it.get("judge") != "reference" else "reference"
         value = {"q": r.get("quantity"), "v": round(c["v"], 2), "err": round(c["err"], 2), "unit": c["unit"], "lo": r.get("lo"), "hi": r.get("hi"), "side": side}
-        value.update(c.get("extra") or {})
+        value.update({k: v for k, v in (c.get("extra") or {}).items() if k != "fault_id"})
+        # 範囲の外にするのに、位置の条件も要る基準（ノート p102〜118: 腕とクラブが25以上離れ「かつ」先が内側）。
+        # 角度だけ外れて位置の条件がそろわないときは、ガイドに基準の無い組み合わせなので判断できない
+        need = spec.get("out_if")
+        if need and res.startswith("out"):
+            a, b = ctx.pt(spec["p"], need["pt"]), ctx.pt(spec["p"], need["of"])
+            gap = (b[0] - a[0]) if need.get("side") == "-x" else (a[0] - b[0])
+            value["out_if_ball"] = round(gap / ctx.ball["d"], 2) if ctx.ball else None
+            if gap <= ctx.pos_err_px(spec["p"]):
+                raise Invalid("combo", need.get("why", ""))
         fault = _fault_for(it, res, c.get("extra") or {}) if res.startswith("out") else None
     basis = TAP_BASIS if ctx.used_tap else POSE_BASIS
     return {"res": res, "value": value, "basis": basis, "fault": fault}
 
 
-def judge_item(ctx: Ctx, it: dict, cam: dict, scale: dict, vision_ans: dict | None = None, ref_club: bool = False) -> dict:
+def judge_item(ctx: Ctx, it: dict, cam: dict, scale: dict, vision_ans: dict | None = None, ref_club: bool = False, view_bad: bool = False) -> dict:
     """1スイング × 1項目の判定（§6.6 の表）。"""
     out: dict[str, Any] = {"id": it["id"], "state": "unknown", "fault": None, "basis": "none", "reason": "", "value": None,
                            "p": it.get("p"), "frames": [p for p in _spec_ps((it.get("measure") or {}).get("spec")) if p] or ([it["p"]] if it.get("p") in ctx.frames else [])}
@@ -672,6 +735,9 @@ def judge_item(ctx: Ctx, it: dict, cam: dict, scale: dict, vision_ans: dict | No
         return unknown("unclear", it.get("needs_note", ""))
     if it.get("view") in ("dtl", "fo") and it["view"] != ctx.view:
         return unknown(f"view_{it['view']}")
+    if view_bad and it.get("view") in ("dtl", "fo"):
+        # 構えの形が選んだ向きと食い違う（§6.1）。向きがずれたまま測った値は、どの向きの基準にも当てはまらない
+        return unknown("view_mismatch", "構えの形が、選んだ向きと違って見えます")
     m = it.get("measure") or {}
     spec = m.get("spec")
     if spec and spec.get("kind") == "derive":
@@ -734,12 +800,14 @@ def measure_swing(swing: dict, vision: dict | None = None) -> dict:
         cls = swing["club_class"]
     cam = camera_check(ctx)
     scale = scale_check(ctx)
+    vc = view_check(ctx)
+    view_bad = vc.get("ok") is False
     res = []
     for it in items():
         ok, ref = applies(it, cls, num, swing.get("club"))
         if not ok:
             continue
-        res.append(judge_item(ctx, it, cam, scale, vision.get(it["id"]), ref_club=ref))
+        res.append(judge_item(ctx, it, cam, scale, vision.get(it["id"]), ref_club=ref, view_bad=view_bad))
     # まとめる項目（pow.width など）: 元の項目がどれか範囲の外なら外、全部中なら中
     by = {r["id"]: r for r in res}
     for r in res:
@@ -749,17 +817,21 @@ def measure_swing(swing: dict, vision: dict | None = None) -> dict:
             continue
         src = (spec.get("from") or {}).get(cls if cls in ("iron", "driver") else "iron", [])
         got = [by[s] for s in src if s in by]
-        if got and any(g["state"] == "out_range" for g in got):
-            r.update(state="out_range", reason="", basis=next(g["basis"] for g in got if g["state"] == "out_range"), fault=(it["faults"][0]["id"] if it["faults"] else None),
-                     derived_from=[g["id"] for g in got])
-        elif got and len(got) == len(src) and all(g["state"] == "in_range" for g in got):
-            r.update(state="in_range", reason="", basis=got[0]["basis"], derived_from=[g["id"] for g in got])
+        # まとめる向きの外れだけを数える（{lead}腕が突っ張りすぎ・{trail}肘が開いているのは「輪が小さい」ではない）
+        want = set(spec.get("faults") or [])
+        hit = [g for g in got if g["state"] == "out_range" and (not want or g.get("fault") in want)]
+        judged = [g for g in got if g["state"] in ("in_range", "out_range")]
+        if hit:
+            r.update(state="out_range", reason="", basis=hit[0]["basis"], fault=(it["faults"][0]["id"] if it["faults"] else None),
+                     derived_from=[g["id"] for g in hit])
+        elif got and len(judged) == len(src):
+            r.update(state="in_range", reason="", basis=judged[0]["basis"], derived_from=[g["id"] for g in got])
     for r in res:
         if r["state"] == "unknown":
             r["reason_text"] = REASON_TEXT.get(r["reason"], r["reason"])
     return {
-        "catalog_version": version(), "judge_version": config.JUDGE_VERSION, "view": ctx.view, "handedness": ctx.hand,
-        "club_class": cls, "club_number": num, "fps": ctx.fps, "camera": cam, "scale": scale, "view_check": view_check(ctx),
+        "catalog_version": version(), "judge_version": config.JUDGE_VERSION, "stamp": stamp(), "view": ctx.view, "handedness": ctx.hand,
+        "club_class": cls, "club_number": num, "fps": ctx.fps, "camera": cam, "scale": scale, "view_check": vc,
         "ball": bool(ctx.ball), "items": res,
     }
 

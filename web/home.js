@@ -14,6 +14,11 @@ const Home = (() => {
   function homeState(h, local = {}) {
     if (local.videoPending) return { key: "video_resume", heading: "動画の処理が途中です", primary: { label: "続きから処理する", href: "#/record" } };
     if (local.setupMismatch) return { key: "setup", heading: "撮り方を確かめたい", primary: { label: "撮り方を合わせる", href: "#/record" } };
+    // 球は無く、動画のチェックだけがある（段2a）: 「ようこそ」のままにせず、動画のチェックへ
+    if (h && !h.sessions_with_shots && h.latest_video) {
+      const v = h.latest_video;
+      return { key: "video", heading: "動画のチェックがあります", video: v, primary: { label: "チェックを見る", href: `#/session/${v.session_id}/check` } };
+    }
     if (!h || !h.sessions_with_shots) return { key: "first", heading: "ようこそ", primary: { label: "最初の記録を入れる", href: "#/record" } };
     const p = h.plan;
     if (p) {
@@ -110,6 +115,12 @@ const Home = (() => {
         <p class="t-headline" data-home="first" style="margin:var(--s1) 0 var(--s3)">${esc(f.title)}</p>
         ${f.cue ? `<div class="focuscard"><span class="label">打つときに意識すること</span><p class="t-headline" data-home="one" style="margin:var(--s1) 0 0">${esc(f.cue)}</p></div>` : ""}</section>`;
     }
+    if (st.key === "video") {
+      const need = Math.max(0, 3 - (st.video.n_same_view || 0));
+      body += `<section class="block" aria-labelledby="h-issue"><h2 id="h-issue" class="label">いまの課題</h2>
+        <p class="t-headline" data-home="first" data-video-focus style="margin:var(--s1) 0 var(--s2)">${need ? `同じ向きで、もう${["", "一本", "二本"][need]}選ぶと課題が決まります` : "チェックで「まずここ」を見られます"}</p>
+        <p class="sub">球の記録（計測器の表）を入れると、球の結果も並べて見られます。</p></section>`;
+    }
     if (st.key === "measure") {
       body += `<p class="sub" data-home="finding">この課題は、いまの記録だけでは直し方を決められません。診断で、先に測れるようにする方法を見られます。</p>`;
     } else if (st.key === "finding") {
@@ -177,6 +188,19 @@ const Home = (() => {
     if (!alive()) return;
     if (shown && shown === JSON.stringify(h)) return; // 写しと同じなら描き直さない（ちらつかせない）
     await drawFigure(el, draw(el, h, fromCopy), alive);
+    videoFocus(el, h, alive);
+  }
+
+  // 動画だけの日は、チェックの「まずここ」の文を後から入れる（ホームの API では課題を選ばない。選ぶのはチェックと同じ関数）
+  async function videoFocus(el, h, alive) {
+    const slot = el.querySelector("[data-video-focus]");
+    if (!slot || !h || !h.latest_video || !window.Checks) return;
+    try {
+      const d = await Checks.load(h.latest_video.session_id);
+      const c = d && d.checks;
+      const f = c && (c.items || []).find((x) => x.focus);
+      if (f && alive() && slot.isConnected) slot.textContent = f.fault_label || f.title;
+    } catch (e) { console.warn(e); }
   }
 
   App.route("/home", render, { tab: "home" });

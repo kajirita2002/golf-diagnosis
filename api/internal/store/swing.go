@@ -97,33 +97,58 @@ func (s *Store) ListSwings(ctx context.Context, sessionID int64) ([]model.Swing,
 	return out, rows.Err()
 }
 
-// UpdateSwingInput はあとから直せる欄（ボールのタップ・写っていない P・番手）。nil は変えない。
+// UpdateSwingInput はあとから直せる欄（ボールのタップ・写っていない P・番手・向き）。nil は変えない。
 type UpdateSwingInput struct {
 	Ball    json.RawMessage
 	Missing *[]string
 	Club    *string
 	Class   *string
+	View    *string
 }
 
-// UpdateSwing はボールのタップ・写っていない P・番手を直す。
+// UpdateSwing はボールのタップ・写っていない P・番手・向きを直す。直したら判定の版を空に戻す
+// （同じトランザクションで。このあとの測り直しが失敗しても、次に一覧を開いたときに測り直す）。
 func (s *Store) UpdateSwing(ctx context.Context, id int64, in UpdateSwingInput) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	changed := false
 	if in.Ball != nil {
-		if _, err := s.db.ExecContext(ctx, `UPDATE {s}swings SET taps_json=? WHERE id=? AND deleted_at IS NULL`, rawOr(in.Ball, "[]"), id); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE {s}swings SET taps_json=? WHERE id=? AND deleted_at IS NULL`, rawOr(in.Ball, "[]"), id); err != nil {
 			return err
 		}
+		changed = true
 	}
 	if in.Missing != nil {
 		b, _ := json.Marshal(nonNil(*in.Missing))
-		if _, err := s.db.ExecContext(ctx, `UPDATE {s}swings SET missing_json=? WHERE id=? AND deleted_at IS NULL`, string(b), id); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE {s}swings SET missing_json=? WHERE id=? AND deleted_at IS NULL`, string(b), id); err != nil {
 			return err
 		}
+		changed = true
 	}
 	if in.Club != nil && in.Class != nil {
-		if _, err := s.db.ExecContext(ctx, `UPDATE {s}swings SET club=?, club_class=? WHERE id=? AND deleted_at IS NULL`, *in.Club, *in.Class, id); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE {s}swings SET club=?, club_class=? WHERE id=? AND deleted_at IS NULL`, *in.Club, *in.Class, id); err != nil {
+			return err
+		}
+		changed = true
+	}
+	if in.View != nil {
+		if *in.View != "dtl" && *in.View != "fo" {
+			return fmt.Errorf("view は dtl か fo")
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE {s}swings SET view=? WHERE id=? AND deleted_at IS NULL`, *in.View, id); err != nil {
+			return err
+		}
+		changed = true
+	}
+	if changed {
+		if _, err := tx.ExecContext(ctx, `UPDATE {s}swings SET cp_catalog_version='' WHERE id=?`, id); err != nil {
 			return err
 		}
 	}
-	return nil
+	return tx.Commit()
 }
 
 // DeleteSwing は論理削除（30日後に消す。いまは印を付けるだけ）。
@@ -182,6 +207,10 @@ func (s *Store) PutSwingFrames(ctx context.Context, swingID int64, frames []mode
 			swingID, f.Checkpoint, f.T, f.Frame, f.Source, rawOr(f.Landmarks, "[]"), rawOr(f.Taps, "{}"), th); err != nil {
 			return err
 		}
+	}
+	// コマかタップが変わったので、前の判定は古い（このあとの測り直しが失敗しても、次に一覧を開いたときに測り直す）
+	if _, err := tx.ExecContext(ctx, `UPDATE {s}swings SET cp_catalog_version='' WHERE id=?`, swingID); err != nil {
+		return err
 	}
 	return tx.Commit()
 }

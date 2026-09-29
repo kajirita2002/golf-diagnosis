@@ -172,6 +172,30 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	out["sessions_with_shots"] = withShots
+	// 動画のスイングがある最新の記録（球が無く動画だけの日でも、ホームを「ようこそ」のままにしない）。
+	// 数えるのは測れたスイングだけ（送り直しの途中で残った、コマの無いスイングは数えない）
+	for i := range ss {
+		sws, err := s.Store.ListSwings(r.Context(), ss[i].ID)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		n, views := 0, map[string]int{}
+		for _, sw := range sws {
+			if len(sw.Measure) > 0 {
+				n++
+				views[sw.View]++
+			}
+		}
+		if n > 0 {
+			most := 0
+			for _, c := range views {
+				most = max(most, c)
+			}
+			out["latest_video"] = map[string]any{"session_id": ss[i].ID, "date": ss[i].Date, "n_swings": n, "n_same_view": most}
+			break
+		}
+	}
 	if latest != nil {
 		out["latest"] = map[string]any{"session_id": latest.ID, "date": latest.Date, "location": latest.Location, "n_shots": latest.NShots}
 	}

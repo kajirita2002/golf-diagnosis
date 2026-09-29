@@ -143,7 +143,7 @@ const Record = (() => {
       <label class="field" data-loc-wrap><span>場所（任意）</span><input data-loc placeholder="例: 練習場" autocomplete="off"></label>
       <p class="caption" data-loc-fixed hidden></p>
       <a class="card vidcard block" data-video href="#/video/${esc(date)}">${icon("video")}<span class="grow1"><b>動画を入れる</b>
-        <span class="caption">後ろから・正面から。端末の中で処理し、送りません</span></span>${icon("chevron-right", "chev")}</a>
+        <span class="caption">後ろから・正面から。動画は送りません（送るのは選んだコマの小さな写真と体の点だけ）</span></span>${icon("chevron-right", "chev")}</a>
       <section class="card block" aria-labelledby="h-tm">
         <h2 id="h-tm">${canRead ? "TrackMan のスクショ" : "TrackMan の表を入れる"}</h2>
         ${shotPart}

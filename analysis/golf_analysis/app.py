@@ -162,7 +162,13 @@ def _client():
 def healthz() -> dict:
     # plan_version / engine_version は Go が保存した評価の版と比べる（版が変われば作り直す。§8.5）
     return {"ok": True, "engine_version": config.ENGINE_VERSION, "plan_version": config.PLAN_VERSION,
-            "checkpoints_version": checkpoints.version(), "judge_version": config.JUDGE_VERSION}
+            "checkpoints_version": checkpoints.version(), "judge_version": config.JUDGE_VERSION, "checkpoints_stamp": checkpoints.stamp()}
+
+
+@app.get("/v1/checkpoints/stamp")
+def checkpoints_stamp() -> dict:
+    """測った条件の指紋（カタログの中身と判定の版）。Go が古い判定を測り直すかどうかに使う。"""
+    return {"stamp": checkpoints.stamp(), "catalog_version": checkpoints.version(), "judge_version": config.JUDGE_VERSION}
 
 
 @app.get("/v1/checkpoints")

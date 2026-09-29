@@ -214,7 +214,6 @@ CREATE TABLE IF NOT EXISTS {s}llm_jobs (
 	updated_at       TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS llm_jobs_hash ON {s}llm_jobs(kind, input_hash);
--- 1日（UTC）・1種類ごとの使った量。上限（LLM_DAILY_LIMIT_*）はここの calls で数える。
 -- 動画のスイング（docs/DESIGN_v2.md §13.2・DESIGN_coaching.md §10.3 の形）。動画そのものと全解像度のコマは置かない。
 -- view は カタログと同じ綴り（dtl / fo）。姿勢の時系列（series_gz）は自動の取り出し（段2b）から入る。
 CREATE TABLE IF NOT EXISTS {s}swings (
@@ -268,6 +267,7 @@ CREATE TABLE IF NOT EXISTS {s}swing_checks (
 	created_at       TEXT NOT NULL,
 	PRIMARY KEY (swing_id, item_id, catalog_version)
 );
+-- 1日（UTC）・1種類ごとの使った量。上限（LLM_DAILY_LIMIT_*）はここの calls で数える。
 CREATE TABLE IF NOT EXISTS {s}llm_usage (
 	day            TEXT NOT NULL,
 	kind           TEXT NOT NULL,

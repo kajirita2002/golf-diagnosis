@@ -259,9 +259,11 @@ def check_home_states(page, errors: list[str]) -> None:
         ("passed", {"sessions_with_shots": 1, "plan": {"next_index": 3, "last": {"progress": {"advance": {"ok": True}, "next_action": "check_retention"}}}}, {}),
         ("video_resume", {"sessions_with_shots": 1}, {"videoPending": True}),
         ("setup", {"sessions_with_shots": 1}, {"setupMismatch": True}),
+        # 球は無く動画だけ（段2a のレビュー）: 「ようこそ」のままにしない
+        ("video", {"sessions_with_shots": 0, "latest_video": {"session_id": 4, "n_swings": 1, "n_same_view": 1}}, {}),
     ]
     want_label = {"first": "最初の記録を入れる", "finding": "診断を見る", "measure": "診断を見る", "found": "この一点で練習を組む", "plan": "練習を始める",
-                  "stop": "続けるか選ぶ", "passed": "次の項目を見る", "video_resume": "続きから処理する", "setup": "撮り方を合わせる"}
+                  "stop": "続けるか選ぶ", "passed": "次の項目を見る", "video_resume": "続きから処理する", "setup": "撮り方を合わせる", "video": "チェックを見る"}
     for key, h, local in cases:
         st = page.evaluate("([h, l]) => App.homeState(h, l)", [h, local])
         if st["key"] != key or st["primary"]["label"] != want_label[key]:
@@ -1116,7 +1118,7 @@ def canvas_click(page, sel: str, x: float, y: float, w: int = SYNTH.W, h: int = 
 
 def tap_points(page, pts: list[tuple[float, float]], p: str) -> None:
     # 前のコマの画面が残っているあいだに押さないよう、見出しがそのコマになるのを待つ
-    page.wait_for_selector(f"[data-body] h2:text-matches('^{p} ')", timeout=15000)
+    page.wait_for_selector(f"[data-body] h2[data-tap-p='{p}']", timeout=15000)
     page.wait_for_selector("[data-stage] canvas.tapimg")
     for x, y in pts:
         canvas_click(page, "[data-stage] canvas.tapimg", x, y)
@@ -1166,18 +1168,34 @@ def check_video(browser, root: str, base: str, pid: int, shots_dir: str, errors:
     no_overflow(page, tag, "P を選ぶ", errors)
     targets(page, tag, "P を選ぶ", errors)
     shot(page, shots_dir, f"{tag}-2-choose")
-    for i in range(7):
+    # 区切りちょうどのコマを選ばない（各 P を映す 0.5 秒の真ん中あたり）。選ぶ前に 0.25 秒進める
+    for _ in range(15):
+        page.click('[data-mv="+1"]')
+    # 途中で「<」を押すと、選んだコマが消えることを確かめてから戻る（確かめずに捨てない）
+    page.click("[data-ok]")
+    page.click("[data-back]")
+    try:
+        page.wait_for_selector("[data-sheet=confirm].on", timeout=5000)
+        page.click("[data-sheet=confirm] [data-cancel]")
+        page.wait_for_selector("[data-sheet=confirm]", state="detached")
+    except Exception:  # noqa: BLE001
+        errors.append(f"[{tag}] 選んだコマがあるのに、戻るで確かめずに消える")
+    if "#/video" not in page.url:
+        errors.append(f"[{tag}] 戻るをやめたのに動画の画面を離れた: {page.url}")
+    page.click("[data-p=P2]")
+    for i in range(1, 7):
+        page.click('[data-mv="+0.5s"]')
+        page.wait_for_timeout(120)
         page.click("[data-ok]")
-        if i < 6:
-            page.click('[data-mv="+0.5s"]')
-            page.wait_for_timeout(120)
     page.wait_for_selector("[data-go-taps]")
     done = page.locator("[data-pchips] .pchip.done").count()
     if done != 7:
         errors.append(f"[{tag}] 選んだ P が7つにならない: {done}")
     page.click("[data-go-taps]")
-    # ボールの両端: 拡大鏡が出て、1画素のボタンで動かせる
+    # ボールの両端: 拡大鏡が出て、1画素のボタンで動かせる。一つ目を置くと、そのあたりを拡大する
     page.wait_for_selector("[data-stage] canvas.tapimg")
+    if page.evaluate("window.scrollY") > 1:
+        errors.append(f"[{tag}] タップの段が前の段のスクロール位置のまま始まる")
     box = page.locator("[data-stage] canvas.tapimg").bounding_box()
     bx, by = SYNTH.pose_json()["dtl_ball"][0]
     page.mouse.move(box["x"] + bx / SYNTH.W * box["width"], box["y"] + by / SYNTH.H * box["height"])
@@ -1186,6 +1204,9 @@ def check_video(browser, root: str, base: str, pid: int, shots_dir: str, errors:
         errors.append(f"[{tag}] 押しているあいだ拡大鏡が出ない")
     shot(page, shots_dir, f"{tag}-3-loupe", full=False)
     page.mouse.up()
+    page.wait_for_timeout(100)
+    if page.get_attribute("[data-z='3']", "aria-pressed") != "true":
+        errors.append(f"[{tag}] ボールの一つ目を置いても拡大しない")
     pts = json.loads(page.get_attribute("[data-body]", "data-pts") or "{}")
     before = pts.get("b1")
     page.click("[data-sel] [data-pi='0']")
@@ -1194,6 +1215,8 @@ def check_video(browser, root: str, base: str, pid: int, shots_dir: str, errors:
     if not before or not pts.get("b1") or pts["b1"][0] != before[0] + 1 or pts["b1"][1] != before[1]:
         errors.append(f"[{tag}] 1画素のボタンで点が動かない: {before} → {pts.get('b1')}")
     page.click('[data-nd="-1,0"]')
+    if page.locator("[data-done][disabled]").count() != 1 or "右の端" not in page.inner_text("[data-need]"):
+        errors.append(f"[{tag}] 決定が押せない理由（あと何を押すか）が出ない: {page.inner_text('[data-need]')!r}")
     targets(page, tag, "タップ", errors)
     no_overflow(page, tag, "タップ", errors)
     page.click("[data-sel] [data-pi='1']")
@@ -1205,11 +1228,48 @@ def check_video(browser, root: str, base: str, pid: int, shots_dir: str, errors:
     tap_points(page, [taps["P2"]["grip"], taps["P2"]["head"]], "P2")
     page.wait_for_selector("[data-more]")
     page.click("[data-more]")
+    # 送るのが入力の誤り（400）で断られたら、点を置き直す道がある。つながらない（503）なら同じスイングへ送り直す（二本にしない）
+    fail = {"code": 400}
+
+    def fake_fail(route):
+        if fail["code"] and route.request.method == "PUT":
+            code, fail["code"] = fail["code"], 0
+            route.fulfill(status=code, content_type="application/json",
+                          body=json.dumps({"error": "ball の点がコマの外です" if code == 400 else "分析のサービスが止まっています"}))
+        else:
+            route.continue_()
+    page.route("**/v1/swings/*/frames", fake_fail)
     for p in ("P1", "P3", "P4", "P5", "P6", "P7"):
         tap_points(page, [taps[p]["grip"], taps[p]["head"]], p)
+    try:
+        page.wait_for_selector("[data-fix]", timeout=30000)
+        shot(page, shots_dir, f"{tag}-3-send-400")
+        page.click("[data-fix]")
+        page.wait_for_selector("[data-body] h2[data-tap-p='P1']", timeout=15000)
+        page.click("[data-done]")
+        page.wait_for_selector("[data-body] h2[data-tap-p='P2']", timeout=15000)
+        page.click("[data-done]")
+        page.wait_for_selector("[data-send]")
+        fail["code"] = 503
+        page.click("[data-send]")
+        page.wait_for_selector("[data-again]", timeout=30000)
+        shot(page, shots_dir, f"{tag}-3-send-503")
+        if len(call("GET", f"{base}/sessions/{sid}/swings")) != 1:
+            errors.append(f"[{tag}] 送り直す前にスイングが二本以上ある")
+        page.click("[data-again]")
+    except Exception as e:  # noqa: BLE001
+        errors.append(f"[{tag}] 送れなかったときの道（点を置き直す・もう一度送る）が通らない: {e}")
     page.wait_for_function(f"location.hash === '#/session/{sid}/check'", timeout=60000)
-    page.wait_for_selector("[data-summary]", timeout=30000)
+    page.unroute("**/v1/swings/*/frames")
+    try:
+        # 一覧を開くときに測り直すことがあるので、待ちは長めに取る
+        page.wait_for_selector("[data-summary]", timeout=60000)
+    except Exception:
+        errors.append(f"[{tag}] 送り直したあとのチェックの画面に見出しが出ない: {page.inner_text('#view')[:300]!r}")
+        return
     page.wait_for_load_state("networkidle")
+    if len(call("GET", f"{base}/sessions/{sid}/swings")) != 1:
+        errors.append(f"[{tag}] 送り直しで同じスイングが増えた: {len(call('GET', f'{base}/sessions/{sid}/swings'))}本")
     # 送ったもの: 動画そのものは送らない（大きな送信が無い）。全解像度のコマも送らない（Go が長辺 360px を超える画像を断る）
     big = [x for x in sent if x[2] > 3 * 1024 * 1024]
     if big:
@@ -1225,6 +1285,21 @@ def check_video(browser, root: str, base: str, pid: int, shots_dir: str, errors:
         errors.append(f"[{tag}] P1〜P7 のコマ・点・サムネイルが揃わない: {sorted(fr)}")
     if abs(fr["P2"]["taps"]["head"][0] - taps["P2"]["head"][0]) > 3:
         errors.append(f"[{tag}] P2 のクラブの先のタップがずれて届いた: {fr['P2']['taps']}")
+    # サムネイルが、その P のコマか（P1 だけにある「構えのクラブの先」の所の色で見分ける。区切りのコマを取ると前の P の絵になる）
+    blue = page.evaluate("""async ([sid, x, y]) => {
+      const out = {};
+      for (const p of ['P1', 'P2', 'P3']) {
+        const img = new Image(); img.src = `/v1/swings/${sid}/thumbs/${p}`; await img.decode();
+        const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight;
+        const g = c.getContext('2d'); g.drawImage(img, 0, 0);
+        // クラブの先は縮めると二画素ほどなので、平均ではなく窓の中でいちばん青い所を見る（圧縮のにじみで平均は薄まる）
+        const k = c.width / 1280, d = g.getImageData(Math.round(x * k) - 4, Math.round(y * k) - 4, 9, 9).data;
+        let s = -255; for (let i = 0; i < d.length; i += 4) s = Math.max(s, d[i + 2] - d[i]);
+        out[p] = s;
+      }
+      return out; }""", [sw["id"], taps["P1"]["head"][0], taps["P1"]["head"][1]])
+    if not (blue["P1"] > blue["P2"] + 20 and blue["P1"] > blue["P3"] + 20):
+        errors.append(f"[{tag}] サムネイルがその P のコマになっていない（P1 のクラブの先の色）: {blue}")
     # チェック一覧（1本だけ）: まずここは出さず、理由を書く。P のチップ7つ。範囲の中は畳む
     if page.locator("[data-pstrip] [data-pchip]").count() != 7:
         errors.append(f"[{tag}] チェックの P のチップが7つでない")
@@ -1232,9 +1307,13 @@ def check_video(browser, root: str, base: str, pid: int, shots_dir: str, errors:
         errors.append(f"[{tag}] 一本だけのときに、課題にしない理由が出ない")
     if page.locator("details[data-fold=in][open]").count():
         errors.append(f"[{tag}] 範囲の中が畳まれていない")
-    unk = page.inner_text("details[data-fold=unknown] > summary")
+    unk = page.text_content("details[data-fold=unknown] [data-unk-why]") or ""
     if "見た目の評価はまだ" not in unk or "正面から撮ると見られます" not in unk:
         errors.append(f"[{tag}] 判断できないの理由の束ねが違う: {unk}")
+    if "件" in page.inner_text("[data-summary]"):
+        errors.append(f"[{tag}] 見出しが件数になっている（言葉にする）: {page.inner_text('[data-summary]')}")
+    if not page.locator("[data-nofocus] [data-add-swing]").count():
+        errors.append(f"[{tag}] 一本だけのとき、注記の中に「あと何本選ぶ」のボタンが無い")
     plain_first(page, "#view", tag, "チェック一覧（1本）", errors)
     no_overflow(page, tag, "チェック一覧", errors)
     targets(page, tag, "チェック一覧", errors)
@@ -1292,6 +1371,76 @@ def check_video(browser, root: str, base: str, pid: int, shots_dir: str, errors:
             print("MediaPipe:", r)
     except Exception as e:  # noqa: BLE001
         errors.append(f"[{tag}] 同梱の MediaPipe が動かない: {e}")
+    ctx.close()
+
+
+PORTRAIT_JS = """async () => {
+  // 縦長の動画（スマホで一番多い撮り方）をブラウザの中で作る（本物の動画・人は使わない）
+  const c = document.createElement('canvas'); c.width = 720; c.height = 1280;
+  const g = c.getContext('2d');
+  const rec = new MediaRecorder(c.captureStream(30), { mimeType: 'video/webm' });
+  const chunks = []; rec.ondataavailable = (e) => chunks.push(e.data);
+  rec.start(100);
+  const t0 = performance.now();
+  await new Promise((ok) => { const tick = () => { const t = (performance.now() - t0) / 1000;
+    g.fillStyle = '#eef2ec'; g.fillRect(0, 0, 720, 1280); g.fillStyle = '#78966a'; g.fillRect(0, 1150, 720, 130);
+    g.fillStyle = '#283230'; g.fillRect(300 + t * 20, 300, 40, 700); g.fillStyle = '#ffffff'; g.beginPath(); g.arc(520, 1150, 8, 0, 7); g.fill();
+    if (t < 2.5) requestAnimationFrame(tick); else ok(); }; tick(); });
+  rec.stop(); await new Promise((ok) => { rec.onstop = ok; });
+  const buf = new Uint8Array(await new Blob(chunks, { type: 'video/webm' }).arrayBuffer());
+  let s = ''; for (let i = 0; i < buf.length; i += 8192) s += String.fromCharCode(...buf.subarray(i, i + 8192));
+  return btoa(s);
+}"""
+
+
+def check_video_portrait(browser, root: str, pid: int, shots_dir: str, errors: list[str]) -> None:
+    """縦長の動画・360px: 選ぶボタンが動画の直下に見える・タップの絵の全体が枠に収まる・点がコマの外に出ない（段2a のレビュー）。"""
+    tag = "video-portrait"
+    ctx = browser.new_context(viewport={"width": 360, "height": 780}, service_workers="block", has_touch=True)
+    ctx.add_init_script(f"try {{ localStorage.setItem('golf.player', '{int(pid)}'); }} catch (e) {{}}")
+    page = ctx.new_page()
+    page.on("pageerror", lambda e: errors.append(f"[{tag}] JS エラー: {e}"))
+    goto(page, root, "/video/2026-09-25", "[data-file]")
+    import base64 as _b64
+    data = _b64.b64decode(page.evaluate(PORTRAIT_JS))
+    page.set_input_files("[data-file]", {"name": "portrait.webm", "mimeType": "video/webm", "buffer": data})
+    page.wait_for_selector("[data-vframe] video", timeout=30000)
+    page.wait_for_timeout(300)
+    ok = page.evaluate("(() => { const r = document.querySelector('[data-ok]').getBoundingClientRect(); return [r.top, r.bottom, innerHeight]; })()")
+    if ok[1] > ok[2]:
+        errors.append(f"[{tag}] 縦長の動画で「このコマでよい」が画面の外にある: {ok}")
+    chips = page.evaluate("(() => { const e = document.querySelector('[data-pchips]'); return [e.scrollWidth, e.clientWidth]; })()")
+    if chips[0] > chips[1] + 1:
+        errors.append(f"[{tag}] P のチップが横に隠れている: {chips}")
+    no_overflow(page, tag, "形を選ぶ", errors)
+    targets(page, tag, "形を選ぶ", errors)
+    shot(page, shots_dir, f"{tag}-choose", full=False)
+    page.click("[data-ok]")
+    page.click('[data-mv="+0.5s"]')
+    page.wait_for_timeout(150)
+    page.click("[data-ok]")
+    for _ in range(5):
+        page.click("[data-miss]")
+    page.wait_for_selector("[data-go-taps]")
+    page.click("[data-go-taps]")
+    page.wait_for_selector("[data-stage] canvas.tapimg")
+    page.wait_for_timeout(200)
+    fit = page.evaluate("(() => { const c = document.querySelector('[data-stage] canvas.tapimg').getBoundingClientRect(); const w = document.querySelector('[data-wrap]').getBoundingClientRect(); return [c.height, w.height, c.bottom, innerHeight]; })()")
+    if fit[0] > fit[1] + 1:
+        errors.append(f"[{tag}] 一倍のタップの絵が枠に収まらない（ボールのある下の端が隠れる）: {fit}")
+    # 指を絵の外まで滑らせても、点はコマの中に止まる
+    box = page.locator("[data-stage] canvas.tapimg").bounding_box()
+    page.mouse.move(box["x"] + box["width"] * 0.5, box["y"] + box["height"] * 0.5)
+    page.mouse.down()
+    page.mouse.move(box["x"] + box["width"] * 0.5, box["y"] - 200, steps=4)
+    page.mouse.up()
+    w, h = page.evaluate("(() => { const c = document.querySelector('[data-stage] canvas.tapimg'); return [c.width, c.height]; })()")
+    pts = json.loads(page.get_attribute("[data-body]", "data-pts") or "{}")
+    q = pts.get("b1")
+    if not q or not (0 <= q[0] <= w - 1 and 0 <= q[1] <= h - 1):
+        errors.append(f"[{tag}] 絵の外へ滑らせた点がコマの外に残る: {q}（{w}×{h}）")
+    no_overflow(page, tag, "タップ（縦長）", errors)
+    shot(page, shots_dir, f"{tag}-taps", full=False)
     ctx.close()
 
 
@@ -1363,6 +1512,7 @@ def main() -> None:
         ctx.close()
         check_settings(browser, sv.root, sv.base, me["id"], real_id, shots_dir, errors)
         check_video(browser, sv.root, sv.base, me["id"], shots_dir, errors)
+        check_video_portrait(browser, sv.root, me["id"], shots_dir, errors)
         check_routes(browser, sv.root, me["id"], real_id, shots_dir, errors)
         check_narrative(browser, shots_dir, errors)
         browser.close()

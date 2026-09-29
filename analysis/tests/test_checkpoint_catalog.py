@@ -194,15 +194,17 @@ def test_同じ量の項目は相手が在り同じPと向きと番手():
 def test_束ねた二つは一覧で一行と一回に数える():
     sws = []
     for i in range(3):
-        r = cm.measure_swing(syn.swing("dtl", faults=("p2_inside",)))
+        r = cm.measure_swing(syn.swing("dtl", faults=("p2_inside", "p6_outside")))
         r["swing_id"] = i + 1
         sws.append(r)
     agg = cj.aggregate(sws)
     ids = [x["id"] for x in agg["items"]]
     assert "err.steep.p6" not in ids and "iron.p6.dtl.head_vs_hands" in ids
     row = next(x for x in agg["items"] if x["id"] == "iron.p6.dtl.head_vs_hands")
+    assert row["state"] == "out_range" and row["fault"] == "outside"
     assert any(a["id"] == "err.steep.p6" for a in row["also"])
-    assert agg["counts"]["out_range"] == sum(1 for x in agg["items"] if x["state"] == "out_range")
+    main = [x for x in agg["items"] if not x.get("optional") and not x.get("derived")]
+    assert agg["counts"]["out_range"] == sum(1 for x in main if x["state"] == "out_range")
 
 
 def test_ドライバーの項目の数はアイアンの位置の項目と同じ():

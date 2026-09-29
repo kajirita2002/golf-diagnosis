@@ -150,6 +150,16 @@ const Report = (() => {
     const rep = r.report, hand = rep.handedness === "L" ? "L" : "R";
     const mains = (rep.scopes || []).filter((x) => x.kind === "main" && x.gist && (x.gist.blocks || []).length);
     if (!mains.length) {
+      // 球が無く動画のスイングがある記録は、動画のチェックを先頭に出す（「球がありません」を先にしない）
+      let sws = [];
+      if (!rep.n_shots) { try { sws = await api("GET", `/v1/sessions/${sid}/swings`); } catch { sws = []; } }
+      if (!alive()) return;
+      if (sws.length) {
+        body.innerHTML = `<a class="card vidcard block" data-video-first href="#/session/${sid}/check">${icon("video")}<span class="grow1"><b>動画のチェック</b>
+            <span class="caption">スイング${lab("count", sws.length + "本")}をガイドの基準で見ています</span></span>${icon("chevron-right", "chev")}</a>
+          <p class="sub">球の記録はまだありません。計測器の表を入れると、球の解説も出ます。</p>${links}`;
+        return;
+      }
       body.innerHTML = `<div class="note">${rep.n_shots ? "この記録の球は全部「除外」になっているので、解説は作れません。一球ずつの画面で除外を外すと解説が出ます。" : "この記録には球がありません。取り込むと解説が出ます。"}</div>${links}`;
       return;
     }

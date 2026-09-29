@@ -3,6 +3,10 @@
 - 項目の状態は、判定できたスイングの**多数**で決める（同数は「スイングごとに食い違う」で判断できない）。
 - 1本しか判定できない項目は「1本だけの見立て」として出し、課題の候補にしない。
 - `same_as` で束ねた項目は相手の判定をそのまま使い、一覧で1行・範囲の外の件数で1回に数える（エラー名は札として添える）。
+  札は**外れの向きが同じときだけ**添える（シャフトが寝すぎのときに「下ろしでクラブが立つ」を添えない）。
+- まとめる項目（`measure.spec.kind == "derive"`。`pow.width` など）は元の項目の言い換えなので、課題の候補にも件数にも入れない。
+  元の行に札として添える（same_as と同じ扱い。同じ外れを2回数えない＝R2）。
+- 件数（見出し）は必須の P の項目だけで数える（任意の P8〜P10 は畳みの中で別に数える）。
 - 課題の順は点数を使わない: ドミノの順 → 同じ段ではセットアップ → 手の通り道 → 測れた → 範囲の外の回数。
   TrackMan の症状とつながる印（linked）は順番を変えない（順番はガイド、TrackMan は答え合わせ）。
 """
@@ -51,15 +55,34 @@ def aggregate(swings: list[dict], hand: str = "R", prefs: dict | None = None, sy
         out_items.append(_one(it, rs, hand, symptoms))
     by = {x["id"]: x for x in out_items}
     for target, ids in also.items():
-        if target in by:
-            by[target]["also"] = [{"id": i, "title": item_view(by_id(i), hand)["title"]} for i in ids]
+        t = by.get(target)
+        if not t:
+            continue
+        # 外れの向き（when）が札の項目の向きと同じときだけ添える
+        tw = _fault_when(by_id(target), t.get("fault"))
+        t["also"] = [{"id": i, "title": item_view(by_id(i), hand)["title"]} for i in ids
+                     if t["state"] == "out_range" and tw and tw in {f.get("when") for f in by_id(i).get("faults") or []}]
+    for x in out_items:
+        spec = ((by_id(x["id"]) or {}).get("measure") or {}).get("spec") or {}
+        if spec.get("kind") != "derive":
+            continue
+        x["derived"] = True
+        x["candidate"] = False
+        if x["state"] == "out_range":
+            want = set(spec.get("faults") or [])
+            for src in (spec.get("from") or {}).values():
+                for sid in src:
+                    s_ = by.get(sid)
+                    if s_ and s_["state"] == "out_range" and (not want or s_.get("fault") in want):
+                        s_.setdefault("also", []).append({"id": x["id"], "title": x["title"]})
     cands = [x for x in out_items if x["candidate"]]
     focus, nxt, rationale = pick_focus(cands, prefs.get("priority") == "distance")
     for x in out_items:
         x["focus"] = bool(focus and x["id"] == focus["id"])
         x["next"] = bool(nxt and x["id"] == nxt["id"])
-    counts = Counter(x["state"] for x in out_items)
-    reasons = Counter(x["reason"] for x in out_items if x["state"] == "unknown")
+    main = [x for x in out_items if not x.get("derived") and not x.get("optional")]
+    counts = Counter(x["state"] for x in main)
+    reasons = Counter(x["reason"] for x in main if x["state"] == "unknown")
     views = {sw.get("view") for sw in swings if sw.get("view")}
     return {
         "catalog_version": version(), "judge_version": config.JUDGE_VERSION,
@@ -72,6 +95,25 @@ def aggregate(swings: list[dict], hand: str = "R", prefs: dict | None = None, sy
         "neutral_note": NEUTRAL_NOTE,
         "items": sorted(out_items, key=lambda x: (x["domino_rank"], 0 if x["group"] == "setup" else 1, x["id"])),
     }
+
+
+def _fault_when(it: dict | None, fault: str | None) -> str | None:
+    for f in (it or {}).get("faults") or []:
+        if f["id"] == fault:
+            return f.get("when")
+    return None
+
+
+def _tight(value: dict | None) -> bool:
+    """範囲の幅が誤差の幅（±err）と同じくらいで、「範囲の中」と言えることがほとんど無い項目か（§5.5・R4）。"""
+    if not value:
+        return False
+    parts = value.get("parts") or [value]
+    for v in parts:
+        lo, hi, err = v.get("lo"), v.get("hi"), v.get("err")
+        if v.get("side", "both") == "both" and lo is not None and hi is not None and err is not None and (hi - lo) <= 2 * err + 0.02:
+            return True
+    return False
 
 
 def _one(it: dict, rs: list[tuple[Any, dict]], hand: str, symptoms: set[str]) -> dict:
@@ -117,6 +159,7 @@ def _one(it: dict, rs: list[tuple[Any, dict]], hand: str, symptoms: set[str]) ->
         "frames": frames[:12],
         "linked": bool(symptoms & set(it.get("l1_links") or [])),
         "conflict": any(r.get("conflict") for _, r in rs),
+        "tight": _tight(rep.get("value") if rep else None),
     })
     return v
 

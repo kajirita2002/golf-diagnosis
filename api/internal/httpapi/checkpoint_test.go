@@ -25,6 +25,8 @@ import (
 type cpFake struct {
 	measured []analysis.CheckpointSwing
 	focus    []analysis.CheckpointFocusInput
+	stamp    string // 分析サービスの指紋（空なら stamp-1）
+	failNext bool   // 次の測るを 503 にする（保存のあとに測るのが失敗した道）
 }
 
 func (f *fakeAnalyzer) Checkpoints(_ context.Context, hand model.Handedness) (json.RawMessage, error) {
@@ -35,12 +37,30 @@ func (f *fakeAnalyzer) Checkpoints(_ context.Context, hand model.Handedness) (js
 }
 
 func (f *fakeAnalyzer) CheckpointsMeasure(_ context.Context, sw analysis.CheckpointSwing) (json.RawMessage, error) {
+	if f.down || f.cp.failNext {
+		f.cp.failNext = false
+		return nil, analysis.ErrUnavailable
+	}
 	f.cp.measured = append(f.cp.measured, sw)
-	return json.RawMessage(`{"catalog_version":"checkpoints/1.0-pgag","camera":{"ok":true},"scale":{"ok":true},"items":[
+	st := f.cp.stamp
+	if st == "" {
+		st = "stamp-1"
+	}
+	return json.RawMessage(`{"catalog_version":"checkpoints/1.0-pgag","stamp":"` + st + `","camera":{"ok":true},"scale":{"ok":true},"items":[
 		{"id":"iron.p2.dtl.head_vs_hands","state":"out_range","fault":"inside","basis":"measured_tap","reason":""},
 		{"id":"iron.p1.dtl.hands","state":"in_range","basis":"measured_approx","reason":""},
 		{"id":"err.steep.p6","state":"same_as","reason":"","target":"iron.p6.dtl.head_vs_hands"},
 		{"id":"pow.turn","state":"unknown","reason":"not_in_2d"}]}`), nil
+}
+
+func (f *fakeAnalyzer) CheckpointsStamp(_ context.Context) (string, error) {
+	if f.down {
+		return "", analysis.ErrUnavailable
+	}
+	if f.cp.stamp == "" {
+		return "stamp-1", nil
+	}
+	return f.cp.stamp, nil
 }
 
 func (f *fakeAnalyzer) CheckpointsFocus(_ context.Context, in analysis.CheckpointFocusInput) (json.RawMessage, error) {
@@ -299,5 +319,74 @@ func Test参照動画を受ける保存の口は無い(t *testing.T) {
 		if resp.StatusCode != http.StatusNotFound && resp.StatusCode != http.StatusMethodNotAllowed {
 			t.Fatalf("%s が %d（動画・参照動画を受ける口を作らない）", p, resp.StatusCode)
 		}
+	}
+}
+
+// 古い判定が残らない（段2a のレビュー）: 利き手を変えた・保存のあとに測るのが失敗した・カタログを直した、のどれでも測り直す
+func Test測った条件が変われば一覧を開いたときに測り直す(t *testing.T) {
+	c := newCPEnv(t, "R")
+	id := c.swing("dtl")
+	fp := "/v1/swings/" + jsonNum(id) + "/frames"
+	frames := []map[string]any{{"checkpoint": "P1", "landmarks": lm33()}, {"checkpoint": "P2", "landmarks": lm33(), "taps": map[string]any{"grip": []float64{690, 370}, "head": []float64{640, 360}}}}
+	c.do("PUT", fp, map[string]any{"frames": frames}, 200)
+	checks := "/v1/sessions/" + jsonNum(c.sid) + "/checks"
+	c.do("GET", checks, nil, 200)
+	if n := len(c.an.cp.measured); n != 1 {
+		t.Fatalf("何も変わっていないのに測り直した: %d", n)
+	}
+	// (a) 利き手を変える
+	pid := c.do("GET", "/v1/sessions/"+jsonNum(c.sid), nil, 200)["player_id"]
+	c.do("PATCH", "/v1/players/"+jsonNum(int64(pid.(float64))), map[string]any{"handedness": "L"}, 200)
+	c.do("GET", checks, nil, 200)
+	if n := len(c.an.cp.measured); n != 2 || c.an.cp.measured[1].Handedness != model.LeftHanded {
+		t.Fatalf("利き手を変えても測り直さない: %d", n)
+	}
+	// (b) タップを直したあと測るのが失敗しても、タップは残り、次に開いたときに新しいタップで測る
+	c.an.cp.failNext = true
+	c.do("PUT", "/v1/swings/"+jsonNum(id)+"/taps", map[string]any{"taps": map[string]any{"P2": map[string]any{"grip": []float64{690, 370}, "head": []float64{692, 368}}}}, 503)
+	c.do("GET", checks, nil, 200)
+	last := c.an.cp.measured[len(c.an.cp.measured)-1]
+	if !strings.Contains(string(last.Frames["P2"]), `"head":[692,368]`) {
+		t.Fatalf("直したタップで測り直していない: %s", last.Frames["P2"])
+	}
+	n := len(c.an.cp.measured)
+	// (c) 版の文字列を変えずにカタログを直した（分析サービスの指紋だけが変わる）
+	c.an.cp.stamp = "stamp-2"
+	c.do("GET", checks, nil, 200)
+	if len(c.an.cp.measured) != n+1 {
+		t.Fatal("カタログを直しても測り直さない")
+	}
+	c.do("GET", checks, nil, 200)
+	if len(c.an.cp.measured) != n+1 {
+		t.Fatal("指紋が同じなのに毎回測り直している")
+	}
+}
+
+func Test向きを直すと測り直す(t *testing.T) {
+	c := newCPEnv(t, "R")
+	id := c.swing("fo")
+	c.do("PUT", "/v1/swings/"+jsonNum(id)+"/frames", map[string]any{"frames": []map[string]any{{"checkpoint": "P1", "landmarks": lm33()}}}, 200)
+	out := c.do("PATCH", "/v1/swings/"+jsonNum(id), map[string]any{"view": "dtl"}, 200)
+	if out["swing"].(map[string]any)["view"] != "dtl" || c.an.cp.measured[len(c.an.cp.measured)-1].View != "dtl" {
+		t.Fatalf("向きを直したあと: %v", out["swing"])
+	}
+	c.do("PATCH", "/v1/swings/"+jsonNum(id), map[string]any{"view": "side"}, 400)
+}
+
+// 球が無く動画だけの記録: ホームが「ようこそ」のままにならないよう、動画のある最新の記録を返す（測れたスイングだけ数える）
+func Testホームは動画だけの記録も返す(t *testing.T) {
+	c := newCPEnv(t, "R")
+	pid := int64(c.do("GET", "/v1/sessions/"+jsonNum(c.sid), nil, 200)["player_id"].(float64))
+	c.swing("dtl") // コマを送っていない（送り直しの途中で残ったもの）は数えない
+	h := c.do("GET", "/v1/players/"+jsonNum(pid)+"/home", nil, 200)
+	if h["latest_video"] != nil {
+		t.Fatalf("測れていないスイングを数えた: %v", h["latest_video"])
+	}
+	id := c.swing("dtl")
+	c.do("PUT", "/v1/swings/"+jsonNum(id)+"/frames", map[string]any{"frames": []map[string]any{{"checkpoint": "P1", "landmarks": lm33()}}}, 200)
+	h = c.do("GET", "/v1/players/"+jsonNum(pid)+"/home", nil, 200)
+	v, _ := h["latest_video"].(map[string]any)
+	if v == nil || int64(v["session_id"].(float64)) != c.sid || v["n_swings"].(float64) != 1 || h["sessions_with_shots"].(float64) != 0 {
+		t.Fatalf("動画だけの記録: %v", h)
 	}
 }

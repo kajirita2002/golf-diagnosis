@@ -391,6 +391,26 @@ func (c *Client) Checkpoints(ctx context.Context, hand model.Handedness) (json.R
 	return c.do(req)
 }
 
+// CheckpointsStamp は測った条件のうち分析サービスの側の指紋（カタログの中身と判定の版）。
+// Go はこれと利き手・向き・コマとタップをまとめた指紋をスイングに残し、違えば測り直す。
+func (c *Client) CheckpointsStamp(ctx context.Context) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/v1/checkpoints/stamp", nil)
+	if err != nil {
+		return "", err
+	}
+	raw, err := c.do(req)
+	if err != nil {
+		return "", err
+	}
+	var v struct {
+		Stamp string `json:"stamp"`
+	}
+	if err := json.Unmarshal(raw, &v); err != nil || v.Stamp == "" {
+		return "", fmt.Errorf("分析サービスの指紋を読めません: %v", err)
+	}
+	return v.Stamp, nil
+}
+
 // CheckpointSwing は1スイングを測る入力（形は分析サービスの checkpoints/measure.py の先頭）。
 type CheckpointSwing struct {
 	View       string                     `json:"view"`

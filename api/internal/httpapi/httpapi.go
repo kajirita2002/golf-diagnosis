@@ -43,6 +43,7 @@ type Analyzer interface {
 	Checkpoints(ctx context.Context, hand model.Handedness) (json.RawMessage, error)
 	CheckpointsMeasure(ctx context.Context, sw analysis.CheckpointSwing) (json.RawMessage, error)
 	CheckpointsFocus(ctx context.Context, in analysis.CheckpointFocusInput) (json.RawMessage, error)
+	CheckpointsStamp(ctx context.Context) (string, error)
 }
 
 // Server は API のハンドラをまとめる。

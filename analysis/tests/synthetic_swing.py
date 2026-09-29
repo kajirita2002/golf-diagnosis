@@ -8,6 +8,9 @@ faults に入れると、その項目だけ範囲の外へ動かす:
   p2_inside … 上げ始めのクラブの先を手元より内側へ（ボール約三個）
   p3_bent   … 正面の P3 の {lead} 腕を曲げる（約百四十）
   p7_rise   … 後ろの P7 で手を構えより浮かせる（ボール約二個）
+  p5_shallow … 後ろの P5 でクラブを寝かせる（先が体の側へ 58。ノート p70 の「シャロー」の例）
+  p5_cross  … 後ろの P5 でクラブが垂直を越えてボールの側へ倒れる（35。極端に立っている側）
+  p6_outside … 後ろの P6 でクラブの先を手元より外側へ（ボール約三個）
 値の中心は範囲の真ん中に置いてある（初期の誤差 ±5°・ボール ±0.5個 でも範囲の中に入るもの）。
 """
 
@@ -88,12 +91,13 @@ def _dtl(p: str, faults: set) -> tuple[dict, dict]:
         pts.update({"left_shoulder": (640, 226), "right_shoulder": (594, 208), "left_elbow": (622, 262), "right_elbow": (590, 268),
                     "left_wrist": (602, 262), "right_wrist": (606, 260)})
         g = (604.0, 255.0)
-        taps = {"grip": g, "head": _club(g, 35.0, 160, up=True, toward=-1)}
+        ang, tw = (58.0, -1) if "p5_shallow" in faults else (35.0, 1) if "p5_cross" in faults else (35.0, -1)
+        taps = {"grip": g, "head": _club(g, ang, 160, up=True, toward=tw)}
     elif p == "P6":
         pts.update({"left_shoulder": (659, 220), "right_shoulder": (637, 214), "left_elbow": (680, 300), "right_elbow": (676, 298),
                     "left_wrist": (700, 372), "right_wrist": (704, 370)})
         hx, hy = 702, 371
-        taps = {"grip": (708, 372), "head": (hx + 3, hy - 2)}
+        taps = {"grip": (708, 372), "head": (hx + 48, hy - 6) if "p6_outside" in faults else (hx + 3, hy - 2)}
     elif p == "P7":
         pts.update({"left_shoulder": (628, 214), "right_shoulder": (618, 216), "left_elbow": (648, 330), "right_elbow": (642, 334),
                     "left_wrist": (672, 450), "right_wrist": (668, 452)})

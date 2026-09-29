@@ -5,8 +5,12 @@
   - **動画は端末の中だけで使う。** サーバーへ送るのは、選んだ P のコマの時刻・体の点（33点）・本人のタップ・
     長辺 360px のサムネイルだけ。長辺 1024px の JPEG は端末（IndexedDB golf-local の swingFrames）に置く。
   - 手順: ① 向きと番手 → ② コマ送りで P1〜P7 を選ぶ（見本の線画と定義の一文。写っていない P は押せる）
-          → ③ ボールの両端・P2 のクラブ（握りの端と先）をタップ（任意で P1〜P7 全部のクラブ）
+          → ③ ボールの両端・P2 のクラブ（握りの端と先。ドライバーはクラブの先の幅も）をタップ（任意で P1〜P7 全部のクラブ）
           → ④ 選んだコマでだけ体の点を取る → 送って測る → チェック一覧へ。
+  - **コマは「このコマでよい」を押した瞬間に一度だけ絵にして持つ**（JPEG の Blob）。タップ・体の点・サムネイルは全部この絵から作る。
+    §6.3-2 の本命（WebCodecs で1コマずつデコード）はまだ入れておらず、<video> の currentTime で探したコマを使う（ずれとして記録）。
+    探し直すたびに Safari の着地がずれると、押した点と体の点が別のコマのものになるので、探すのは選ぶときの一回だけにする。
+  - 送り直しは同じスイングへ（作れた記録とスイングの id を覚え、コマの送信だけをやり直す。同じスイングを二本作らない＝R11）。
   - fps は ①ファイルの中の記録（mp4 / mov。mp4box.js）②再生して測る（requestVideoFrameCallback）の順。分からなければ 0（不明）。
   - 体の点は MediaPipe Pose Landmarker（lite・同梱）。window.__FAKE_POSE があればそれを使う（画面の確認で棒人間を使うため）。
   - タップ: ピンチ・ボタンで拡大、押した所の上に2倍の拡大鏡（利き手の側を避けて出す）、1画素ずつ動かすボタン（長押しで続けて）、
@@ -159,7 +163,11 @@ const Video = (() => {
       detect: (canvas) => {
         const r = lm.detect(canvas);
         const p = r && r.landmarks && r.landmarks[0];
-        return p ? p.map((q) => ({ x: +q.x.toFixed(5), y: +q.y.toFixed(5), visibility: +(q.visibility ?? 1).toFixed(3) })) : null;
+        if (!p) return null;
+        // 版によっては visibility が全部 0（値が入っていない）で返る。そのまま送ると全部「体の点が見えない」になるので、
+        // 全部 0 のときは visibility を付けずに送る（分析サービスは無いとき見えているとみなす）。実機でどちらかは未確認
+        const none = p.every((q) => !q.visibility);
+        return p.map((q) => none ? { x: +q.x.toFixed(5), y: +q.y.toFixed(5) } : { x: +q.x.toFixed(5), y: +q.y.toFixed(5), visibility: +(q.visibility ?? 1).toFixed(3) });
       },
     };
     return detector;
@@ -177,6 +185,7 @@ const Video = (() => {
   }
 
   // ---- コマ ----
+  const GRAB_EDGE = 2048; // 選んだコマを持つ大きさの上限（4K でもタップの細かさが足りる。メモリは JPEG で持つ）
   const seekTo = (video, t) => new Promise((ok) => {
     const tt = Math.max(0, Math.min(t, (video.duration || t) - 0.0005));
     if (Math.abs(video.currentTime - tt) < 1e-4 && video.readyState >= 2) { ok(); return; }
@@ -184,31 +193,53 @@ const Video = (() => {
     video.addEventListener("seeked", on);
     video.currentTime = tt;
   });
-  function frameCanvas(video, maxEdge = 0) {
-    const w = video.videoWidth, h = video.videoHeight;
-    const k = maxEdge ? Math.min(1, maxEdge / Math.max(w, h)) : 1;
+  function scaled(src, sw, sh, maxEdge = 0) {
+    const k = maxEdge ? Math.min(1, maxEdge / Math.max(sw, sh)) : 1;
     const c = document.createElement("canvas");
-    c.width = Math.round(w * k); c.height = Math.round(h * k);
-    c.getContext("2d").drawImage(video, 0, 0, c.width, c.height);
+    c.width = Math.round(sw * k); c.height = Math.round(sh * k);
+    c.getContext("2d").drawImage(src, 0, 0, c.width, c.height);
     return c;
   }
+  const frameCanvas = (video, maxEdge = 0) => scaled(video, video.videoWidth, video.videoHeight, maxEdge);
   const toBlob = (c, q = 0.8) => new Promise((ok) => c.toBlob((b) => ok(b), "image/jpeg", q));
   const b64 = (blob) => new Promise((ok, ng) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(",")[1] || ""); r.onerror = () => ng(r.error); r.readAsDataURL(blob); });
+  // 持っている絵（Blob）→ canvas。maxEdge を渡せば縮める
+  async function blobCanvas(blob, maxEdge = 0) {
+    if (window.createImageBitmap) {
+      const bmp = await createImageBitmap(blob);
+      const c = scaled(bmp, bmp.width, bmp.height, maxEdge);
+      if (bmp.close) bmp.close();
+      return c;
+    }
+    const url = URL.createObjectURL(blob);
+    try {
+      const img = await new Promise((ok, ng) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => ng(new Error("コマの絵を読めません")); i.src = url; });
+      return scaled(img, img.naturalWidth, img.naturalHeight, maxEdge);
+    } finally { URL.revokeObjectURL(url); }
+  }
 
   // ---- 画面 ----
-  const pTitle = (cat, p) => `${lab("p", p)} ${esc((cat.p_names || {})[p] || "")}`;
+  const pName = (cat, p) => esc((cat.p_names || {})[p] || "");
   const svgOf = (cat, p, view) => (cat.svg || {})[`${p.toLowerCase()}.${view}`] || "";
+  const pIdx = (p) => [...PS, ...PS_OPT].indexOf(p);
 
   async function render({ el, params, query, alive }) {
     const date = /^\d{4}-\d{2}-\d{2}$/.test(params.date || "") ? params.date : App.localDate();
     const st = {
-      date, session: /^\d+$/.test(query.session || "") ? Number(query.session) : null,
+      date, session: /^\d+$/.test(query.session || "") ? Number(query.session) : null, sid: null, swingId: null, payload: null,
       view: LS.get("golf.cpView") === "fo" ? "fo" : "dtl", club: LS.get("golf.cpClub") || "7 Iron",
       file: null, url: null, video: null, fps: 0, fpsSource: "", fpsStep: 30, container: null,
       cur: "P1", frames: {}, missing: new Set(), ball: null, taps: {}, perf: {},
     };
-    el.innerHTML = `<div class="pagehead"><a class="iconbtn" href="#/record/${esc(date)}" aria-label="記録へ戻る">${icon("chevron-left")}</a><h1>動画から P を選ぶ</h1></div>
+    el.innerHTML = `<div class="pagehead"><a class="iconbtn" data-back href="#/record/${esc(date)}" aria-label="記録へ戻る">${icon("chevron-left")}</a><h1>動画から形を選ぶ</h1></div>
       <p class="caption" data-step aria-live="polite"></p><div data-body></div>`;
+    // 選んだコマがあるときは、確かめずに捨てない（NN/g #3）
+    $("[data-back]", el).addEventListener("click", async (ev) => {
+      if (!Object.keys(st.frames).length && !st.missing.size) return;
+      ev.preventDefault();
+      const ok = await App.ask({ title: "記録の画面へ戻りますか", text: "選んだコマと押した点は消えます（まだ送っていません）。", ok: "戻る（消す）", cancel: "続ける", danger: true });
+      if (ok) { st.frames = {}; st.missing.clear(); App.go(`/record/${date}`); }
+    });
     let cat;
     try { cat = await catalog(); } catch (e) {
       if (!alive()) return;
@@ -221,23 +252,46 @@ const Video = (() => {
     stepSetup(el, st, cat);
   }
 
-  function setStep(el, n, text) { $("[data-step]", el).innerHTML = `${lab("count", n + " / 4")}　${esc(text)}`; }
+  // 段が変わったら、画面の頭から始め、見出しに移る（読み上げにも段が変わったことが伝わる）
+  function setStep(el, n, text, sub = "") {
+    $("[data-step]", el).innerHTML = `${lab("count", n + " / 4")}　${esc(text)}${sub ? `　${sub}` : ""}`;
+  }
+  // 段・画面ごとに入れ物を作り直す（同じ要素に付けた前の画面の押したときの処理が残ると、一回押して二回動く）
+  function freshBody(el) {
+    const old = $("[data-body]", el);
+    const nb = old.cloneNode(false);
+    old.replaceWith(nb);
+    return nb;
+  }
+  function enter(el) {
+    window.scrollTo(0, 0);
+    const h = $("[data-body] h2", el) || $("h1", el);
+    if (h) { h.tabIndex = -1; h.focus({ preventScroll: true }); }
+  }
+
+  // よく使う番手はボタン、残りは一覧（iOS のホイールで14個から選ばせない）
+  const QUICK = [["7 Iron", "7番アイアン"], ["Driver", "ドライバー"]];
 
   // ① 向きと番手・動画を選ぶ
   function stepSetup(el, st, cat) {
     setStep(el, 1, "向きと番手を選び、動画を選びます");
-    const body = $("[data-body]", el);
+    const body = freshBody(el);
+    const quick = QUICK.some(([v]) => v === st.club);
     body.innerHTML = `
       <section class="card" aria-labelledby="h-view"><h2 id="h-view" class="label">撮った向き</h2>
         <div class="seg" data-view role="group" aria-label="撮った向き">
           <button type="button" data-v="dtl" aria-pressed="${st.view === "dtl"}">${icon("view-dtl")}後ろから</button>
           <button type="button" data-v="fo" aria-pressed="${st.view === "fo"}">${icon("view-face")}正面から</button></div>
         <p class="caption">一本の動画は一つの向きです。同じ一球を両方から見ることはできません。</p>
-        <label class="field"><span>番手</span><select data-club>${CLUBS.map(([v, t]) => `<option value="${esc(v)}" ${v === st.club ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></label>
+        <p class="label" id="h-club">番手</p>
+        <div class="seg" data-quick role="group" aria-labelledby="h-club">${QUICK.map(([v, t]) => `<button type="button" data-c="${esc(v)}" aria-pressed="${v === st.club}">${esc(t)}</button>`).join("")}
+          <button type="button" data-c="" aria-pressed="${!quick}">ほかの番手</button></div>
+        <label class="field" data-club-wrap ${quick ? "hidden" : ""}><span>ほかの番手</span><select data-club>${CLUBS.map(([v, t]) => `<option value="${esc(v)}" ${v === st.club ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></label>
       </section>
+      ${st.video ? `<button type="button" class="btn primary block" data-keep>選んだ動画で続ける</button>` : ""}
       <label class="drop block" data-drop>${icon("video")}
         <input type="file" data-file accept="video/*,.mov,.mp4,.m4v,.webm" class="visually-hidden">
-        <span><b>動画を選ぶ</b><span class="caption">端末の中で処理します。送るのは選んだコマの小さな写真と体の点だけです。</span></span></label>
+        <span><b>${st.video ? "別の動画を選ぶ" : "動画を選ぶ"}</b><span class="caption">動画は送りません。送るのは選んだコマの小さな写真と体の点だけです。</span></span></label>
       <div data-err></div>
       <ul class="navlist block">${App.navItem(`#/guide/${st.view}`, "撮り方ガイド", "カメラの置き方と、試し撮りの確かめ方", "data-guide")}</ul>`;
     $("[data-view]", body).addEventListener("click", (ev) => {
@@ -248,16 +302,31 @@ const Video = (() => {
       $$("[data-view] button", body).forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
       $("[data-guide]", body).setAttribute("href", `#/guide/${st.view}`);
     });
+    $("[data-quick]", body).addEventListener("click", (ev) => {
+      const b = ev.target.closest("button[data-c]");
+      if (!b) return;
+      $$("[data-quick] button", body).forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+      const wrap = $("[data-club-wrap]", body);
+      if (b.dataset.c) { st.club = b.dataset.c; LS.set("golf.cpClub", st.club); wrap.hidden = true; } else { wrap.hidden = false; st.club = $("[data-club]", body).value; LS.set("golf.cpClub", st.club); }
+    });
     $("[data-club]", body).addEventListener("change", (ev) => { st.club = ev.target.value; LS.set("golf.cpClub", st.club); });
+    const keep = $("[data-keep]", body);
+    if (keep) keep.addEventListener("click", () => stepChoose(el, st, cat));
     $("[data-file]", body).addEventListener("change", async (ev) => {
       const f = ev.target.files[0];
       if (!f) return;
       $("[data-err]", body).innerHTML = `<p class="loading-text" role="status">動画を読み込んでいます…</p>`;
-      try { await loadVideo(st, f); stepChoose(el, st, cat); } catch (e) {
+      try {
+        if (st.url) URL.revokeObjectURL(st.url);
+        Object.assign(st, { frames: {}, missing: new Set(), ball: null, taps: {}, cur: "P1", swingId: null, payload: null });
+        await loadVideo(st, f);
+        stepChoose(el, st, cat);
+      } catch (e) {
         $("[data-err]", body).innerHTML = App.errorHtml({ what: "この動画を読めませんでした", saved: "何も送っていません。",
           next: "iPhone ならカメラの設定の「フォーマット」を「互換性優先」にして撮り直すと読めることがあります。", detail: e && e.message });
       }
     });
+    enter(el);
   }
 
   async function loadVideo(st, f) {
@@ -288,53 +357,75 @@ const Video = (() => {
     }
     st.duration = elDur;
     st.perf.load_ms = Math.round(performance.now() - t0);
+    st.perf.grab = "seek_once"; // §6.3-2 の WebCodecs ではなく currentTime で探したコマ（ずれとして残す）
     await seekTo(v, 0.5 / st.fpsStep);
   }
 
   const frameNo = (st) => Math.round(st.video.currentTime * st.fpsStep - 0.5);
   const toFrame = (st, n) => seekTo(st.video, (Math.max(0, n) + 0.5) / st.fpsStep);
 
-  function chipsHtml(st) {
-    const one = (p, opt) => {
-      const done = st.frames[p], miss = st.missing.has(p), cur = st.cur === p;
-      const mark = done ? "✓" : miss ? "―" : opt ? "" : "△";
-      const word = done ? "選んだ" : miss ? "写っていない" : opt ? "任意" : "まだ";
-      return `<button type="button" class="pchip ${done ? "done" : miss ? "miss" : ""}" data-p="${p}" ${cur ? `aria-current="step"` : ""} aria-label="${p} ${word}"><span aria-hidden="true">${mark}</span>${lab("p", p)}</button>`;
-    };
-    return `<div class="pchips" data-pchips role="group" aria-label="P を選ぶ">${PS.map((p) => one(p, false)).join("")}<span class="pchips-sep" aria-hidden="true"></span>${PS_OPT.map((p) => one(p, true)).join("")}</div>`;
+  // 選んだ P の時刻が順番どおりか（P1＜P2＜…）。ずれている P を返す
+  function orderErrors(st) {
+    const bad = [];
+    let prev = null;
+    for (const p of [...PS, ...PS_OPT]) {
+      const f = st.frames[p];
+      if (!f) continue;
+      if (prev && f.t <= st.frames[prev].t) bad.push([p, prev]);
+      prev = p;
+    }
+    return bad;
   }
 
-  // ② P1〜P7 を手で選ぶ
+  function chipsHtml(st, bad) {
+    const one = (p, opt) => {
+      const done = st.frames[p], miss = st.missing.has(p), cur = st.cur === p, wrong = bad.includes(p);
+      // 印: 選んだ ✓・写っていない ―・順番が違う !・まだ は空の丸（「△」は一覧で「範囲の外」の印なので使わない）
+      const mark = wrong ? "!" : done ? "✓" : miss ? "―" : "○";
+      const word = wrong ? "順番が違う" : done ? "選んだ" : miss ? "写っていない" : opt ? "任意" : "まだ";
+      return `<button type="button" class="pchip ${wrong ? "wrong" : done ? "done" : miss ? "miss" : ""}" data-p="${p}" ${cur ? `aria-current="step"` : ""} aria-label="${p} ${esc((App.S.cpNames || {})[p] || "")} ${word}"><span aria-hidden="true">${mark}</span>${lab("p", p)}</button>`;
+    };
+    return `<div class="pchips" data-pchips role="group" aria-label="形を選ぶ">${PS.map((p) => one(p, false)).join("")}</div>
+      <div class="pchips opt" role="group" aria-label="任意の形"><span class="caption">任意</span>${PS_OPT.map((p) => one(p, true)).join("")}</div>`;
+  }
+
+  // ② P1〜P7 を手で選ぶ（押した瞬間のコマを絵にして持つ）
   function stepChoose(el, st, cat) {
-    setStep(el, 2, "コマ送りで P を選びます");
-    const body = $("[data-body]", el);
+    setStep(el, 2, "コマ送りで、それぞれの形のコマを選びます");
+    App.S.cpNames = cat.p_names || {};
+    const body = freshBody(el);
     body.innerHTML = `
+      <h2 class="visually-hidden">形を選ぶ</h2>
       <div class="vframe" data-vframe></div>
+      <div data-chips></div>
       <div class="scrub"><input type="range" data-scrub min="0" max="${Math.max(1, Math.round(st.duration * st.fpsStep) - 1)}" step="1" value="${frameNo(st)}" aria-label="コマの位置"></div>
       <div class="stepbtns" role="group" aria-label="コマ送り">
         <button type="button" class="btn small" data-mv="-0.5s" aria-label="半秒戻る">−半秒</button>
         <button type="button" class="btn small" data-mv="-1" aria-label="一コマ戻る">−1コマ</button>
         <button type="button" class="btn small" data-mv="+1" aria-label="一コマ進む">＋1コマ</button>
         <button type="button" class="btn small" data-mv="+0.5s" aria-label="半秒進む">＋半秒</button></div>
+      <div class="row choosebtns"><button type="button" class="btn primary grow1" data-ok>このコマでよい</button>
+        <button type="button" class="btn" data-miss>写っていない</button></div>
       <section class="card pinfo" aria-live="polite" data-pinfo></section>
-      <div class="stack block"><button type="button" class="btn primary block" data-ok>このコマでよい</button>
-        <button type="button" class="btn block" data-miss>このPは写っていない</button></div>
-      <div data-chips></div>
-      <div class="block" data-next-wrap></div>`;
+      <div class="block" data-next-wrap></div>
+      <button type="button" class="btn block" data-prev-step>${icon("chevron-left")}前へ（向きと番手）</button>`;
     const vf = $("[data-vframe]", body);
     st.video.className = "vid";
     st.video.setAttribute("aria-label", "選んでいる動画のコマ");
     vf.append(st.video);
     const scrub = $("[data-scrub]", body);
     const paint = () => {
-      $("[data-pinfo]", body).innerHTML = `<div class="prow"><div class="pdef"><p class="t-headline" style="margin:0">${pTitle(cat, st.cur)}${PS_OPT.includes(st.cur) ? `<span class="chip none">任意</span>` : ""}</p>
+      const bad = orderErrors(st);
+      const badPs = bad.map((x) => x[0]);
+      $("[data-pinfo]", body).innerHTML = `<div class="prow"><div class="pdef"><p class="t-headline" style="margin:0">${pName(cat, st.cur)} <span class="caption">${lab("p", st.cur)}</span>${PS_OPT.includes(st.cur) ? `<span class="chip none">任意</span>` : ""}</p>
           <p class="sub" style="margin:var(--s1) 0 0">${esc(((cat.p_define || {})[st.cur]) || "")}</p></div>
-          <figure class="psample" aria-label="${esc(st.cur)} の見本の線画">${svgOf(cat, st.cur, st.view)}</figure></div>`;
-      $("[data-chips]", body).innerHTML = chipsHtml(st);
+          <figure class="psample" aria-label="${esc((cat.p_names || {})[st.cur] || "")} の見本の線画">${svgOf(cat, st.cur, st.view)}</figure></div>`;
+      $("[data-chips]", body).innerHTML = chipsHtml(st, badPs);
       const ready = PS.every((p) => st.frames[p] || st.missing.has(p));
-      $("[data-next-wrap]", body).innerHTML = ready
-        ? `<button type="button" class="btn primary block" data-go-taps>次へ（ボールとクラブの点を押す）</button>`
-        : `<p class="caption">P1〜P7 を全部選ぶか、「写っていない」を押すと次へ進めます（P8〜P10 は任意）。</p>`;
+      $("[data-next-wrap]", body).innerHTML = bad.length
+        ? `<div class="note warn" data-order>${bad.map(([p, q]) => `${pName(cat, p)}（${lab("p", p)}）のコマが、${pName(cat, q)}（${lab("p", q)}）より前になっています。`).join("")}選び直してください。</div>`
+        : ready ? `<button type="button" class="btn primary block" data-go-taps>次へ（ボールとクラブの点を押す）</button>`
+          : `<p class="caption">必須の七つの形を全部選ぶか、「写っていない」を押すと次へ進めます（フォローの三つは任意）。</p>`;
       const gb = $("[data-go-taps]", body);
       if (gb) gb.addEventListener("click", () => stepTaps(el, st, cat));
       scrub.value = String(frameNo(st));
@@ -347,7 +438,10 @@ const Video = (() => {
       else if (how === "-0.5s") await toFrame(st, n - Math.round(st.fpsStep / 2));
       scrub.value = String(frameNo(st));
     };
-    body.addEventListener("click", async (ev) => {
+    // 押した順に一つずつ片づける（コマを絵にしているあいだに押されたコマ送りを、落とさず後に回す）
+    let chain = Promise.resolve();
+    body.addEventListener("click", (ev) => { chain = chain.then(() => onClick(ev)).catch((e) => console.warn(e)); });
+    const onClick = async (ev) => {
       const mv = ev.target.closest("[data-mv]");
       if (mv) { await move(mv.dataset.mv); return; }
       const pc = ev.target.closest("[data-p]");
@@ -358,88 +452,144 @@ const Video = (() => {
         return;
       }
       if (ev.target.closest("[data-ok]")) {
-        st.frames[st.cur] = { t: +st.video.currentTime.toFixed(4), frame: frameNo(st) };
+        // いま画面に出ているコマを、その場で一度だけ絵にする（あとで探し直さない）
+        const t = +st.video.currentTime.toFixed(4), n = frameNo(st);
+        const blob = await toBlob(frameCanvas(st.video, GRAB_EDGE), 0.92);
+        st.frames[st.cur] = { t, frame: n, blob };
         st.missing.delete(st.cur);
+        delete st.taps[st.cur];
+        st.payload = null;
         advance();
         return;
       }
       if (ev.target.closest("[data-miss]")) {
         delete st.frames[st.cur];
+        delete st.taps[st.cur];
         st.missing.add(st.cur);
+        st.payload = null;
         advance();
+        return;
       }
-    });
+      if (ev.target.closest("[data-prev-step]")) stepSetup(el, st, cat);
+    };
     const advance = () => {
       const all = [...PS, ...PS_OPT];
       const i = all.indexOf(st.cur);
       const next = all.slice(i + 1).find((p) => !st.frames[p] && !st.missing.has(p) && PS.includes(p)) || all[Math.min(i + 1, all.length - 1)];
       st.cur = next;
       paint();
-      App.say(`${next} を選びます`);
+      App.say(`${(cat.p_names || {})[next] || next} を選びます`);
     };
     scrub.addEventListener("input", () => toFrame(st, Number(scrub.value)));
     paint();
+    enter(el);
   }
 
   // ---- タップの部品（§6.5） ----
-  // points: [{key, label, shape: "square" | "circle"}]。決定で {key: [x, y]}（コマの画素）、飛ばすで null を返す
-  function tapEditor(host, { canvas, title, hint, points, initial = {}, hand = "R" }) {
+  // points: [{key, label, shape}]。shape: square（握りの端）・circle（クラブの先）・half-l / half-r（ボールの左右の端）・tri-l / tri-r（クラブの先の幅）
+  // 決定で {key: [x, y]}（コマの画素）、飛ばすで null、前へで "back" を返す
+  const SHAPE_MARK = { square: "■", circle: "●", "half-l": "◐", "half-r": "◑", "tri-l": "◀", "tri-r": "▶" };
+  function tapEditor(host, { canvas, p = "", title, hint, points, initial = {}, hand = "R", progress = "", zoomOnFirst = false, canBack = true }) {
     return new Promise((resolve) => {
       const W = canvas.width, H = canvas.height;
       const pts = {};
       for (const p of points) if (initial[p.key]) pts[p.key] = [...initial[p.key]];
       let cur = points.findIndex((p) => !pts[p.key]);
       if (cur < 0) cur = 0;
-      let zoom = 1;
+      let zoom = 1, mode = "place";
       host.innerHTML = `
-        <h2 class="t-headline" style="margin:0 0 var(--s1)">${esc(title)}</h2>
+        <h2 class="t-headline" style="margin:0 0 var(--s1)" data-tap-p="${esc(p)}">${esc(title)}${p ? ` <span class="caption">${lab("p", p)}</span>` : ""}</h2>
+        ${progress ? `<p class="caption" data-tprog>${progress}</p>` : ""}
         <p class="sub" style="margin:0 0 var(--s2)">${esc(hint)}</p>
         <p class="tapnow" data-now aria-live="polite"></p>
-        <div class="tapwrap" data-wrap><div class="tapstage" data-stage><canvas data-over aria-hidden="true"></canvas></div><canvas class="loupe" data-loupe width="160" height="160" aria-hidden="true" hidden></canvas></div>
-        <div class="row between"><div class="seg" data-zoom role="group" aria-label="拡大">${[1, 2, 3].map((z) => `<button type="button" data-z="${z}" aria-pressed="${z === 1}">${z}倍</button>`).join("")}</div>
+        <div class="tapwrap" data-wrap><div class="tapstage" data-stage><canvas data-over aria-hidden="true"></canvas></div></div>
+        <canvas class="loupe" data-loupe width="160" height="160" aria-hidden="true" hidden></canvas>
+        <div class="tapbar"><div class="seg" data-zoom role="group" aria-label="拡大">${[1, 2, 3].map((z) => `<button type="button" data-z="${z}" aria-pressed="${z === 1}">${z}倍</button>`).join("")}</div>
+          <div class="seg" data-mode role="group" aria-label="指の動き"><button type="button" data-m="place" aria-pressed="true">点を置く</button><button type="button" data-m="pan" aria-pressed="false">絵を動かす</button></div></div>
+        <p class="caption" data-panhint>拡大した絵は、二本指か「絵を動かす」で動かせます。</p>
+        <div class="row between"><div class="row pointsel" data-sel role="group" aria-label="置く点">${points.map((p, i) => `<button type="button" class="btn small" data-pi="${i}">${SHAPE_MARK[p.shape] || "●"} ${esc(p.label)}</button>`).join("")}</div>
           <div class="nudge" role="group" aria-label="点を一画素ずつ動かす">
             <button type="button" class="iconbtn" data-nd="0,-1" aria-label="上へ">↑</button><button type="button" class="iconbtn" data-nd="-1,0" aria-label="左へ">←</button>
             <button type="button" class="iconbtn" data-nd="1,0" aria-label="右へ">→</button><button type="button" class="iconbtn" data-nd="0,1" aria-label="下へ">↓</button></div></div>
-        <div class="row pointsel" data-sel role="group" aria-label="置く点">${points.map((p, i) => `<button type="button" class="btn small" data-pi="${i}">${p.shape === "square" ? "■" : "●"} ${esc(p.label)}</button>`).join("")}</div>
         <div class="stack block"><button type="button" class="btn primary block" data-done>決定</button>
-          <div class="row"><button type="button" class="btn grow1" data-redo>やり直す</button><button type="button" class="btn grow1" data-skip>このコマは飛ばす</button></div></div>`;
+          <p class="caption" data-need aria-live="polite"></p>
+          <div class="row"><button type="button" class="btn grow1" data-redo>やり直す</button><button type="button" class="btn grow1" data-skip>このコマは飛ばす</button></div>
+          ${canBack ? `<button type="button" class="btn block" data-tback>${icon("chevron-left")}前へ</button>` : ""}</div>`;
       const stage = $("[data-stage]", host), over = $("[data-over]", host), loupe = $("[data-loupe]", host), wrap = $("[data-wrap]", host);
       canvas.classList.add("tapimg");
       stage.prepend(canvas);
       over.width = W; over.height = H;
       const g = over.getContext("2d");
       const css = getComputedStyle(document.documentElement);
+      const shapePath = (shape, x, y, r) => {
+        g.beginPath();
+        if (shape === "square") g.rect(x - r, y - r, 2 * r, 2 * r);
+        else if (shape === "tri-l") { g.moveTo(x - r, y); g.lineTo(x + r, y - r); g.lineTo(x + r, y + r); g.closePath(); }
+        else if (shape === "tri-r") { g.moveTo(x + r, y); g.lineTo(x - r, y - r); g.lineTo(x - r, y + r); g.closePath(); }
+        else g.arc(x, y, r, 0, Math.PI * 2);
+      };
       const draw = () => {
         g.clearRect(0, 0, W, H);
         const r = Math.max(6, Math.round(Math.min(W, H) * 0.012));
         for (const [i, p] of points.entries()) {
           const q = pts[p.key];
           if (!q) continue;
-          g.lineWidth = Math.max(2, r / 3);
-          for (const [stroke, lw] of [[css.getPropertyValue("--ov-edge").trim() || "black", g.lineWidth + 3], [css.getPropertyValue(i === cur ? "--ov-gap" : "--ov-me").trim() || "white", g.lineWidth]]) {
+          const lw0 = Math.max(2, r / 3);
+          const main = css.getPropertyValue(i === cur ? "--ov-gap" : "--ov-me").trim() || "white";
+          for (const [stroke, lw] of [[css.getPropertyValue("--ov-edge").trim() || "black", lw0 + 3], [main, lw0]]) {
             g.strokeStyle = stroke; g.lineWidth = lw;
-            g.beginPath();
-            if (p.shape === "square") g.rect(q[0] - r, q[1] - r, 2 * r, 2 * r); else g.arc(q[0], q[1], r, 0, Math.PI * 2);
+            shapePath(p.shape, q[0], q[1], r);
             g.stroke();
+          }
+          // ボールの端は、左右どちらの端かを塗り分けでも示す（色だけに頼らない。WCAG 1.4.1）
+          if (p.shape === "half-l" || p.shape === "half-r") {
+            g.fillStyle = main;
+            g.beginPath();
+            const a0 = p.shape === "half-l" ? Math.PI / 2 : -Math.PI / 2;
+            g.arc(q[0], q[1], r, a0, a0 + Math.PI);
+            g.closePath();
+            g.fill();
           }
         }
         host.dataset.pts = JSON.stringify(pts); // 画面の確認が読む（押した点・コマの画素）
         const p = points[cur];
-        $("[data-now]", host).innerHTML = `いま置いている点: <b>${p.shape === "square" ? "■" : "●"} ${esc(p.label)}</b>${pts[p.key] ? "（置きました。ボタンで一画素ずつ直せます）" : "（まだ）"}`;
+        $("[data-now]", host).innerHTML = `いま置いている点: <b>${SHAPE_MARK[p.shape] || "●"} ${esc(p.label)}</b>${pts[p.key] ? "（置きました。ボタンで一画素ずつ直せます）" : "（まだ）"}`;
         $$("[data-pi]", host).forEach((b, i) => b.setAttribute("aria-pressed", String(i === cur)));
-        $("[data-done]", host).toggleAttribute("disabled", !points.every((q) => pts[q.key]));
+        const left = points.filter((q) => !pts[q.key]);
+        $("[data-done]", host).toggleAttribute("disabled", left.length > 0);
+        $("[data-need]", host).textContent = left.length ? `あと${["", "一つ", "二つ", "三つ", "四つ"][left.length] || left.length + "つ"}、${left.map((q) => `${SHAPE_MARK[q.shape] || "●"} ${q.label}`).join("・")}を押すと決定できます。` : "";
       };
-      const setZoom = (z) => {
+      // 1倍は絵の全体が枠に収まる大きさ（縦長の動画でもボールのある下の端が切れない）。拡大したときだけ枠の中を動かす
+      const maxH = () => Math.max(220, Math.round(window.innerHeight * 0.55));
+      const baseFrac = () => { const cw = wrap.clientWidth || 1; return Math.min(1, (maxH() * W / H) / cw); };
+      const centerOn = (q) => {
+        const sw = stage.clientWidth, sh = stage.clientHeight;
+        wrap.scrollLeft = Math.max(0, (q[0] / W) * sw - wrap.clientWidth / 2);
+        wrap.scrollTop = Math.max(0, (q[1] / H) * sh - wrap.clientHeight / 2);
+      };
+      const setZoom = (z, q) => {
         zoom = z;
-        stage.style.width = `${z * 100}%`;
+        wrap.style.maxHeight = `${maxH()}px`;
+        stage.style.width = `${z * baseFrac() * 100}%`;
+        stage.style.margin = z === 1 ? "0 auto" : "0";
         $$("[data-z]", host).forEach((b) => b.setAttribute("aria-pressed", String(Number(b.dataset.z) === z)));
+        // 拡大したら、いまの点（無ければ最後に置いた点、それも無ければ絵の真ん中）を真ん中に出す
+        const c = q || pts[points[cur].key] || Object.values(pts).pop() || [W / 2, H / 2];
+        requestAnimationFrame(() => centerOn(c));
       };
+      const setMode = (m) => {
+        mode = m;
+        $$("[data-m]", host).forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.m === m)));
+        stage.classList.toggle("panning", m === "pan");
+      };
+      // 押した所 → コマの画素（コマの外へ指を滑らせても、点はコマの端に止める）
       const toPx = (ev) => {
         const r = canvas.getBoundingClientRect();
-        return [Math.round(((ev.clientX - r.left) / r.width) * W), Math.round(((ev.clientY - r.top) / r.height) * H)];
+        const x = Math.round(((ev.clientX - r.left) / r.width) * W), y = Math.round(((ev.clientY - r.top) / r.height) * H);
+        return [Math.max(0, Math.min(W - 1, x)), Math.max(0, Math.min(H - 1, y))];
       };
+      // 拡大鏡は枠の外（画面に固定）に、指で隠れない側へ出す（右手で押すなら左上、左手なら右上）
       const showLoupe = (ev, q) => {
-        const lr = wrap.getBoundingClientRect();
         const lg = loupe.getContext("2d");
         const s = 40;
         lg.imageSmoothingEnabled = false;
@@ -448,19 +598,19 @@ const Video = (() => {
         lg.strokeStyle = "white"; lg.lineWidth = 3; lg.strokeRect(78, 78, 4, 4);
         lg.strokeStyle = "black"; lg.lineWidth = 1; lg.strokeRect(76, 76, 8, 8);
         loupe.hidden = false;
-        // 指で隠れない側（右手で押すなら左上、左手なら右上）
-        const x = ev.clientX - lr.left, y = ev.clientY - lr.top;
-        const left = hand === "L" ? Math.min(lr.width - 164, x + 40) : Math.max(4, x - 200);
-        loupe.style.left = `${left}px`;
-        loupe.style.top = `${Math.max(4, y - 200)}px`;
+        const vw = window.innerWidth;
+        const left = hand === "L" ? Math.min(vw - 168, ev.clientX + 48) : Math.max(8, ev.clientX - 208);
+        const top = ev.clientY - 208 >= 8 ? ev.clientY - 208 : Math.min(window.innerHeight - 168, ev.clientY + 48);
+        loupe.style.left = `${Math.max(8, left)}px`;
+        loupe.style.top = `${Math.max(8, top)}px`;
       };
-      // ピンチで拡大（ボタンでも同じことができる）
       const active = new Map();
-      let pinch0 = null;
+      let pinch0 = null, pan0 = null;
       stage.addEventListener("pointerdown", (ev) => {
         active.set(ev.pointerId, ev);
-        if (active.size === 2) { const [a, b] = [...active.values()]; pinch0 = { d: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY), z: zoom }; loupe.hidden = true; return; }
+        if (active.size === 2) { const [a, b] = [...active.values()]; pinch0 = { d: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY), z: zoom }; loupe.hidden = true; pan0 = null; return; }
         stage.setPointerCapture(ev.pointerId);
+        if (mode === "pan") { pan0 = { x: ev.clientX, y: ev.clientY, l: wrap.scrollLeft, t: wrap.scrollTop }; return; }
         const q = toPx(ev);
         pts[points[cur].key] = q;
         showLoupe(ev, q);
@@ -476,9 +626,11 @@ const Video = (() => {
           const mx = (a.clientX + b.clientX) / 2, my = (a.clientY + b.clientY) / 2;
           if (pinch0.mx !== undefined) { wrap.scrollLeft -= mx - pinch0.mx; wrap.scrollTop -= my - pinch0.my; }
           pinch0.mx = mx; pinch0.my = my;
-          stage.style.width = `${z * 100}%`; zoom = z;
+          stage.style.width = `${z * baseFrac() * 100}%`; zoom = z;
           return;
         }
+        if (pan0) { wrap.scrollLeft = pan0.l - (ev.clientX - pan0.x); wrap.scrollTop = pan0.t - (ev.clientY - pan0.y); return; }
+        if (mode === "pan") return;
         const q = toPx(ev);
         pts[points[cur].key] = q;
         showLoupe(ev, q);
@@ -489,6 +641,11 @@ const Video = (() => {
         if (active.size < 2) pinch0 = null;
         if (!active.size) {
           loupe.hidden = true;
+          if (pan0) { pan0 = null; return; }
+          if (mode === "pan") return;
+          const placed = pts[points[cur].key];
+          // ボールは小さいので、一つ目を置いたら、そのあたりを三倍で出す
+          if (zoomOnFirst && zoom === 1 && placed) { setZoom(3, placed); zoomOnFirst = false; }
           // 置いたら次の点へ（全部置いたら、いまの点のまま）
           const nxt = points.findIndex((p) => !pts[p.key]);
           if (nxt >= 0) cur = nxt;
@@ -499,6 +656,7 @@ const Video = (() => {
       stage.addEventListener("pointerup", up);
       stage.addEventListener("pointercancel", up);
       $("[data-zoom]", host).addEventListener("click", (ev) => { const b = ev.target.closest("[data-z]"); if (b) setZoom(Number(b.dataset.z)); });
+      $("[data-mode]", host).addEventListener("click", (ev) => { const b = ev.target.closest("[data-m]"); if (b) setMode(b.dataset.m); });
       $("[data-sel]", host).addEventListener("click", (ev) => { const b = ev.target.closest("[data-pi]"); if (b) { cur = Number(b.dataset.pi); draw(); } });
       // 1画素ずつ（長押しで続けて動く）
       let rep = null;
@@ -521,122 +679,200 @@ const Video = (() => {
       });
       $("[data-redo]", host).addEventListener("click", () => { for (const p of points) delete pts[p.key]; cur = 0; draw(); });
       $("[data-skip]", host).addEventListener("click", () => { stopRep(); resolve(null); });
+      const tb = $("[data-tback]", host);
+      if (tb) tb.addEventListener("click", () => { stopRep(); resolve("back"); });
       $("[data-done]", host).addEventListener("click", () => { stopRep(); if (points.every((q) => pts[q.key])) resolve({ ...pts }); });
+      setMode("place");
       setZoom(1);
       draw();
+      window.scrollTo(0, 0);
+      const h2 = $("h2", host);
+      if (h2) { h2.tabIndex = -1; h2.focus({ preventScroll: true }); }
     });
   }
 
-  // ③ ボールの両端・P2 のクラブ・（任意で）P1〜P7 のクラブ
+  const CLUB_PTS = [{ key: "grip", label: "握りの端", shape: "square" }, { key: "head", label: "クラブの先", shape: "circle" }];
+  // ドライバーの基準は「クラブの先一個」（§5.3 C）。クラブの先の幅を、根元側と先端側の端の二点で測る
+  const WIDTH_PTS = [{ key: "heel", label: "先の根元側の端", shape: "tri-l" }, { key: "toe", label: "先の先端側の端", shape: "tri-r" }];
+
+  // ③ ボールの両端・P2 のクラブ・（任意で）ほかのコマのクラブ。前へで一つ前の画面に戻れる
   async function stepTaps(el, st, cat) {
-    const body = $("[data-body]", el);
     const hand = (S.player && S.player.handedness) || App.pendingHand();
-    const shot = async (p) => { await toFrame(st, st.frames[p].frame); return frameCanvas(st.video, KEEP_EDGE * 2); };
+    const driver = classOf(st.club) === "driver";
+    const canvasOf = (p) => blobCanvas(st.frames[p].blob);
     const scaleOf = (c) => c.width / st.video.videoWidth; // タップはコマの画素（元の大きさ）で持つ
     const back = (q, k) => [Math.round(q[0] / k), Math.round(q[1] / k)];
     const fwd = (q, k) => q && [q[0] * k, q[1] * k];
-    if (st.frames.P1) {
-      setStep(el, 3, "構えのコマでボールの両端を押します");
-      const c = await shot("P1"), k = scaleOf(c);
-      const r = await tapEditor(body, { canvas: c, hand, title: `${"P1"} 構え: ボールの両端`, hint: "ボールの左の端と右の端を押します。ボール一個の大きさを物差しにします（手の位置・横のずれを測る）。",
-        points: [{ key: "b1", label: "ボールの端（一つ目）", shape: "circle" }, { key: "b2", label: "ボールの端（二つ目）", shape: "circle" }],
-        initial: st.ball ? { b1: fwd(st.ball[0], k), b2: fwd(st.ball[1], k) } : {} });
-      st.ball = r ? [back(r.b1, k), back(r.b2, k)] : null;
-    }
-    if (st.frames.P2) {
-      setStep(el, 3, "P2 でクラブの握りの端と先を押します");
-      const c = await shot("P2"), k = scaleOf(c);
-      const r = await tapEditor(body, { canvas: c, hand, title: "P2 クラブが水平（上げ）: クラブ", hint: "クラブの握りの端と、クラブの先（真ん中）を押します。上げ始めのクラブの先の位置を測ります（最初に見る項目）。",
-        points: [{ key: "grip", label: "握りの端", shape: "square" }, { key: "head", label: "クラブの先", shape: "circle" }], initial: mapTaps(st.taps.P2, (q) => fwd(q, k)) });
-      if (r) st.taps.P2 = { grip: back(r.grip, k), head: back(r.head, k) };
-    }
-    askMoreTaps(el, st, cat, shot, scaleOf, back, fwd, hand);
-  }
-  const mapTaps = (t, f) => { const o = {}; for (const [k, v] of Object.entries(t || {})) o[k] = f(v); return o; };
-
-  function askMoreTaps(el, st, cat, shot, scaleOf, back, fwd, hand) {
-    setStep(el, 3, "ほかのコマのクラブ（任意）");
-    const body = $("[data-body]", el);
-    const rest = PS.filter((p) => p !== "P2" && st.frames[p]);
-    const clubItems = (cat.items || []).filter((it) => it.view === st.view && rest.includes(it.p) && /tap/.test((it.measure || {}).how || "") && it.definition_status === "ok" && !it.same_as && (it.clubs || []).includes(classOf(st.club) === "driver" ? "driver" : "iron")).length;
-    body.innerHTML = `<section class="card"><h2 class="t-headline" style="margin-top:0">クラブの位置を付ける（任意）</h2>
-      <p class="sub">残りのコマ（${rest.map((p) => lab("p", p)).join("・")}）でも握りの端と先を押すと、クラブの傾きの項目も測れます（${lab("count", clubItems + "件")}）。一コマ十秒ほどです。</p>
-      <div class="stack"><button type="button" class="btn block" data-more>クラブの位置を付ける</button>
-      <button type="button" class="btn primary block" data-send>このまま測る</button></div></section>`;
-    $("[data-send]", body).addEventListener("click", () => stepProcess(el, st, cat));
-    $("[data-more]", body).addEventListener("click", async () => {
-      let last = st.taps.P2;
-      for (const p of rest) {
-        const c = await shot(p), k = scaleOf(c);
-        setStep(el, 3, `${p} のクラブ`);
-        const r = await tapEditor(body, { canvas: c, hand, title: `${p} ${(cat.p_names || {})[p] || ""}: クラブ`, hint: "クラブの握りの端と、クラブの先を押します。ぶれて見えないときは「このコマは飛ばす」。",
-          points: [{ key: "grip", label: "握りの端", shape: "square" }, { key: "head", label: "クラブの先", shape: "circle" }],
-          // 前のコマの点を初めの位置に置く（§6.5）。押し直せば動く
-          initial: mapTaps(st.taps[p] || last, (q) => fwd(q, k)) });
-        if (r) { st.taps[p] = { grip: back(r.grip, k), head: back(r.head, k) }; last = st.taps[p]; }
+    const clubPts = (p) => (driver && (p === "P2" || p === "P4") ? [...CLUB_PTS, ...WIDTH_PTS] : CLUB_PTS);
+    // 画面の並び（ボール → P2 → 任意で残りのコマ）。前へで戻れるように、番号で進める
+    const base = [];
+    if (st.frames.P1) base.push("ball");
+    if (st.frames.P2) base.push("P2");
+    let screens = base.slice(), i = 0, askedMore = false;
+    for (;;) {
+      if (i >= screens.length) {
+        if (askedMore) { stepProcess(el, st, cat); return; }
+        const more = await askMoreTaps(el, st, cat);
+        if (more === "back") {
+          if (!screens.length) { stepChoose(el, st, cat); return; }
+          i = screens.length - 1;
+          continue;
+        }
+        if (more === "send") { stepProcess(el, st, cat); return; }
+        screens = base.concat(PS.filter((q) => q !== "P2" && st.frames[q]));
+        askedMore = true;
+        continue;
       }
-      stepProcess(el, st, cat);
+      const sc = screens[i];
+      const prog = `点を押す ${lab("count", (i + 1) + " / " + screens.length)}`;
+      let r;
+      if (sc === "ball") {
+        setStep(el, 3, "構えのコマでボールの両端を押します");
+        const c = await canvasOf("P1"), k = scaleOf(c);
+        r = await tapEditor(freshBody(el), { canvas: c, p: "P1", hand, progress: prog, zoomOnFirst: !st.ball, title: `${(cat.p_names || {}).P1 || "構え"}: ボールの両端`,
+          hint: "ボールのあたりを一度押すと拡大します。ボールの左の端と右の端を押します（ボール一個の大きさを物差しにします）。",
+          points: [{ key: "b1", label: "左の端", shape: "half-l" }, { key: "b2", label: "右の端", shape: "half-r" }],
+          initial: st.ball ? { b1: fwd(st.ball[0], k), b2: fwd(st.ball[1], k) } : {} });
+        if (r !== "back") st.ball = r ? [back(r.b1, k), back(r.b2, k)] : null;
+      } else {
+        const p = sc;
+        setStep(el, 3, `${(cat.p_names || {})[p] || p}のクラブを押します`);
+        const c = await canvasOf(p), k = scaleOf(c);
+        const pts = clubPts(p);
+        const wide = pts.length > 2 ? "。ドライバーはクラブの先の両端も押します（先の大きさを物差しにします）" : "";
+        // 前のコマの点を初めの位置に置く（§6.5。握りの端と先だけ）。押し直せば動く
+        const prev = st.taps[p] || (i > 0 && st.taps[screens[i - 1]]) || (p !== "P2" && st.taps.P2) || null;
+        r = await tapEditor(freshBody(el), { canvas: c, p, hand, progress: prog, title: `${(cat.p_names || {})[p] || ""}: クラブ`,
+          hint: p === "P2" ? `クラブの握りの端と、クラブの先（真ん中）を押します${wide}。上げ始めのクラブの先の位置を測ります（最初に見る項目）。`
+            : `クラブの握りの端と、クラブの先を押します${wide}。ぶれて見えないときは「このコマは飛ばす」。`,
+          points: pts,
+          initial: mapTaps(st.taps[p] || (prev && { grip: prev.grip, head: prev.head }), (q) => fwd(q, k)) });
+        if (r !== "back") { if (r) st.taps[p] = mapTaps(r, (q) => back(q, k)); else delete st.taps[p]; }
+      }
+      if (r === "back") {
+        if (i === 0) { stepChoose(el, st, cat); return; }
+        i -= 1;
+        continue;
+      }
+      st.payload = null;
+      i += 1;
+    }
+  }
+  const mapTaps = (t, f) => { const o = {}; for (const [k, v] of Object.entries(t || {})) if (v) o[k] = f(v); return o; };
+
+  // 残りのコマのクラブ（任意）。"more" / "send" / "back" を返す
+  function askMoreTaps(el, st, cat) {
+    return new Promise((resolve) => {
+      setStep(el, 3, "ほかのコマのクラブ（任意）");
+      const body = freshBody(el);
+      const rest = PS.filter((p) => p !== "P2" && st.frames[p]);
+      const cls = classOf(st.club) === "driver" ? "driver" : "iron";
+      const clubItems = (cat.items || []).filter((it) => it.view === st.view && rest.includes(String(it.p || "").split("-").pop()) && /tap/.test((it.measure || {}).how || "")
+        && it.definition_status === "ok" && it.judge === "binary" && !it.same_as && (it.clubs || []).includes(cls)).length;
+      body.innerHTML = `<section class="card"><h2 class="t-headline" style="margin-top:0">クラブの位置を付ける（任意）</h2>
+        <p class="sub">残りのコマ（${rest.map((p) => esc((cat.p_names || {})[p] || p)).join("・")}）でも握りの端と先を押すと、クラブの傾きの項目も測れます（${lab("count", clubItems + "件")}）。一コマ十秒ほどです。</p>
+        <div class="stack"><button type="button" class="btn block" data-more ${rest.length ? "" : "disabled"}>クラブの位置を付ける</button>
+        <button type="button" class="btn primary block" data-send>このまま測る</button>
+        <button type="button" class="btn block" data-tback>${icon("chevron-left")}前へ</button></div></section>`;
+      $("[data-send]", body).addEventListener("click", () => resolve("send"));
+      $("[data-more]", body).addEventListener("click", () => resolve("more"));
+      $("[data-tback]", body).addEventListener("click", () => resolve("back"));
+      enter(el);
     });
   }
 
-  // ④ 選んだコマでだけ体の点を取る → 送って測る
+  // 送る前に、点がコマの中にあるかを確かめる（外なら、どの点を置き直すかを返す）
+  function outsidePoints(st) {
+    const W = st.video.videoWidth, H = st.video.videoHeight;
+    const inside = (q) => Array.isArray(q) && q[0] >= 0 && q[0] <= W && q[1] >= 0 && q[1] <= H;
+    const bad = [];
+    if (st.ball && !st.ball.every(inside)) bad.push("ボールの端");
+    for (const [p, t] of Object.entries(st.taps)) if (!Object.values(t).every(inside)) bad.push(`${p} のクラブ`);
+    return bad;
+  }
+
+  // ④ 選んだコマでだけ体の点を取る → 送って測る。送り直しは同じスイングへ
   async function stepProcess(el, st, cat) {
     setStep(el, 4, "体の点を取って測ります");
-    const body = $("[data-body]", el);
-    const stages = ["コマを切り出す", "体の点を取る", "送って測る"];
-    body.innerHTML = `<section class="card"><ol class="stages" data-stages>${stages.map((s) => `<li>${esc(s)}</li>`).join("")}</ol>
+    const body = freshBody(el);
+    const stages = ["コマを用意する", "体の点を取る", "送って測る"];
+    body.innerHTML = `<section class="card"><h2 class="visually-hidden">測っています</h2><ol class="stages" data-stages>${stages.map((s) => `<li>${esc(s)}</li>`).join("")}</ol>
       <p class="caption">このあいだは画面を閉じないでください。</p><div data-err></div></section>`;
+    enter(el);
     const mark = (i) => { $$("[data-stages] li", body).forEach((li, j) => { li.className = j < i ? "done" : j === i ? "cur" : ""; }); App.say(stages[i] || ""); };
+    const bad = outsidePoints(st);
+    if (bad.length) { showSendError(el, st, cat, body, { status: 400, message: `${bad.join("・")}の点がコマの外です` }); return; }
     let wake = null;
     try { if (navigator.wakeLock) wake = await navigator.wakeLock.request("screen"); } catch { /* 使えなくても続ける */ }
     const t0 = performance.now();
+    let poseErr = "";
     try {
-      mark(0);
-      const chosen = [...PS, ...PS_OPT].filter((p) => st.frames[p]);
-      const shots = {};
-      for (const p of chosen) {
-        await toFrame(st, st.frames[p].frame);
-        shots[p] = { full: frameCanvas(st.video), thumb: frameCanvas(st.video, THUMB_EDGE), keep: frameCanvas(st.video, KEEP_EDGE) };
-      }
-      mark(1);
-      let det = null, poseErr = "";
-      try { det = await poseDetector(); } catch (e) { poseErr = String(e && e.message || e); }
-      const tp = performance.now();
-      const frames = [];
-      for (const p of chosen) {
-        let lms = null;
-        if (det) {
-          try { lms = det.detect(shots[p].full, { t: st.frames[p].t, frame: st.frames[p].frame, p, view: st.view, width: st.video.videoWidth, height: st.video.videoHeight }); } catch (e) { poseErr = String(e && e.message || e); }
+      if (!st.payload) {
+        mark(0);
+        const chosen = [...PS, ...PS_OPT].filter((p) => st.frames[p]);
+        const shots = {};
+        for (const p of chosen) shots[p] = await blobCanvas(st.frames[p].blob);
+        mark(1);
+        let det = null;
+        try { det = await poseDetector(); } catch (e) { poseErr = String(e && e.message || e); }
+        const tp = performance.now();
+        const frames = [];
+        let noVis = 0;
+        for (const p of chosen) {
+          let lms = null;
+          if (det) {
+            try { lms = det.detect(shots[p], { t: st.frames[p].t, frame: st.frames[p].frame, p, view: st.view, width: st.video.videoWidth, height: st.video.videoHeight }); } catch (e) { poseErr = String(e && e.message || e); }
+          }
+          if (lms && lms.length === 33 && lms.every((q) => q.visibility === undefined)) noVis += 1;
+          const thumb = await b64(await toBlob(scaled(shots[p], shots[p].width, shots[p].height, THUMB_EDGE), 0.8));
+          frames.push({ checkpoint: p, t: st.frames[p].t, frame: st.frames[p].frame, source: "manual", landmarks: lms && lms.length === 33 ? lms : [], taps: st.taps[p] || {}, thumb });
+          st.frames[p].keep = scaled(shots[p], shots[p].width, shots[p].height, KEEP_EDGE);
         }
-        const thumb = await b64(await toBlob(shots[p].thumb, 0.8));
-        frames.push({ checkpoint: p, t: st.frames[p].t, frame: st.frames[p].frame, source: "manual", landmarks: lms && lms.length === 33 ? lms : [], taps: st.taps[p] || {}, thumb });
+        st.perf.pose_ms_per_frame = chosen.length ? Math.round((performance.now() - tp) / chosen.length) : 0;
+        st.perf.pose_backend = det ? det.backend : "none";
+        if (noVis) st.perf.visibility_missing = noVis;
+        st.payload = { frames, missing: [...st.missing], ball: st.ball || [], poseErr };
       }
-      st.perf.pose_ms_per_frame = chosen.length ? Math.round((performance.now() - tp) / chosen.length) : 0;
-      st.perf.pose_backend = det ? det.backend : "none";
+      poseErr = st.payload.poseErr;
       mark(2);
       const p = await App.ensurePlayer();
-      let sid = st.session;
-      if (!sid) {
-        const s = await api("POST", "/v1/sessions", { player_id: p.id, date: st.date, location: "" });
-        sid = s.id;
+      if (!st.sid) {
+        st.sid = st.session || (await api("POST", "/v1/sessions", { player_id: p.id, date: st.date, location: "" })).id;
       }
-      const cap = { container: st.container, fps_step: Math.round(st.fpsStep * 100) / 100, element_duration: Math.round((st.duration || 0) * 1000) / 1000,
-        file_type: st.file.type || "", size_mb: Math.round((st.file.size / 1048576) * 10) / 10, ua: (navigator.userAgent || "").slice(0, 160), perf: { ...st.perf, total_ms: Math.round(performance.now() - t0) } };
-      const sw = await api("POST", `/v1/sessions/${sid}/swings`, { view: st.view, club: st.club, club_class: classOf(st.club), fps: st.fps || 0, fps_source: st.fpsSource,
-        width: st.video.videoWidth, height: st.video.videoHeight, duration: st.duration || 0, ball: st.ball || [], capture: cap });
-      // 長辺 1024px の JPEG は端末にだけ置く（サーバーには送らない）
-      for (const q of chosen) keepFrame(`${sw.id}:${q}`, await toBlob(shots[q].keep, 0.85));
-      await api("PUT", `/v1/swings/${sw.id}/frames`, { frames, missing: [...st.missing], ball: st.ball || [] });
-      App.invalidate(sid);
+      if (!st.swingId) {
+        const cap = { container: st.container, fps_step: Math.round(st.fpsStep * 100) / 100, element_duration: Math.round((st.duration || 0) * 1000) / 1000,
+          file_type: st.file.type || "", size_mb: Math.round((st.file.size / 1048576) * 10) / 10, ua: (navigator.userAgent || "").slice(0, 160), perf: { ...st.perf, total_ms: Math.round(performance.now() - t0) } };
+        const sw = await api("POST", `/v1/sessions/${st.sid}/swings`, { view: st.view, club: st.club, club_class: classOf(st.club), fps: st.fps || 0, fps_source: st.fpsSource,
+          width: st.video.videoWidth, height: st.video.videoHeight, duration: st.duration || 0, ball: st.ball || [], capture: cap });
+        st.swingId = sw.id;
+        // 長辺 1024px の JPEG は端末にだけ置く（サーバーには送らない）
+        for (const q of Object.keys(st.frames)) if (st.frames[q].keep) keepFrame(`${sw.id}:${q}`, await toBlob(st.frames[q].keep, 0.85));
+      }
+      await api("PUT", `/v1/swings/${st.swingId}/frames`, { frames: st.payload.frames, missing: st.payload.missing, ball: st.payload.ball });
+      App.invalidate(st.sid);
+      if (window.Checks) Checks.invalidate(st.sid);
       if (wake) wake.release().catch(() => {});
+      st.frames = {}; st.missing.clear(); // 送り終えたので、戻るで「消えます」と聞かない
       App.toast(poseErr ? "体の点を取れなかったコマがあります（その項目は判断できないになります）" : "測りました");
-      App.go(`/session/${sid}/check`);
+      App.go(`/session/${st.sid}/check`);
     } catch (e) {
       if (wake) wake.release().catch(() => {});
-      $("[data-err]", body).innerHTML = App.errOf(e, { what: "測れませんでした", saved: "選んだコマはこの画面に残っています。", next: "もう一度押すか、つながる所で試してください。" }) + `<button type="button" class="btn block" data-again>もう一度送る</button>`;
-      const b = $("[data-again]", body);
-      if (b) b.addEventListener("click", () => stepProcess(el, st, cat));
+      showSendError(el, st, cat, body, e);
     }
+  }
+
+  // 送れなかったとき: 入力の誤り（400）とつながらない・測れない（圏外・503）を分ける
+  function showSendError(el, st, cat, body, e) {
+    const input = e && e.status === 400;
+    const saved = st.swingId ? "スイングは作れています。もう一度送ると、同じスイングにコマを入れ直します（二本にはなりません）。" : "選んだコマと押した点は、この画面に残っています。";
+    $("[data-err]", body).innerHTML = input
+      ? App.errorHtml({ what: "押した点に直すところがあります", saved, next: `${e.message || ""}。点を置き直してから、もう一度送ってください。` })
+        + `<button type="button" class="btn primary block" data-fix>点を置き直す</button>`
+      : App.errOf(e, { what: "送れませんでした", saved, next: "つながる所で、もう一度送ってください。" }) + `<button type="button" class="btn primary block" data-again>もう一度送る</button>`;
+    const again = $("[data-again]", body);
+    if (again) { again.addEventListener("click", () => stepProcess(el, st, cat)); again.focus(); }
+    const fix = $("[data-fix]", body);
+    if (fix) { fix.addEventListener("click", () => { st.payload = null; stepTaps(el, st, cat); }); fix.focus(); }
   }
 
   App.route("/video", render, { tab: "record", noTabbar: true });

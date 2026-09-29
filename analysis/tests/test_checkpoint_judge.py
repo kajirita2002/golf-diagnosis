@@ -348,7 +348,7 @@ def test_口():
     raw = c.get("/v1/checkpoints").json()
     assert any("{lead}" in it["title"] for it in raw["items"])
     m = c.post("/v1/checkpoints/measure", json={"swing": syn.swing("dtl", faults=("p2_inside",))}).json()
-    assert m["catalog_version"] == "checkpoints/1.0-pgag" and m["judge_version"] == "judge/1.0"
+    assert m["catalog_version"] == "checkpoints/1.0-pgag" and m["judge_version"] == "judge/1.1"
     m["swing_id"] = 9
     f = c.post("/v1/checkpoints/focus", json={"swings": [m, {**m, "swing_id": 10}, {**m, "swing_id": 11}], "handedness": "R"}).json()
     assert f["focus"] == "iron.p2.dtl.head_vs_hands"
@@ -356,3 +356,5 @@ def test_口():
     assert x["fault_label"] == "クラブが体の内側に引かれています"
     assert c.post("/v1/checkpoints/measure", json={"swing": {"view": "side", "frames": {}}}).status_code == 400
     assert c.get("/healthz").json()["checkpoints_version"] == "checkpoints/1.0-pgag"
+    st = c.get("/v1/checkpoints/stamp").json()
+    assert st["stamp"] == m["stamp"] and len(st["stamp"]) == 16

@@ -253,12 +253,15 @@
      "pose.heels",
      "pose.ankles"
     ],
-    "proxy": "足の内側 → かかとの点、スタンスの真ん中 → 両足首の点の真ん中、ボールの位置 → 構えのコマで押した二点の真ん中",
+    "proxy": "{lead}足の内側 → {lead}かかとの点からボール一個{trail}側（足の幅の半分と読む・仮）、ボールの位置 → 構えのコマで押した二点の真ん中",
     "spec": {
      "kind": "offset_x",
      "p": "P1",
      "pt": "ball",
-     "ref": "lead_heel"
+     "ref": {
+      "ref": "lead_heel",
+      "dx_ball": -1
+     }
     }
    },
    "vision": null,
@@ -323,12 +326,15 @@
      "pose.heels",
      "pose.ankles"
     ],
-    "proxy": "足の内側 → かかとの点、スタンスの真ん中 → 両足首の点の真ん中、ボールの位置 → 構えのコマで押した二点の真ん中",
+    "proxy": "{lead}足の内側 → {lead}かかとの点からボール一個{trail}側（足の幅の半分と読む・仮）、ボールの位置 → 構えのコマで押した二点の真ん中",
     "spec": {
      "kind": "offset_x",
      "p": "P1",
      "pt": "ball",
-     "ref": "lead_heel"
+     "ref": {
+      "ref": "lead_heel",
+      "dx_ball": -1
+     }
     }
    },
    "vision": null,
@@ -387,12 +393,15 @@
      "pose.heels",
      "pose.ankles"
     ],
-    "proxy": "足の内側 → かかとの点、スタンスの真ん中 → 両足首の点の真ん中、ボールの位置 → 構えのコマで押した二点の真ん中",
+    "proxy": "{lead}足の内側 → {lead}かかとの点からボール一個{trail}側（足の幅の半分と読む・仮）、ボールの位置 → 構えのコマで押した二点の真ん中",
     "spec": {
      "kind": "offset_x",
      "p": "P1",
      "pt": "ball",
-     "ref": "lead_heel"
+     "ref": {
+      "ref": "lead_heel",
+      "dx_ball": -1
+     }
     }
    },
    "vision": null,
@@ -2026,17 +2035,18 @@
      "pose.feet",
      "ball"
     ],
-    "proxy": "手の中心 → 両手首の点の真ん中、足の内側 → かかとの点",
+    "proxy": "手の中心 → 両手首の点の真ん中、{trail}足の内側と外側 → {trail}かかとの点からボール一個ずつ（足の幅の半分と読む・仮）",
     "spec": {
      "kind": "band_x",
      "p": "P2",
      "pt": "H",
      "a": {
-      "ref": "trail_heel"
+      "ref": "trail_heel",
+      "dx_ball": 1
      },
      "b": {
       "ref": "trail_heel",
-      "dx_ball": -2
+      "dx_ball": -3
      }
     }
    },
@@ -2055,7 +2065,8 @@
    },
    "definition_status": "ok",
    "checked_by": "",
-   "version": "checkpoints/1.0-pgag"
+   "version": "checkpoints/1.0-pgag",
+   "note": "足の内側と外側を、かかとの点からボール一個ずつ離れた所と読むのはこちらの読みです（要確認）"
   },
   {
    "id": "iron.p2.fo.hand_height",
@@ -2118,7 +2129,8 @@
    },
    "definition_status": "ok",
    "checked_by": "",
-   "version": "checkpoints/1.0-pgag"
+   "version": "checkpoints/1.0-pgag",
+   "note": "幅（腰の高さからボール一個まで）はガイドに数が無く、こちらの読みです（要確認）"
   },
   {
    "id": "iron.p3.dtl.hands",
@@ -2134,14 +2146,14 @@
    "ok_text": "手が胸の真ん中から{trail}胸のあいだにあります",
    "faults": [
     {
-     "id": "in",
+     "id": "out",
      "when": "lo",
-     "label": "手が体の内側へ入っています"
+     "label": "手が体から離れています"
     },
     {
-     "id": "out",
+     "id": "in",
      "when": "hi",
-     "label": "手が体から離れています"
+     "label": "手が体の内側へ入っています"
     }
    ],
    "range": {
@@ -2168,6 +2180,10 @@
      },
      "b": {
       "ref": "trail_shoulder"
+     },
+     "fault_x": {
+      "+x": "out",
+      "-x": "in"
      }
     }
    },
@@ -2218,8 +2234,7 @@
     "lo": 30,
     "hi": 40,
     "side": "both",
-    "speed_dependent": false,
-    "unsigned": true
+    "speed_dependent": false
    },
    "measure": {
     "how": "tap",
@@ -2229,10 +2244,11 @@
     ],
     "proxy": "クラブの握りの端 → あなたが押した点",
     "spec": {
-     "kind": "ang_v",
+     "kind": "shaft_v",
      "p": "P3",
      "a": "grip",
-     "b": "head"
+     "b": "head",
+     "side": -1
     }
    },
    "vision": null,
@@ -2394,18 +2410,22 @@
    "faults": [
     {
      "id": "over",
-     "when": "hi",
+     "when": "lo",
      "label": "手首が折れすぎています"
+    },
+    {
+     "id": "under",
+     "when": "hi",
+     "label": "手首の折れが浅いです"
     }
    ],
    "range": {
     "quantity": "cock",
     "unit": "deg",
-    "lo": null,
+    "lo": 0,
     "hi": 40,
-    "side": "hi_only",
-    "speed_dependent": false,
-    "unsigned": true
+    "side": "both",
+    "speed_dependent": false
    },
    "measure": {
     "how": "tap",
@@ -2415,10 +2435,11 @@
     ],
     "proxy": "クラブの握りの端 → あなたが押した点",
     "spec": {
-     "kind": "ang_v",
+     "kind": "shaft_v",
      "p": "P3",
      "a": "grip",
-     "b": "head"
+     "b": "head",
+     "side": -1
     }
    },
    "vision": null,
@@ -2776,8 +2797,7 @@
     "lo": 40,
     "hi": 70,
     "side": "both",
-    "speed_dependent": false,
-    "unsigned": true
+    "speed_dependent": false
    },
    "measure": {
     "how": "tap",
@@ -2787,10 +2807,11 @@
     ],
     "proxy": "クラブの握りの端 → あなたが押した点",
     "spec": {
-     "kind": "ang_v",
+     "kind": "shaft_v",
      "p": "P4",
      "a": "grip",
-     "b": "head"
+     "b": "head",
+     "side": 1
     }
    },
    "vision": null,
@@ -2891,14 +2912,14 @@
    "ok_text": "手が胸の真ん中から{trail}胸のあいだにあります",
    "faults": [
     {
-     "id": "in",
+     "id": "out",
      "when": "lo",
-     "label": "手が体の内側へ入っています"
+     "label": "手が体から離れています"
     },
     {
-     "id": "out",
+     "id": "in",
      "when": "hi",
-     "label": "手が体から離れています"
+     "label": "手が体の内側へ入っています"
     }
    ],
    "range": {
@@ -2925,6 +2946,10 @@
      },
      "b": {
       "ref": "trail_shoulder"
+     },
+     "fault_x": {
+      "+x": "out",
+      "-x": "in"
      }
     }
    },
@@ -2975,8 +3000,7 @@
     "lo": 30,
     "hi": 40,
     "side": "both",
-    "speed_dependent": false,
-    "unsigned": true
+    "speed_dependent": false
    },
    "measure": {
     "how": "tap",
@@ -2986,10 +3010,11 @@
     ],
     "proxy": "クラブの握りの端 → あなたが押した点",
     "spec": {
-     "kind": "ang_v",
+     "kind": "shaft_v",
      "p": "P5",
      "a": "grip",
-     "b": "head"
+     "b": "head",
+     "side": -1
     }
    },
    "vision": null,
@@ -3203,14 +3228,14 @@
    "ok_text": "手首の折れを保てています",
    "faults": [
     {
-     "id": "early",
+     "id": "over",
      "when": "lo",
-     "label": "手首の折れが早くほどけています"
+     "label": "手首が折れすぎています"
     },
     {
-     "id": "over",
+     "id": "early",
      "when": "hi",
-     "label": "手首が折れすぎています"
+     "label": "手首の折れが早くほどけています"
     }
    ],
    "range": {
@@ -3219,8 +3244,7 @@
     "lo": 20,
     "hi": 40,
     "side": "both",
-    "speed_dependent": false,
-    "unsigned": true
+    "speed_dependent": false
    },
    "measure": {
     "how": "tap",
@@ -3230,10 +3254,11 @@
     ],
     "proxy": "クラブの握りの端 → あなたが押した点",
     "spec": {
-     "kind": "ang_v",
+     "kind": "shaft_v",
      "p": "P5",
      "a": "grip",
-     "b": "head"
+     "b": "head",
+     "side": -1
     }
    },
    "vision": null,
@@ -3439,8 +3464,7 @@
     "lo": 10,
     "hi": 20,
     "side": "both",
-    "speed_dependent": false,
-    "unsigned": true
+    "speed_dependent": false
    },
    "measure": {
     "how": "pose",
@@ -3449,10 +3473,11 @@
     ],
     "proxy": "{lead}腕 → {lead}肩と{lead}手首の点の線",
     "spec": {
-     "kind": "ang_v",
+     "kind": "shaft_v",
      "p": "P6",
      "a": "lead_shoulder",
-     "b": "lead_wrist"
+     "b": "lead_wrist",
+     "side": 1
     }
    },
    "vision": null,
@@ -3860,7 +3885,8 @@
    },
    "definition_status": "ok",
    "checked_by": "",
-   "version": "checkpoints/1.0-pgag"
+   "version": "checkpoints/1.0-pgag",
+   "note": "幅（ボール半個まで）はガイドに数が無く、こちらの読みです（要確認）"
   },
   {
    "id": "iron.p7.fo.shaft",
@@ -4308,16 +4334,16 @@
      "pose.feet",
      "ball"
     ],
-    "proxy": "手の中心 → 両手首の点の真ん中、かかと → かかとの点",
+    "proxy": "手の中心 → 両手首の点の真ん中、{lead}かかと → {lead}かかとの点（後ろからは奥の足なので、見えにくいと測らない）",
     "spec": {
      "kind": "band_x",
      "p": "P9",
      "pt": "H",
      "a": {
-      "ref": "foot.heel"
+      "ref": "lead_heel"
      },
      "b": {
-      "ref": "foot.heel",
+      "ref": "lead_heel",
       "dx_ball": 4
      }
     }
@@ -4364,8 +4390,7 @@
     "lo": null,
     "hi": 30,
     "side": "hi_only",
-    "speed_dependent": false,
-    "unsigned": true
+    "speed_dependent": false
    },
    "measure": {
     "how": "tap",
@@ -4375,10 +4400,12 @@
     ],
     "proxy": "クラブの握りの端 → あなたが押した点",
     "spec": {
-     "kind": "ang_v",
+     "kind": "shaft_v",
      "p": "P9",
      "a": "grip",
-     "b": "head"
+     "b": "head",
+     "side": -1,
+     "cross": "unknown"
     }
    },
    "vision": null,
@@ -4456,7 +4483,8 @@
    },
    "definition_status": "ok",
    "checked_by": "",
-   "version": "checkpoints/1.0-pgag"
+   "version": "checkpoints/1.0-pgag",
+   "note": "幅（傾きの差 十まで）はガイドに数が無く、こちらの読みです（要確認）"
   },
   {
    "id": "iron.p9.fo.side_bend",
@@ -5325,17 +5353,18 @@
      "pose.feet",
      "ball"
     ],
-    "proxy": "手の中心 → 両手首の点の真ん中、足の内側 → かかとの点",
+    "proxy": "手の中心 → 両手首の点の真ん中、{trail}足の内側と外側 → {trail}かかとの点からボール一個ずつ（足の幅の半分と読む・仮）",
     "spec": {
      "kind": "band_x",
      "p": "P2",
      "pt": "H",
      "a": {
-      "ref": "trail_heel"
+      "ref": "trail_heel",
+      "dx_ball": 1
      },
      "b": {
       "ref": "trail_heel",
-      "dx_ball": -2
+      "dx_ball": -3
      }
     }
    },
@@ -5354,7 +5383,8 @@
    },
    "definition_status": "ok",
    "checked_by": "",
-   "version": "checkpoints/1.0-pgag"
+   "version": "checkpoints/1.0-pgag",
+   "note": "足の内側と外側を、かかとの点からボール一個ずつ離れた所と読むのはこちらの読みです（要確認）"
   },
   {
    "id": "driver.p2.fo.hand_height",
@@ -5417,7 +5447,8 @@
    },
    "definition_status": "ok",
    "checked_by": "",
-   "version": "checkpoints/1.0-pgag"
+   "version": "checkpoints/1.0-pgag",
+   "note": "幅（腰の高さからボール一個まで）はガイドに数が無く、こちらの読みです（要確認）"
   },
   {
    "id": "driver.p3.dtl.hands",
@@ -5433,14 +5464,14 @@
    "ok_text": "手が胸の真ん中から{trail}胸のあいだにあります",
    "faults": [
     {
-     "id": "in",
+     "id": "out",
      "when": "lo",
-     "label": "手が体の内側へ入っています"
+     "label": "手が体から離れています"
     },
     {
-     "id": "out",
+     "id": "in",
      "when": "hi",
-     "label": "手が体から離れています"
+     "label": "手が体の内側へ入っています"
     }
    ],
    "range": {
@@ -5467,6 +5498,10 @@
      },
      "b": {
       "ref": "trail_shoulder"
+     },
+     "fault_x": {
+      "+x": "out",
+      "-x": "in"
      }
     }
    },
@@ -5517,8 +5552,7 @@
     "lo": 40,
     "hi": 50,
     "side": "both",
-    "speed_dependent": false,
-    "unsigned": true
+    "speed_dependent": false
    },
    "measure": {
     "how": "tap",
@@ -5528,10 +5562,11 @@
     ],
     "proxy": "クラブの握りの端 → あなたが押した点",
     "spec": {
-     "kind": "ang_v",
+     "kind": "shaft_v",
      "p": "P3",
      "a": "grip",
-     "b": "head"
+     "b": "head",
+     "side": -1
     }
    },
    "vision": null,
@@ -5693,18 +5728,22 @@
    "faults": [
     {
      "id": "over",
-     "when": "hi",
+     "when": "lo",
      "label": "手首が折れすぎています"
+    },
+    {
+     "id": "under",
+     "when": "hi",
+     "label": "手首の折れが浅いです"
     }
    ],
    "range": {
     "quantity": "cock",
     "unit": "deg",
-    "lo": null,
+    "lo": 0,
     "hi": 40,
-    "side": "hi_only",
-    "speed_dependent": false,
-    "unsigned": true
+    "side": "both",
+    "speed_dependent": false
    },
    "measure": {
     "how": "tap",
@@ -5714,10 +5753,11 @@
     ],
     "proxy": "クラブの握りの端 → あなたが押した点",
     "spec": {
-     "kind": "ang_v",
+     "kind": "shaft_v",
      "p": "P3",
      "a": "grip",
-     "b": "head"
+     "b": "head",
+     "side": -1
     }
    },
    "vision": null,
@@ -5936,7 +5976,8 @@
         "hi": 1,
         "side": "hi_only"
        },
-       "fault": "wide"
+       "fault": "wide",
+       "axis": "x"
       }
      ]
     }
@@ -6215,14 +6256,14 @@
    "ok_text": "手が胸の真ん中から{trail}胸のあいだにあります",
    "faults": [
     {
-     "id": "in",
+     "id": "out",
      "when": "lo",
-     "label": "手が体の内側へ入っています"
+     "label": "手が体から離れています"
     },
     {
-     "id": "out",
+     "id": "in",
      "when": "hi",
-     "label": "手が体から離れています"
+     "label": "手が体の内側へ入っています"
     }
    ],
    "range": {
@@ -6249,6 +6290,10 @@
      },
      "b": {
       "ref": "trail_shoulder"
+     },
+     "fault_x": {
+      "+x": "out",
+      "-x": "in"
      }
     }
    },
@@ -6299,8 +6344,7 @@
     "lo": 40,
     "hi": 50,
     "side": "both",
-    "speed_dependent": false,
-    "unsigned": true
+    "speed_dependent": false
    },
    "measure": {
     "how": "tap",
@@ -6310,10 +6354,11 @@
     ],
     "proxy": "クラブの握りの端 → あなたが押した点",
     "spec": {
-     "kind": "ang_v",
+     "kind": "shaft_v",
      "p": "P5",
      "a": "grip",
-     "b": "head"
+     "b": "head",
+     "side": -1
     }
    },
    "vision": null,
@@ -6524,14 +6569,14 @@
    "ok_text": "手首の折れを保てています",
    "faults": [
     {
-     "id": "early",
+     "id": "over",
      "when": "lo",
-     "label": "手首の折れが早くほどけています"
+     "label": "手首が折れすぎています"
     },
     {
-     "id": "over",
+     "id": "early",
      "when": "hi",
-     "label": "手首が折れすぎています"
+     "label": "手首の折れが早くほどけています"
     }
    ],
    "range": {
@@ -6540,8 +6585,7 @@
     "lo": 30,
     "hi": 60,
     "side": "both",
-    "speed_dependent": false,
-    "unsigned": true
+    "speed_dependent": false
    },
    "measure": {
     "how": "tap",
@@ -6551,10 +6595,11 @@
     ],
     "proxy": "クラブの握りの端 → あなたが押した点",
     "spec": {
-     "kind": "ang_v",
+     "kind": "shaft_v",
      "p": "P5",
      "a": "grip",
-     "b": "head"
+     "b": "head",
+     "side": -1
     }
    },
    "vision": null,
@@ -6757,8 +6802,7 @@
     "lo": 15,
     "hi": 25,
     "side": "both",
-    "speed_dependent": false,
-    "unsigned": true
+    "speed_dependent": false
    },
    "measure": {
     "how": "pose",
@@ -6767,10 +6811,11 @@
     ],
     "proxy": "{lead}腕 → {lead}肩と{lead}手首の点の線",
     "spec": {
-     "kind": "ang_v",
+     "kind": "shaft_v",
      "p": "P6",
      "a": "lead_shoulder",
-     "b": "lead_wrist"
+     "b": "lead_wrist",
+     "side": 1
     }
    },
    "vision": null,
@@ -6863,14 +6908,14 @@
    "ok_text": "握りの端が{trail}脚の内側から少し外にあります",
    "faults": [
     {
-     "id": "trail",
+     "id": "lead",
      "when": "lo",
-     "label": "握りの端が{trail}へ行きすぎています"
+     "label": "握りの端が{lead}側に出ています"
     },
     {
-     "id": "lead",
+     "id": "trail",
      "when": "hi",
-     "label": "握りの端が{lead}側に出ています"
+     "label": "握りの端が{trail}へ行きすぎています"
     }
    ],
    "range": {
@@ -6889,17 +6934,18 @@
      "pose.knees",
      "ball"
     ],
-    "proxy": "クラブの握りの端 → あなたが押した点、{trail}脚の内側 → {trail}膝の点",
+    "proxy": "クラブの握りの端 → あなたが押した点、{trail}脚の内側と外側 → {trail}膝の点からボール一個ずつ（脚の幅の半分と読む・仮）",
     "spec": {
      "kind": "band_x",
      "p": "P6",
      "pt": "grip",
      "a": {
-      "ref": "trail_knee"
+      "ref": "trail_knee",
+      "dx_ball": 1
      },
      "b": {
       "ref": "trail_knee",
-      "dx_ball": -1
+      "dx_ball": -2
      }
     }
    },
@@ -6918,7 +6964,8 @@
    },
    "definition_status": "ok",
    "checked_by": "",
-   "version": "checkpoints/1.0-pgag"
+   "version": "checkpoints/1.0-pgag",
+   "note": "脚の内側と外側を、膝の点からボール一個ずつ離れた所と読むのはこちらの読みです（要確認）"
   },
   {
    "id": "driver.p6.fo.side_bend",
@@ -7766,7 +7813,8 @@
    },
    "definition_status": "ok",
    "checked_by": "",
-   "version": "checkpoints/1.0-pgag"
+   "version": "checkpoints/1.0-pgag",
+   "note": "幅（傾きの差 十まで）はガイドに数が無く、こちらの読みです（要確認）"
   },
   {
    "id": "driver.p9.fo.side_bend",
@@ -8080,8 +8128,7 @@
     "lo": 30,
     "hi": null,
     "side": "lo_only",
-    "speed_dependent": false,
-    "unsigned": true
+    "speed_dependent": false
    },
    "measure": {
     "how": "tap",
@@ -8091,10 +8138,11 @@
     ],
     "proxy": "クラブの握りの端 → あなたが押した点",
     "spec": {
-     "kind": "ang_v",
+     "kind": "shaft_v",
      "p": "P5",
      "a": "grip",
-     "b": "head"
+     "b": "head",
+     "side": -1
     }
    },
    "vision": null,
@@ -8265,8 +8313,7 @@
     "lo": null,
     "hi": 30,
     "side": "hi_only",
-    "speed_dependent": false,
-    "unsigned": true
+    "speed_dependent": false
    },
    "measure": {
     "how": "tap",
@@ -8276,10 +8323,12 @@
     ],
     "proxy": "クラブの握りの端 → あなたが押した点",
     "spec": {
-     "kind": "ang_v",
+     "kind": "shaft_v",
      "p": "P6_5",
      "a": "grip",
-     "b": "head"
+     "b": "head",
+     "side": 1,
+     "cross": "unknown"
     }
    },
    "vision": null,
@@ -8426,7 +8475,7 @@
    "clubs": [
     "iron"
    ],
-   "p": "P5",
+   "p": "P5-P6",
    "view": "fo",
    "optional": false,
    "title": "起き上がり（正面）",
@@ -8456,12 +8505,40 @@
     ],
     "proxy": "骨盤 → 両腰の点の線、胸 → 両肩の点の線",
     "spec": {
-     "kind": "ang_between",
+     "kind": "all",
      "p": "P5",
-     "a1": "lead_hip",
-     "b1": "trail_hip",
-     "a2": "lead_shoulder",
-     "b2": "trail_shoulder"
+     "parts": [
+      {
+       "kind": "ang_between",
+       "a1": "lead_hip",
+       "b1": "trail_hip",
+       "a2": "lead_shoulder",
+       "b2": "trail_shoulder",
+       "p": "P5",
+       "unit": "deg",
+       "range": {
+        "lo": null,
+        "hi": 10,
+        "side": "hi_only"
+       },
+       "fault": "ext"
+      },
+      {
+       "kind": "ang_between",
+       "a1": "lead_hip",
+       "b1": "trail_hip",
+       "a2": "lead_shoulder",
+       "b2": "trail_shoulder",
+       "p": "P6",
+       "unit": "deg",
+       "range": {
+        "lo": null,
+        "hi": 10,
+        "side": "hi_only"
+       },
+       "fault": "ext"
+      }
+     ]
     }
    },
    "vision": null,
@@ -8489,7 +8566,7 @@
    "clubs": [
     "iron"
    ],
-   "p": "P5",
+   "p": "P5-P6",
    "view": "dtl",
    "optional": false,
    "title": "起き上がり（後ろ）",
@@ -8519,11 +8596,38 @@
     ],
     "proxy": "胴と太もも → {trail}肩・{trail}腰・{trail}膝の点がつくる形（「腰の角度」をこう読むのはこちらの解釈）",
     "spec": {
-     "kind": "joint",
+     "kind": "all",
      "p": "P5",
-     "a": "trail_shoulder",
-     "b": "trail_hip",
-     "c": "trail_knee"
+     "parts": [
+      {
+       "kind": "joint",
+       "a": "trail_shoulder",
+       "b": "trail_hip",
+       "c": "trail_knee",
+       "p": "P5",
+       "unit": "deg",
+       "range": {
+        "lo": null,
+        "hi": 160,
+        "side": "hi_only"
+       },
+       "fault": "ext"
+      },
+      {
+       "kind": "joint",
+       "a": "trail_shoulder",
+       "b": "trail_hip",
+       "c": "trail_knee",
+       "p": "P6",
+       "unit": "deg",
+       "range": {
+        "lo": null,
+        "hi": 160,
+        "side": "hi_only"
+       },
+       "fault": "ext"
+      }
+     ]
     }
    },
    "vision": null,
@@ -9451,7 +9555,13 @@
      "a1": "lead_shoulder",
      "b1": "lead_wrist",
      "a2": "grip",
-     "b2": "head"
+     "b2": "head",
+     "out_if": {
+      "pt": "head",
+      "of": "H",
+      "side": "-x",
+      "why": "腕とクラブは離れているが、クラブの先が手より内側ではない（ガイドが範囲の外とするのは両方そろったとき）"
+     }
     }
    },
    "vision": null,
@@ -9518,7 +9628,7 @@
    "vision": null,
    "judgeable": "measurable",
    "needs_note": "",
-   "judge": "binary",
+   "judge": "reference",
    "domino_rank": 4,
    "l1_links": [],
    "tags": [],
@@ -9531,7 +9641,7 @@
    "definition_status": "ok",
    "checked_by": "",
    "version": "checkpoints/1.0-pgag",
-   "note": "保つの幅をクラブの傾き十の差と読むのはこちらの読み（要確認）"
+   "note": "「保つ」の幅はガイドに数が無いので、合否を出さず参考にしています（人が幅を決めたら判定に上げる）。後ろからのトップのクラブは短く写るので、傾きの差は大きくぶれます"
   },
   {
    "id": "pow.turn",
@@ -9583,7 +9693,6 @@
    "id": "pow.head_fb",
    "group": "power",
    "clubs": [
-    "iron",
     "driver"
    ],
    "p": "P1-P4",
@@ -9631,7 +9740,7 @@
    "judgeable": "measurable",
    "needs_note": "",
    "judge": "binary",
-   "domino_rank": 1,
+   "domino_rank": 4,
    "l1_links": [
     "S8"
    ],
@@ -9815,7 +9924,11 @@
        "driver.p4.fo.lead_arm",
        "driver.p4.fo.trail_elbow"
       ]
-     }
+     },
+     "faults": [
+      "bent",
+      "folded"
+     ]
     }
    },
    "vision": null,
@@ -10780,7 +10893,7 @@
    "judgeable": "measurable",
    "needs_note": "",
    "judge": "binary",
-   "domino_rank": 1,
+   "domino_rank": 3,
    "l1_links": [],
    "tags": [
     "distance"

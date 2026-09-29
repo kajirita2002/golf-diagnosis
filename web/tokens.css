@@ -399,7 +399,8 @@ body.no-tabbar .toast{bottom:auto;top:calc(env(safe-area-inset-top) + var(--s4))
 .vidcard svg.icon{width:28px;height:28px;color:var(--brand);flex:none}
 /* コマ: 元の縦横比のまま全幅（3:4 に切らない） */
 .vframe{background:var(--surface-2);border-radius:var(--r-m);overflow:hidden;line-height:0}
-.vframe video,.vframe .vid{display:block;width:100%;height:auto;max-height:62vh;object-fit:contain;background:var(--surface-2)}
+/* 縦長の動画でも、選ぶボタンとコマ送りが同じ画面に入るように高さを抑える */
+.vframe video,.vframe .vid{display:block;width:100%;height:auto;max-height:45vh;object-fit:contain;background:var(--surface-2)}
 .scrub{margin:var(--s2) 0}
 .scrub input[type=range]{width:100%;min-height:44px}
 .stepbtns{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--s1)}
@@ -409,20 +410,30 @@ body.no-tabbar .toast{bottom:auto;top:calc(env(safe-area-inset-top) + var(--s4))
 .pdef{flex:1 1 auto;min-width:0}
 .psample{margin:0;flex:0 0 96px;width:96px;height:96px;color:var(--sub);display:flex;align-items:center;justify-content:center}
 .psample svg{width:100%;height:100%}
-.pchips{display:flex;gap:var(--s1);overflow-x:auto;padding:var(--s2) 0}
-.pchips-sep{flex:0 0 var(--s2)}
-.pchip{flex:0 0 auto;display:inline-flex;align-items:center;gap:var(--s1);min-width:52px;min-height:44px;padding:0 var(--s2);border-radius:var(--r-s);
-  border:1px solid var(--line-strong);background:var(--surface);color:var(--ink);font-weight:600;cursor:pointer}
+/* 必須の七つは一行の七等分（横に隠れる続きを作らない）。320px でも 44px 取れるよう左右の余白まで使う */
+.pchips{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:1px;padding:var(--s2) 0;margin:0 calc(-1 * var(--s4))}
+.pchips.opt{display:flex;align-items:center;gap:var(--s1);margin:0;padding-top:0}
+.pchips.opt .pchip{flex:0 0 56px}
+.pchip{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0;min-width:0;min-height:48px;padding:0;border-radius:var(--r-s);
+  border:1px solid var(--line-strong);background:var(--surface);color:var(--ink);font-weight:600;font-size:.8125rem;line-height:1.2;cursor:pointer}
 .pchip.done{background:var(--good-weak);color:var(--good)}
 .pchip.miss{border-style:dashed;color:var(--sub)}
+.pchip.wrong{background:var(--warn-weak);color:var(--warn);border-color:var(--warn)}
+.choosebtns{margin-top:var(--s2);gap:var(--s2)}
+.choosebtns .btn{min-height:48px}
 .pchip[aria-current="step"]{outline:2px solid var(--brand);outline-offset:1px}
 /* タップ（§6.5）: 拡大しても押した座標はコマの画素に戻す */
 .tapnow{margin:0 0 var(--s2);font-size:.9375rem}
-.tapwrap{position:relative;overflow:auto;max-height:64vh;background:var(--surface-2);border-radius:var(--r-m);-webkit-overflow-scrolling:touch}
-.tapstage{position:relative;width:100%;touch-action:none;line-height:0}
+/* 高さの上限は video.js が画面の高さから決める（一倍で絵の全体が収まる） */
+.tapwrap{position:relative;overflow:auto;background:var(--surface-2);border-radius:var(--r-m);-webkit-overflow-scrolling:touch}
+.tapstage{position:relative;width:100%;margin:0 auto;touch-action:none;line-height:0}
+.tapstage.panning{cursor:grab}
+.tapbar{display:flex;flex-wrap:wrap;gap:var(--s2);justify-content:space-between;margin-top:var(--s2)}
+.tapbar .seg button{padding:0 var(--s2)}
 .tapstage canvas{display:block;width:100%;height:auto}
 .tapstage canvas[data-over]{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
-.loupe{position:absolute;width:160px;height:160px;border-radius:var(--r-full);border:3px solid var(--ov-me);box-shadow:0 0 0 2px var(--ov-edge),var(--e2);pointer-events:none;z-index:2}
+/* 拡大鏡は枠の外（画面に固定）。枠が低い横長の動画でも切れない */
+.loupe{position:fixed;width:160px;height:160px;border-radius:var(--r-full);border:3px solid var(--ov-me);box-shadow:0 0 0 2px var(--ov-edge),var(--e2);pointer-events:none;z-index:50}
 .nudge{display:grid;grid-template-columns:repeat(4,44px);gap:var(--s1)}
 .nudge .iconbtn{border:1px solid var(--line-strong);border-radius:var(--r-s);font-size:1.125rem}
 .pointsel{margin:var(--s2) 0}
@@ -460,4 +471,11 @@ body.no-tabbar .toast{bottom:auto;top:calc(env(safe-area-inset-top) + var(--s4))
 ul.plain{margin:var(--s1) 0;padding-left:1.2em}
 ul.plain li{margin:var(--s1) 0}
 .gart{display:block;width:100%;height:auto;color:var(--ink);margin:var(--s2) 0}
-.gart .gl{fill:var(--sub);font-size:.8125rem}
+/* 図の中の字は図が縮んでも 14px 以上に見える大きさにし、線の上でも読めるよう背景の色で縁取る */
+.gart .gl{fill:var(--ink);font-size:17px;font-weight:600;paint-order:stroke;stroke:var(--bg);stroke-width:5px;stroke-linejoin:round}
+/* 項目1つ: 範囲の目安（あなたへの判定ではなく、こうなら範囲の中という見本） */
+.cprange{margin:var(--s3) 0;padding:var(--s3) var(--s4);border-radius:var(--r-m);border:1px dashed var(--line-strong);background:transparent}
+.cprange .label{display:block;margin-bottom:var(--s1)}
+.itemnav{display:grid;grid-template-columns:1fr 1fr;gap:var(--s2);margin-top:var(--s5)}
+.itemnav .btn{min-height:48px;justify-content:center}
+.itemnav .btn.next{justify-content:center}
