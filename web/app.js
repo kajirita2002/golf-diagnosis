@@ -4,12 +4,17 @@
   - ルーティングはハッシュ（#/home・#/record/{date}・#/session/{id}/… ）。再読み込みしても同じ画面に戻る。
   - サーバーから来る文字列（CSV のクラブ名・定型文）は必ず esc() を通してから HTML に入れる。
   - alert / confirm は使わない。確認はシート（App.confirm）、失敗はその場の文（App.errorHtml）、知らせはトースト。
-  - 最初の API が3秒を超えたら「サーバーを起こしています」を出す（無料の仕組みは寝ている）。
+  - 起動して最初の API が3秒を超えたら「サーバーを起こしています」を出す（無料の仕組みは寝ている）。
+    起きたあとの遅い処理（スクショの読み取り・解説の作成）では出さない（寝起きではないので、案内が嘘になる）。
+  - 使う人とホームの写しがあれば、サーバーを待たずに先に描き、届いたら描き直す。
   - 圏外でもホームと練習は描く（使う人・ホーム・今日の練習の写しを localStorage に持つ）。
+    「圏外」と言うのは端末が電波を失っているとき（navigator.onLine が false）だけ。電波はあってサーバーに
+    届かないときは「サーバーにつながりません」と分ける（偽の確信を出さない）。
     判定の文はサーバーから届いたものだけを出す（古い写しの数字で新しい判定を作らない）。
 */
 const App = (() => {
   const APP_VERSION = "web/2.0-stage1";
+  const APP_UPDATED = "2026-09-29"; // 画面を最後に直した日（設定の「このアプリについて」）
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -27,13 +32,17 @@ const App = (() => {
   const S = { player: null, offline: false, health: null, cache: { report: {}, analysis: {}, shots: {}, sessions: null } };
 
   // ---- API ----
+  // 端末が電波を失っているか（false のときだけ「圏外」と言う。分からなければ電波はあるとみなす）
+  const netDown = () => navigator.onLine === false;
   let waking = 0;
+  let awake = false; // サーバーから一度でも答えが返ったか（返ったあとは寝起きではない）
   function wakeBanner(on) {
     waking = Math.max(0, waking + (on ? 1 : -1));
     const el = $("#banners");
     let b = el && $("[data-banner=wake]", el);
     if (waking && !b && el) {
-      el.insertAdjacentHTML("beforeend", `<div class="banner" data-banner="wake"><div class="info">サーバーを起こしています（無料の仕組みなので、最大1分ほど）。手元の写しがあれば先に出します。</div></div>`);
+      const copy = S.shownCopy ? "前に開いたときの内容を先に出しています。" : "";
+      el.insertAdjacentHTML("beforeend", `<div class="banner" data-banner="wake"><div class="info">サーバーを起こしています（無料の仕組みなので、最大1分ほど）。${copy}</div></div>`);
     } else if (!waking && b) b.remove();
   }
   async function request(method, path, { body, raw, ctype } = {}) {
@@ -42,9 +51,11 @@ const App = (() => {
     else if (raw !== undefined) { opt.body = raw; opt.headers["Content-Type"] = ctype || "text/plain; charset=utf-8"; }
     else if (body !== undefined) { opt.body = JSON.stringify(body); opt.headers["Content-Type"] = "application/json"; }
     let slow = false;
-    const t = setTimeout(() => { slow = true; wakeBanner(true); }, 3000);
+    // 寝起きの案内は、サーバーからまだ一度も答えが返っていないあいだだけ（§11.4・§12）
+    const t = awake ? null : setTimeout(() => { if (!awake) { slow = true; wakeBanner(true); } }, 3000);
     try {
       const r = await fetch(path, opt);
+      awake = true;
       const text = await r.text();
       let j = null;
       try { j = text ? JSON.parse(text) : null; } catch { /* JSON でない応答 */ }
@@ -59,7 +70,7 @@ const App = (() => {
   async function api(method, path, body) {
     let r;
     try { r = await request(method, path, { body }); } catch (e) {
-      const err = new Error("サーバーに届きません（圏外か、サーバーが止まっています）");
+      const err = new Error(netDown() ? "圏外なので届きません" : "サーバーにつながりません");
       err.status = 0; err.offline = true; err.detail = String(e && e.message || e);
       throw err;
     }
@@ -128,6 +139,15 @@ const App = (() => {
     if (iso === localDate(y)) return `${s}（昨日）`;
     return `${s}（${WD[new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).getDay()]}）`;
   }
+  // 定型文の中のクラブ名（"6 Iron"）と距離（"105.3m"）を、画面の言葉と設定の単位にそろえる。
+  // 文を作り直すのではなく、書き方だけを置き換える（数字の中身は変えない）
+  function textJa(t) {
+    let s = String(t ?? "").replace(/\b(\d+)\s?(Iron|Wood|Hybrid)\b/gi, (m) => clubJa(m.replace(/(\d+)\s?/, "$1 ")));
+    if (distUnit() === "yd") {
+      s = s.replace(/(\d+(?:\.\d+)?)m(?![a-zA-Z/²])/g, (m, v) => `${(Number(v) / 0.9144).toFixed(v.includes(".") ? 1 : 0)}yd`);
+    }
+    return s;
+  }
   const localTime = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : `${dateJa(localDate(d), false)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
 
   // ---- 部品: トースト・読み上げ・エラー・読み込み ----
@@ -140,14 +160,20 @@ const App = (() => {
   }
   function say(text) { const l = $("#live"); if (l) { l.textContent = ""; setTimeout(() => { l.textContent = text; }, 30); } }
   // 失敗の文（NN/g #9）: 何が起きたか・何が保存されたか・次に何ができるか。技術の文言は「くわしく」の中
-  function errorHtml({ what, saved, next, detail }) {
-    return `<div class="errbox" role="alert"><p class="what">${esc(what)}</p>${saved ? `<p>${esc(saved)}</p>` : ""}${next ? `<p>${esc(next)}</p>` : ""}${detail ? `<details><summary>くわしく</summary><p class="caption">${esc(detail)}</p></details>` : ""}</div>`;
+  // retry: true なら「もう一度読み込む」を主ボタンで添える（画面を出せなかったとき。NN/g #9・Carbon の action）
+  function errorHtml({ what, saved, next, detail, retry }) {
+    return `<div class="errbox" role="alert"><p class="what">${esc(what)}</p>${saved ? `<p>${esc(saved)}</p>` : ""}${next ? `<p>${esc(next)}</p>` : ""}${retry ? `<button class="btn primary" data-retry>もう一度読み込む</button>` : ""}${detail ? `<details><summary>くわしく</summary><p class="caption">${esc(detail)}</p></details>` : ""}</div>`;
   }
-  // 例外 → 失敗の文。圏外とサーバーの断りを分ける
-  function errOf(e, { what, saved, next } = {}) {
-    if (e && e.offline) return errorHtml({ what: what || "サーバーに届きませんでした", saved: saved || "この画面で入れたものは、まだ送っていません。", next: next || "電波のあるところで、もう一度押してください。", detail: e.detail });
-    return errorHtml({ what: what || "うまくいきませんでした", saved, next: next || "内容を確かめて、もう一度押してください。", detail: e && e.message });
+  // 例外 → 失敗の文。圏外（端末に電波が無い）・サーバーに届かない・サーバーの断りを分ける
+  function errOf(e, { what, saved, next, retry } = {}) {
+    if (e && e.offline) {
+      const down = netDown();
+      return errorHtml({ what: what || (down ? "圏外なので届きませんでした" : "サーバーにつながりませんでした"), saved: saved || "この画面で入れたものは、まだ送っていません。",
+        next: next || (down ? "電波のあるところで、もう一度押してください。" : "サーバーが止まっているか、起きるところです。少し待ってから、もう一度押してください。"), detail: e.detail, retry });
+    }
+    return errorHtml({ what: what || "うまくいきませんでした", saved, next: next || "内容を確かめて、もう一度押してください。", detail: e && e.message, retry });
   }
+  document.addEventListener("click", (ev) => { if (ev.target.closest("[data-retry]")) { ev.preventDefault(); render(); } });
   // 1秒未満は何も出さない・1〜3秒は骨組み・3秒超は言葉（Carbon）。止める関数を返す
   function loading(el, text = "読み込んでいます…") {
     let t2 = null;
@@ -172,7 +198,7 @@ const App = (() => {
     el.setAttribute("aria-labelledby", hid);
     if (label) el.dataset.sheet = label;
     el.innerHTML = `<div class="grab" aria-hidden="true"><span></span></div>
-      <header><h2 id="${hid}">${esc(title || "")}</h2><button class="iconbtn" data-sheet-close aria-label="閉じる">${icon("x")}</button></header>
+      <header><h2 id="${hid}" tabindex="-1">${esc(title || "")}</h2><button class="iconbtn" data-sheet-close aria-label="閉じる">${icon("x")}</button></header>
       <div class="body">${html}</div>`;
     document.body.append(scrim, el);
     requestAnimationFrame(() => { scrim.classList.add("on"); el.classList.add("on"); });
@@ -198,11 +224,25 @@ const App = (() => {
       g.addEventListener("pointerup", (ev) => { if (y0 === null) return; const dy = ev.clientY - y0; y0 = null; el.style.transform = ""; if (dy > 80) sh.close("swipe"); });
     }
     sheets.push(sh);
-    const first = $(".body button, .body input, .body select, .body textarea, .body a[href]", el) || $("[data-sheet-close]", el);
-    setTimeout(() => first && first.focus(), 30);
+    // 最初のフォーカスは見出し（中の最初のボタンにすると、そこまで自動で動いて文が途中から見える。
+    // 入力欄にするとスマホのキーボードが勝手に開いてシートを隠す）。読み始めは本文の頭から
+    setTimeout(() => { sh.body.scrollTop = 0; $("h2", el).focus({ preventScroll: true }); }, 30);
     return sh;
   }
-  document.addEventListener("keydown", (ev) => { if (ev.key === "Escape" && sheets.length) { ev.preventDefault(); sheets[sheets.length - 1].close("esc"); } });
+  // シートの中にフォーカスを閉じ込める（aria-modal の約束。Tab で背面へ抜けない。WCAG 2.4.3）
+  const FOCUSABLE = "button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex='-1'])";
+  document.addEventListener("keydown", (ev) => {
+    if (!sheets.length) return;
+    const top = sheets[sheets.length - 1];
+    if (ev.key === "Escape") { ev.preventDefault(); top.close("esc"); return; }
+    if (ev.key !== "Tab") return;
+    const fs = $$(FOCUSABLE, top.el).filter((x) => x.offsetParent !== null || x === document.activeElement);
+    if (!fs.length) { ev.preventDefault(); return; }
+    const first = fs[0], last = fs[fs.length - 1], a = document.activeElement;
+    if (!top.el.contains(a)) { ev.preventDefault(); first.focus(); }
+    else if (ev.shiftKey && (a === first || a === $("h2", top.el))) { ev.preventDefault(); last.focus(); }
+    else if (!ev.shiftKey && a === last) { ev.preventDefault(); first.focus(); }
+  });
   // 確認（confirm の代わり）。true / false で返す
   function confirmSheet({ title, text, ok = "続ける", cancel = "やめる", danger = false }) {
     return new Promise((resolve) => {
@@ -240,7 +280,10 @@ const App = (() => {
   }
   const current = { path: "", token: 0 };
   function parseHash() {
-    const h = decodeURIComponent((location.hash || "").replace(/^#/, "")) || "/home";
+    const raw = (location.hash || "").replace(/^#/, "");
+    let h;
+    try { h = decodeURIComponent(raw); } catch { h = raw; } // 壊れた % でも画面を止めない（知らない道ならホームへ）
+    h = h || "/home";
     const [path, qs] = h.split("?");
     return { path: path || "/home", query: Object.fromEntries(new URLSearchParams(qs || "")) };
   }
@@ -276,16 +319,31 @@ const App = (() => {
       await hit.render(ctx);
     } catch (e) {
       if (!ctx.alive()) return;
-      el.innerHTML = errOf(e, { what: "この画面を出せませんでした", saved: "入れた記録は消えていません。", next: "少し待ってから開き直してください。" });
+      el.innerHTML = errOf(e, { what: "この画面を出せませんでした", saved: "入れた記録は消えていません。", next: "少し待ってから、もう一度読み込んでください。", retry: true });
       console.warn(e);
     }
     if (ctx.alive()) {
+      for (const sg of $$(".seg", el)) watchSeg(sg);
       const h1 = $("h1", el);
       if (h1 && moved) { h1.tabIndex = -1; h1.focus({ preventScroll: true }); }
       document.title = (h1 ? h1.textContent.trim() + " - " : "") + "Swing Lab";
     }
   }
   window.addEventListener("hashchange", render);
+  // 横に動かせるセグメント（診断のクラブなど）: 続きがある側の端を薄くし、選んでいるものを見える所へ動かす
+  function watchSeg(sg) {
+    if (sg.dataset.watched) return;
+    sg.dataset.watched = "1";
+    const update = () => {
+      const more = sg.scrollWidth - sg.clientWidth;
+      sg.classList.toggle("more-r", more > 2 && sg.scrollLeft < more - 2);
+      sg.classList.toggle("more-l", more > 2 && sg.scrollLeft > 2);
+    };
+    const cur = sg.querySelector("[aria-current=page],[aria-pressed=true]");
+    if (cur && sg.scrollWidth > sg.clientWidth) sg.scrollLeft = Math.max(0, cur.offsetLeft - sg.offsetLeft - 48);
+    sg.addEventListener("scroll", update, { passive: true });
+    update();
+  }
 
   // ---- 使う人（画面に「選手」を出さない。§2.2） ----
   function setPlayer(p) {
@@ -304,18 +362,29 @@ const App = (() => {
       setOffline(true);
     }
   }
-  // 最初の記録の前に1人作る（利き手はホームの最初の面で選ぶ）
+  // 使う人がまだいないときに選んだ利き手（ようこそ・設定で選ぶ）。どの道から最初の記録を入れても、これで作る
+  // （タブ・ブックマーク・#/record を直に開いたときに、右打ちで作ってしまわないように）
+  const pendingHand = () => (LS.get("golf.handPending") === "L" ? "L" : "R");
+  const setPendingHand = (v) => LS.set("golf.handPending", v === "L" ? "L" : "R");
+  // 最初の記録の前に1人作る。hand を渡さなければ、使う人がいないうちに選んだ利き手
   async function ensurePlayer(hand) {
     if (S.player) return S.player;
-    const r = await api("POST", "/v1/me", { handedness: hand === "L" ? "L" : "R" });
+    const r = await api("POST", "/v1/me", { handedness: (hand || pendingHand()) === "L" ? "L" : "R" });
     setPlayer(r.player);
+    LS.del("golf.handPending");
     return S.player;
   }
   function setOffline(on) {
     S.offline = on;
     const el = $("#banners");
     const b = el && $("[data-banner=offline]", el);
-    if (on && !b && el) el.insertAdjacentHTML("afterbegin", `<div class="banner" data-banner="offline"><div>圏外です。最後に写した内容で動いています。練習のブロックは進められます（送るのは電波が戻ってから）。</div></div>`);
+    const text = netDown()
+      ? "圏外です。最後に写した内容で動いています。練習のブロックは進められます（送るのは電波が戻ってから）。"
+      : "サーバーにつながりません。最後に写した内容で動いています。練習のブロックは進められます（送るのはつながってから）。";
+    if (on && el) {
+      if (b) b.firstElementChild.textContent = text;
+      else el.insertAdjacentHTML("afterbegin", `<div class="banner" data-banner="offline"><div>${esc(text)}</div></div>`);
+    }
     if (!on && b) b.remove();
   }
 
@@ -358,19 +427,31 @@ const App = (() => {
   async function start() {
     // 動作の状態（/healthz）。保存先が一時的・スクショが読めないときは、記録の画面と設定で知らせる
     fetch("/healthz").then((r) => r.json()).then((h) => { S.health = h; }).catch(() => {});
-    try { await loadPlayer(); } catch (e) {
-      $("#view").innerHTML = errOf(e, { what: "サーバーで失敗しました", next: "少し待ってから開き直してください。" });
-      return;
+    // 使う人の写しがあれば、サーバーを待たずに先に描く（寝起きに白い画面で待たせない）。届いたら、変わっていれば描き直す
+    const copy = LS.get("golf.playerObj");
+    if (copy && copy.id != null && copy.id === LS.get("golf.player")) {
+      S.player = copy;
+      S.shownCopy = true;
+      render();
+      loadPlayer().then(() => {
+        const p = S.player;
+        if (!p || p.id !== copy.id || p.handedness !== copy.handedness) render();
+      }).catch((e) => console.warn(e));
+    } else {
+      try { await loadPlayer(); } catch (e) {
+        $("#view").innerHTML = errOf(e, { what: "サーバーで失敗しました", next: "少し待ってから、もう一度読み込んでください。" });
+        return;
+      }
+      render();
     }
-    render();
     // 圏外でも画面を開き直せるよう、画面のファイルだけを手元に置く（API は置かない。sw.js）
     if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
   }
   document.addEventListener("DOMContentLoaded", start);
 
   return {
-    APP_VERSION, $, $$, esc, icon, lab, LS, S, api, request, fmt, LABEL, KIND, distUnit, clubJa, localDate, dateJa, localTime,
+    APP_VERSION, APP_UPDATED, $, $$, esc, icon, lab, LS, S, api, request, fmt, LABEL, KIND, distUnit, clubJa, textJa, localDate, dateJa, localTime,
     toast, say, errorHtml, errOf, loading, openSheet, ask: confirmSheet, loadFigures, route, go, render, parseHash,
-    ensurePlayer, setPlayer, sessions, invalidate, report, shots, backBtn, navItem, setOffline,
+    ensurePlayer, pendingHand, setPendingHand, setPlayer, sessions, invalidate, report, shots, backBtn, navItem, setOffline, netDown,
   };
 })();

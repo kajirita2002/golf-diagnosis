@@ -46,6 +46,7 @@ const homeReport = `{"scopes":[
  {"scope_id":"club:9 Iron","kind":"folded","label":"9 Iron"},
  {"scope_id":"group:iron","kind":"main","label":"アイアン（まとめ）","figures":{"C1":{"id":"C1"}},
   "gist":{"focus":{"candidate_id":"strike_heel","title":"ネック寄りの当たりを減らす"},
+   "candidates":{"strike_heel":{"title":"ネック寄りの当たりを減らす"},"face":{"title":"クラブの面が右を向きすぎる球を減らす"}},
    "steps":[{"text":"「ネック寄りの当たりを減らす」を確かめる","which":"now"},{"text":"できたら「クラブの面が右を向きすぎる球を減らす」に進む","which":"next"}],
    "blocks":[{"id":"gap","title":"理想との差","lines":[{"text":"理想は"}],"rows":[]},
      {"id":"action","title":"意識すること・やること","start":"strike_heel","lines":[{"text":"意識する一点: 飛んだ先より、当たった場所だけを見る。"}]}]}}]}`
@@ -106,5 +107,32 @@ func Testホームの材料(t *testing.T) {
 	}
 	if strings.Contains(fmt.Sprint(h), "{band:") {
 		t.Fatal("埋めていない文")
+	}
+}
+
+// 「次」の候補でプランを始めたホーム: 課題はプランの候補。解説の「まずここ」の図・文と「次に見る」を並べない
+// （「まずここ」と「次に見る」が同じ文になり、理想との差が別の課題の図になっていた。レビュー 2026-09-29）。
+func Test次の候補から作ったプランのホーム(t *testing.T) {
+	e := newEnv(t)
+	pid := num(e.do("POST", "/v1/me", nil, 200)["player"].(map[string]any)["id"])
+	s := e.do("POST", "/v1/sessions", map[string]any{"player_id": pid, "date": "2026-09-27"}, 201)
+	sid := num(s["id"])
+	e.importCSV(sid, dummyCSV(t), "", 201)
+	e.an.reportOut = homeReport
+	e.do("POST", fmt.Sprintf("/v1/players/%d/plans", pid), planBody(map[string]any{"from_session": sid, "issue": "face",
+		"target_metric": "face_to_path",
+		"rationale":     map[string]any{"claims": []map[string]any{{"id": "group:iron/next.advance", "text": "次に進む条件: 別の日にも効いた。"}}},
+		"trigger":       map[string]any{"scope_id": "group:iron", "plain": map[string]any{"title": "クラブの面が右を向きすぎる球を減らす"}}}), 201)
+	h := e.do("GET", fmt.Sprintf("/v1/players/%d/home", pid), nil, 200)
+	p := h["plan"].(map[string]any)
+	f := h["focus"].(map[string]any)
+	if p["title"] != "クラブの面が右を向きすぎる球を減らす" || p["issue"] != "face" || p["advance"] != "次に進む条件: 別の日にも効いた。" {
+		t.Fatalf("プラン: %v", p)
+	}
+	if f["candidate_id"] != "face" || f["title"] != "クラブの面が右を向きすぎる球を減らす" {
+		t.Fatalf("課題がプランの候補でない: %v", f)
+	}
+	if f["next_title"] != nil || f["gap"] != nil || f["figure"] != nil || f["cue"] != nil {
+		t.Fatalf("別の候補の図・文・次に見るを返した: %v", f)
 	}
 }

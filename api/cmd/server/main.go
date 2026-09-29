@@ -86,7 +86,7 @@ func main() {
 		ReportLLM:    llmCfg.Enabled,
 		DB:           dbKind(dbPath),
 		DBPersistent: persistent,
-		AnthropicKey: os.Getenv("ANTHROPIC_API_KEY") != "",
+		AnthropicKey: os.Getenv("ANTHROPIC_API_KEY") != "" || os.Getenv("ANTHROPIC_AUTH_TOKEN") != "", // 分析サービスと同じ見方（どちらかがあれば読める）
 		Commit:       short(os.Getenv("RENDER_GIT_COMMIT")),
 		AnalysisURL:  env("ANALYSIS_URL", "http://127.0.0.1:8001"),
 	}

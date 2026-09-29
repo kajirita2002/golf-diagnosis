@@ -145,6 +145,10 @@ h1[tabindex="-1"]:focus,main[tabindex="-1"]:focus{outline:none} /* 画面を移�
 .seg button,.seg a{flex:1 0 auto;min-height:44px;min-width:44px;padding:0 var(--s3);border:0;border-radius:var(--r-s);background:transparent;
   color:var(--sub);cursor:pointer;white-space:nowrap;text-decoration:none;display:inline-flex;align-items:center;justify-content:center}
 .seg [aria-pressed="true"],.seg [aria-selected="true"],.seg [aria-current="page"]{background:var(--surface);color:var(--ink);font-weight:600;box-shadow:inset 0 -2px 0 var(--brand)}
+/* 横に続きがあるときは端を薄くして、動かせることを見せる（app.js が .more-r / .more-l を付ける） */
+.seg.more-r{-webkit-mask-image:linear-gradient(to right,black calc(100% - 48px),transparent);mask-image:linear-gradient(to right,black calc(100% - 48px),transparent)}
+.seg.more-l{-webkit-mask-image:linear-gradient(to left,black calc(100% - 48px),transparent);mask-image:linear-gradient(to left,black calc(100% - 48px),transparent)}
+.seg.more-l.more-r{-webkit-mask-image:linear-gradient(to right,transparent,black 48px,black calc(100% - 48px),transparent);mask-image:linear-gradient(to right,transparent,black 48px,black calc(100% - 48px),transparent)}
 
 /* チップ（形の印と言葉。色だけで伝えない） */
 .chip{display:inline-flex;align-items:center;gap:var(--s1);min-height:28px;padding:0 var(--s2);border-radius:var(--r-full);font-size:.8125rem;line-height:1.3;
@@ -161,6 +165,7 @@ h1[tabindex="-1"]:focus,main[tabindex="-1"]:focus{outline:none} /* 画面を移�
 input[type=text],input[type=url],input[type=number],input[type=date],input:not([type]),select,textarea{
   min-height:44px;max-width:100%;padding:var(--s2) var(--s3);border:1px solid var(--line-strong);border-radius:var(--r-s);background:var(--surface)}
 textarea{width:100%;font-family:var(--mono);font-size:.875rem;line-height:1.5;white-space:pre;overflow-x:auto}
+textarea.plain{font-family:var(--font);font-size:1rem;line-height:1.6;white-space:pre-wrap;overflow-x:hidden;resize:vertical}
 .field input,.field select{width:100%}
 label.radio{display:flex;align-items:center;gap:var(--s3);min-height:48px;padding:var(--s2) 0;cursor:pointer}
 label.radio input{width:22px;height:22px;margin:0;flex:none;accent-color:var(--brand)}
@@ -176,7 +181,8 @@ label.radio input{width:22px;height:22px;margin:0;flex:none;accent-color:var(--b
 .errbox .what{font-weight:700;color:var(--ink)}
 .errbox .what::before{content:"× ";color:var(--bad)}
 .errbox p{margin:var(--s1) 0}
-.errbox details summary{min-height:44px;display:flex;align-items:center;color:var(--sub);cursor:pointer}
+.errbox details summary{min-height:44px;display:flex;align-items:center;color:var(--brand);font-weight:600;text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+.errbox .btn{margin:var(--s2) 0}
 .note{background:var(--surface-2);border-radius:var(--r-m);padding:var(--s3) var(--s4);margin:var(--s3) 0}
 .note.warn{background:var(--warn-weak);box-shadow:inset 4px 0 0 var(--warn)}
 .note.good{background:var(--good-weak);box-shadow:inset 4px 0 0 var(--good)}
@@ -205,14 +211,20 @@ label.radio input{width:22px;height:22px;margin:0;flex:none;accent-color:var(--b
 .sheet .grab span{width:40px;height:5px;border-radius:var(--r-full);background:var(--line-strong)}
 .sheet header{display:flex;align-items:center;gap:var(--s2);padding:var(--s1) var(--s2) 0 var(--s4);touch-action:none}
 .sheet header h2{flex:1;min-width:0}
+.sheet header h2:focus{outline:none} /* 開いたときに移すフォーカス（押せる所ではない） */
+.sheet ul.parts{margin:var(--s1) 0 var(--s2);padding-left:1.2em}
+.sheet ul.parts li{margin:var(--s1) 0}
+.sheet .gloss-list{margin-top:var(--s5)}
 .sheet .body{overflow:auto;padding:var(--s2) var(--s4) var(--s5);overscroll-behavior:contain}
 .sheet .claim{margin:var(--s2) 0}
 .sheet .wq{margin:var(--s3) 0 var(--s1);font-weight:600}
 .sheet .wgrp{padding-left:var(--s3);box-shadow:inset 3px 0 0 var(--line);margin:var(--s3) 0}
 
 /* トースト（知らせるだけ・4秒） */
-.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(var(--tabbar-h) + env(safe-area-inset-bottom) + var(--s4));z-index:50;
-  background:var(--ink);color:var(--bg);padding:var(--s3) var(--s4);border-radius:var(--r-m);box-shadow:var(--e2);max-width:calc(100% - 32px)}
+/* 左右を 16px に置いて真ん中へ寄せる（left:50% と translateX だと、幅が画面の半分で頭打ちになり細い縦長に折れた） */
+.toast{position:fixed;left:var(--s4);right:var(--s4);margin-inline:auto;width:fit-content;max-width:480px;
+  bottom:calc(var(--tabbar-h) + env(safe-area-inset-bottom) + var(--s4));z-index:50;
+  background:var(--ink);color:var(--bg);padding:var(--s3) var(--s4);border-radius:var(--r-m);box-shadow:var(--e2)}
 
 /* ---- 要点（診断 D） ---- */
 .gblock{padding:var(--s4) 0}
@@ -220,7 +232,7 @@ label.radio input{width:22px;height:22px;margin:0;flex:none;accent-color:var(--b
 .gblock h2{font-size:.9375rem;color:var(--sub);letter-spacing:.04em;margin-bottom:var(--s1)}
 .gline{margin:var(--s1) 0}
 .gb-now .gline:first-of-type{font-size:1.125rem;font-weight:700}
-.gb-issue .gline:first-of-type{font-weight:700}
+.gb-issue .gline:first-of-type{font-weight:600}
 .gcmp{display:grid;gap:var(--s2);margin-top:var(--s3)}
 .grow{background:var(--surface-2);border-radius:var(--r-s);padding:var(--s2) var(--s3)}
 .grow .gasp{font-weight:700;display:flex;flex-wrap:wrap;gap:var(--s2);align-items:center}
@@ -269,6 +281,9 @@ td.l,th.l{text-align:left}
 tr.excluded td{opacity:.45;text-decoration:line-through}
 tr.sel td{background:var(--brand-weak)}
 td input[type=number]{width:5rem}
+/* 一球ずつ: 番号の列は横に動かしても残す（どの球の行かを見失わない） */
+table[data-shots] th:first-child,table[data-shots] td:first-child{position:sticky;left:0;background:var(--surface);z-index:1;box-shadow:inset -1px -1px 0 var(--line)}
+table[data-shots] tr.sel td:first-child{background:var(--brand-weak)}
 
 /* スクショのカード */
 .shotcard{background:var(--surface-2);border-radius:var(--r-m);padding:var(--s3);margin-top:var(--s3)}
@@ -298,9 +313,12 @@ td input[type=number]{width:5rem}
 .run .cueline{font-size:1.125rem;font-weight:600}
 .run .ctl{margin-top:auto;padding-top:var(--s4)}
 .run .next{display:flex;width:100%;min-height:72px;font-size:1.25rem}
-.run .ctl .row .btn{flex:1}
-.run.flash{animation:tflash .6s}
-@keyframes tflash{from{background:var(--brand-weak)}to{background:transparent}}
+.run .ctl .row .btn{flex:1 1 0;white-space:nowrap;min-width:0}
+.run .ctl .why{margin:var(--s2) 0 0}
+/* ブロックが変わった合図は「いま」の枠の縁だけ（画面全体の背景を動かすと、描き直しの途中で四角が残って見えた） */
+.run .now{border-radius:var(--r-m);padding:var(--s2) var(--s3);margin-left:calc(-1 * var(--s3));margin-right:calc(-1 * var(--s3))}
+.run.flash .now{animation:tflash .6s}
+@keyframes tflash{from{box-shadow:inset 0 0 0 3px var(--brand)}to{box-shadow:inset 0 0 0 3px transparent}}
 .strip{display:flex;flex-wrap:wrap;gap:var(--s1);margin:var(--s2) 0}
 .strip .cell{min-width:44px;height:44px;padding:0 2px;font-size:.8125rem;border-radius:var(--r-s);color:var(--ink);background:var(--surface-2);
   border:0;box-shadow:inset 0 -5px 0 var(--line);cursor:pointer}
@@ -325,6 +343,9 @@ td input[type=number]{width:5rem}
 .fig-legend .lg{display:inline-flex;align-items:center;gap:var(--s1)}
 .fig text{font-family:inherit}
 .fig .t11{font-size:13px}.fig .t12{font-size:13.5px}.fig .t13{font-size:14px}.fig .t16{font-size:16px;font-weight:600}
+/* 理想との差の図（C1）はスマホで約 256px に縮むので、図の中の字を大きめに（画面で 12px 前後） */
+.fig-cmp .t11{font-size:17px}.fig-cmp .t12{font-size:16px}.fig-cmp .t13{font-size:18px}.fig-cmp .c1-cap{font-size:14px}
+.fig-mini{margin:var(--s2) 0}.fig-mini > svg{max-width:20rem}
 .g-text{fill:var(--ink)} .g-sub{fill:var(--sub)}
 .g-axis{stroke:var(--sub);stroke-width:1;fill:none} .g-frame{stroke:var(--line)} .g-zero{stroke:var(--sub)}
 .g-grid{stroke:var(--line);stroke-width:1}
@@ -366,3 +387,7 @@ td input[type=number]{width:5rem}
 /* 練習中は下の操作と重ねない（下のタブが無いので上に出す） */
 body.no-tabbar .toast{bottom:auto;top:calc(env(safe-area-inset-top) + var(--s4))}
 .block:empty{margin:0}
+
+/* 記録: 日付の欄は1行を使う（320px で「09/29/202」と切れていた） */
+.daterow{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--s1);margin:var(--s2) 0}
+.daterow input[type=date]{width:100%}

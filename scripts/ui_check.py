@@ -44,7 +44,7 @@ import zlib
 from playwright.sync_api import sync_playwright
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from e2e import ROOT, Services, call, fake_narrative_file, import_csv, import_practice, practice_tsv, seed_real  # noqa: E402
+from e2e import REAL, ROOT, Services, call, create_plan_from_report, fake_narrative_file, import_csv, import_practice, practice_tsv, seed_real  # noqa: E402
 
 WEB = os.path.join(ROOT, "web")
 
@@ -252,7 +252,7 @@ def check_home_states(page, errors: list[str]) -> None:
         ("finding", {"sessions_with_shots": 1, "focus_state": "unavailable", "latest": {"session_id": 3}}, {}),
         ("finding", {"sessions_with_shots": 1, "focus_state": "no_focus", "latest": {"session_id": 3}}, {}),
         ("found", {"sessions_with_shots": 1, "focus_state": "found", "focus": {"session_id": 3, "scope_id": "group:iron", "startable": True}}, {}),
-        ("finding", {"sessions_with_shots": 1, "focus_state": "found", "focus": {"session_id": 3, "scope_id": "x", "startable": False}}, {}),
+        ("measure", {"sessions_with_shots": 1, "focus_state": "found", "focus": {"session_id": 3, "scope_id": "x", "startable": False}}, {}),
         ("plan", {"sessions_with_shots": 1, "plan": {"next_index": 1, "total": 37, "last": None}}, {}),
         ("stop", {"sessions_with_shots": 1, "plan": {"next_index": 2, "last": {"progress": {"next_action": "ask_continue"}}}}, {}),
         ("passed", {"sessions_with_shots": 1, "plan": {"next_index": 3, "last": {"progress": {"next_action": "recompute_candidates"}}}}, {}),
@@ -260,7 +260,7 @@ def check_home_states(page, errors: list[str]) -> None:
         ("video_resume", {"sessions_with_shots": 1}, {"videoPending": True}),
         ("setup", {"sessions_with_shots": 1}, {"setupMismatch": True}),
     ]
-    want_label = {"first": "最初の記録を入れる", "finding": "診断を見る", "found": "この一点で練習を組む", "plan": "練習を始める",
+    want_label = {"first": "最初の記録を入れる", "finding": "診断を見る", "measure": "診断を見る", "found": "この一点で練習を組む", "plan": "練習を始める",
                   "stop": "続けるか選ぶ", "passed": "次の項目を見る", "video_resume": "続きから処理する", "setup": "撮り方を合わせる"}
     for key, h, local in cases:
         st = page.evaluate("([h, l]) => App.homeState(h, l)", [h, local])
@@ -269,6 +269,11 @@ def check_home_states(page, errors: list[str]) -> None:
     st = page.evaluate("() => App.homeState({sessions_with_shots: 1, plan: {next_index: 1, total: 37, last: null}})")
     if st.get("nth") != 2 or st["primary"]["href"] != "#/practice/run":
         errors.append(f"[homeState] プラン中の回数・行き先が違う: {st}")
+    # 合格・止めるは、最後に判定した回を開く（判定と選ぶボタンが最初から出る）
+    for last in ({"progress": {"next_action": "ask_continue"}}, {"progress": {"next_action": "recompute_candidates"}}):
+        st = page.evaluate("(l) => App.homeState({sessions_with_shots: 1, plan: {next_index: 2, last: l}})", last)
+        if st["primary"]["href"] != "#/practice/result?show=last":
+            errors.append(f"[homeState] {st['key']} の行き先が最後に判定した回でない: {st['primary']['href']}")
 
 
 def check_first_run(browser, root: str, shots_dir: str, errors: list[str]) -> None:
@@ -295,6 +300,50 @@ def check_first_run(browser, root: str, shots_dir: str, errors: list[str]) -> No
     call("PATCH", f"{root}/v1/players/{ps[0]['id']}", {"handedness": "R"})
     shot(page, shots_dir, "first-1-record")
     ctx.close()
+
+
+def check_pending_hand(browser, shots_dir: str, errors: list[str]) -> None:
+    """ようこそ画面を通らずに入る道: 設定で左打ちを選ぶ → 下のタブの「記録」から取り込む → 左打ちで作る。
+    練習・経過のタブも、使う人がいなければ空の状態（圏外の文ではない）。"""
+    with Services() as sv:
+        ctx, page = new_page(browser, 390, 844, errors, "pending")
+        goto(page, sv.root, "/practice", "[data-t=noplayer]")
+        if "圏外" in page.inner_text("#view") or page.locator("[data-primary]").count() != 1:
+            errors.append(f"[pending] 使う人がいない練習のタブが空の状態でない: {page.inner_text('#view')[:120]!r}")
+        goto(page, sv.root, "/progress", "[data-t=noplayer]")
+        goto(page, sv.root, "/settings", "[data-set=hand]")
+        page.click("[data-set=hand] button[data-v=L]")
+        page.click("#tabbar a[data-tab=record]")
+        page.wait_for_selector("[data-paste]", state="attached")
+        tsv = open(os.path.join(ROOT, "testdata", "real", "2026-09-17", "6i.tsv"), encoding="utf-8").read()
+        # この Services はスクショを読めない（Claude の鍵が無い）ので、貼り付けが最初から主役で出ている
+        if not page.locator("[data-noshot]").is_visible() or not page.locator("[data-paste]").is_visible():
+            errors.append("[pending] スクショを読めないのに、貼り付けが主役になっていない")
+        page.select_option("[data-units]", "metric")
+        page.fill("[data-paste]", tsv)
+        page.fill("[data-paste-club]", "6 Iron")
+        page.click("[data-paste-go]")
+        page.wait_for_selector("[data-imported]", timeout=20000)
+        ps = call("GET", f"{sv.base}/players")
+        if [p["handedness"] for p in ps] != ["L"]:
+            errors.append(f"[pending] 設定で左打ちを選んで記録から入れたのに、左打ちで作られない: {ps}")
+        # 同じ日にプランを始めたら、記録の既定の入れ先は、きっかけの記録ではなく新しい記録
+        pid = ps[0]["id"]
+        sid = call("GET", f"{sv.base}/players/{pid}/sessions")[0]["id"]
+        for f, club in REAL:
+            with open(os.path.join(ROOT, "testdata", "real", "2026-09-17", f + ".tsv"), "rb") as fh:
+                call("POST", f"{sv.base}/sessions/{sid}/import?units=metric&club=" + club.replace(" ", "%20"), raw=fh.read(), ctype="text/plain")
+        create_plan_from_report(sv.base, pid, sid)
+        goto(page, sv.root, f"/record/{datetime.date.today().isoformat()}", "[data-target]")  # 同じ #/record だと描き直さないので日付つきで開く
+        if page.input_value("[data-target]") != "new":
+            errors.append(f"[pending] 同じ日にプランを始めたあと、記録の入れ先の既定がきっかけの記録になっている: {page.input_value('[data-target]')}")
+        page.select_option("[data-target]", str(sid))
+        if not page.locator("[data-trig-note]").is_visible():
+            errors.append("[pending] きっかけの記録を選んでも注意が出ない")
+        if page.locator("[data-loc-wrap]").is_visible():
+            errors.append("[pending] 既にある記録を選んでいるのに、場所の欄が直せるように見える")
+        shot(page, shots_dir, "pending-record-trigger")
+        ctx.close()
 
 
 def check_record(browser, root: str, base: str, shots_dir: str, tag: str, w: int, h: int, errors: list[str]) -> None:
@@ -465,18 +514,36 @@ def check_home(page, root: str, base: str, pid: int, shots_dir: str, tag: str, e
             errors.append(f"[{tag}] 今日の一点が要点の「意識する一点」でない")
         if home["focus"].get("next_title") and home["focus"]["next_title"] not in page.inner_text("[data-home=next]"):
             errors.append(f"[{tag}] 次に見るが無い")
-    # 主ボタンは1つ・画面の下半分（HIG）
+    # 主ボタンは1つ（HIG）
     if page.locator("#view [data-primary]").count() != 1:
         errors.append(f"[{tag}] ホームの主ボタンが {page.locator('#view [data-primary]').count()} 個")
-    box = page.locator("[data-primary]").bounding_box()
-    doc_h = page.evaluate("document.documentElement.scrollHeight")
-    if box and box["y"] < doc_h / 2 - 1:
-        errors.append(f"[{tag}] 主ボタンが画面の上半分にある: {box['y']} / {doc_h}")
+    # 主ボタンの位置は primary_in_view で見る（スクロールせずに見えること。ページの下半分に置くと図に押し出された）
     plain_first(page, "#view", tag, "ホーム", errors)
     no_overflow(page, tag, "ホーム", errors)
     targets(page, tag, "ホーム", errors)
+    primary_in_view(page, tag, "ホーム", errors)
     page.wait_for_timeout(400)
     shot(page, shots_dir, f"{tag}-home")
+
+
+def primary_in_view(page, tag: str, where: str, errors: list[str]) -> None:
+    """主ボタンが、スクロールせずに見える所（下のタブより上）にある（図に押し出されていた）。"""
+    got = page.evaluate("""() => { window.scrollTo(0, 0);
+      const b = document.querySelector('#view [data-primary]'); if (!b) return null;
+      const t = document.querySelector('#tabbar'); const top = t && t.offsetParent !== null ? t.getBoundingClientRect().top : window.innerHeight;
+      return { bottom: b.getBoundingClientRect().bottom, limit: top }; }""")
+    if got and got["bottom"] > got["limit"] + 0.5:
+        errors.append(f"[{tag}] {where}: 主ボタンが最初の画面に入っていない（下端 {round(got['bottom'])} > タブの上端 {round(got['limit'])}）")
+
+
+def check_home_fold(browser, root: str, pid: int, shots_dir: str, errors: list[str]) -> None:
+    for w in (320, 360, 390):
+        ctx, page = new_page(browser, w, 700, errors, f"fold{w}", pid)
+        goto(page, root, "/home", "[data-primary]")
+        page.wait_for_timeout(300)
+        primary_in_view(page, f"fold{w}", "ホーム", errors)
+        shot(page, shots_dir, f"fold{w}-home", full=False)
+        ctx.close()
 
 
 def check_diag(page, root: str, base: str, sid: int, shots_dir: str, tag: str, errors: list[str]) -> None:
@@ -682,9 +749,10 @@ def check_dummy(page, root: str, base: str, today_sid: int, yday_sid: int, shots
     no_overflow(page, tag, "実験", errors)
     targets(page, tag, "実験", errors)
     shot(page, shots_dir, f"{tag}-experiments")
-    goto(page, root, f"/progress/compare?a={yday_sid}&b={today_sid}", "[data-out] .finding")
-    if "フェース・トゥ・パス" not in page.inner_text("[data-out]"):
-        errors.append(f"[{tag}] 比較の説明にフェース・トゥ・パスが無い")
+    goto(page, root, f"/progress/compare?a={yday_sid}&b={today_sid}", "[data-out] [data-t=cmpclub]")
+    if "フェース・トゥ・パス" not in page.text_content("[data-out] [data-t=cmpnums]"):
+        errors.append(f"[{tag}] 比較の「数字を見る」にフェース・トゥ・パスが無い")
+    plain_first(page, "[data-out]", tag, "2日の比較", errors)
     no_overflow(page, tag, "2日の比較", errors)
     shot(page, shots_dir, f"{tag}-compare")
     goto(page, root, f"/session/{today_sid}/shots", "tr[data-id]")
@@ -776,6 +844,7 @@ def check_plan(browser, root: str, base: str, shots_dir: str, tag: str, w: int, 
     if page.inner_text("[data-home=one]").strip() != "向こうにボールがあるつもりで打つ":
         errors.append(f"[{tag}] プラン中のホームの今日の一点がプランの一点でない")
     plain_first(page, "#view", tag, "ホーム（プラン中）", errors)
+    primary_in_view(page, tag, "ホーム（プラン中）", errors)
     page.wait_for_timeout(300)
     shot(page, shots_dir, f"{tag}-home-plan")
     # 練習中: 下のタブを隠す・「次」は 64px 以上・出口は中断1つ
@@ -884,9 +953,11 @@ def check_plan(browser, root: str, base: str, shots_dir: str, tag: str, w: int, 
     shot(page, shots_dir, f"{tag}-result-judge")
     # 経過: プランの進み（図は「なぜ？」のシート）・あなたの記録
     goto(page, root, "/progress", "[data-t=progwhy]")
-    page.wait_for_selector("[data-part=rec] [data-t=rec]", timeout=10000)
-    if "判定した 1回" not in page.inner_text("[data-part=rec]"):
-        errors.append(f"[{tag}] あなたの記録に1回ぶんが無い")
+    page.wait_for_selector("[data-part=plan] [data-t=progruns]", timeout=10000)
+    if "判定した 1回" not in page.inner_text("[data-part=plan]"):
+        errors.append(f"[{tag}] いまのプランに練習1回ぶんが無い")
+    if page.locator("[data-part=rec] [data-t=rec]").count() != 0:
+        errors.append(f"[{tag}] 進行中のプランが「これまでのプラン」にも並んでいる")
     page.click("[data-t=progwhy]")
     try:
         page.wait_for_selector("[data-sheet=progwhy] [data-t=progfig] circle[data-t=apt]", timeout=10000)
@@ -1068,6 +1139,7 @@ def main() -> None:
         exe = os.environ.get("PLAYWRIGHT_CHROMIUM")
         browser = pw.chromium.launch(executable_path=exe) if exe else pw.chromium.launch()
         check_first_run(browser, sv.root, shots_dir, errors)
+        check_pending_hand(browser, shots_dir, errors)
         me = call("GET", f"{sv.base}/players")[0]
         real_id = seed_real(sv.base, me["id"])
         yday = call("POST", f"{sv.base}/sessions", {"player_id": me["id"], "date": "2026-09-26", "location": "練習場"})
@@ -1085,6 +1157,7 @@ def main() -> None:
             ctx.close()
             check_record(browser, sv.root, sv.base, shots_dir, tag, w, h, errors)
             check_plan(browser, sv.root, sv.base, shots_dir, tag, w, h, errors)
+        check_home_fold(browser, sv.root, me["id"], shots_dir, errors)
         ctx, page = new_page(browser, 360, 780, errors, "phone-L", lefty["id"])
         check_detail(page, sv.root, sv.base, lefty_id, shots_dir, "phone-L", errors, hand="L")
         ctx.close()

@@ -5,7 +5,7 @@
 <symbol id="history" viewBox="0 0 24 24"><rect x="4" y="3.5" width="16" height="17" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></symbol>
 <symbol id="practice" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M10 8.5v7l5.5-3.5z"/></symbol>
 <symbol id="progress" viewBox="0 0 24 24"><path d="M4 19.5h16"/><path d="M5 15l4.5-4.5 3.5 3.5L19 7.5"/><path d="M15 7.5h4v4"/></symbol>
-<symbol id="settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"/></symbol>
+<symbol id="settings" viewBox="0 0 24 24"><path d="M19.02 9.99 L21.42 10.17 L21.42 13.83 L19.02 14.01 L18.38 15.54 L19.96 17.37 L17.37 19.96 L15.54 18.38 L14.01 19.02 L13.83 21.42 L10.17 21.42 L9.99 19.02 L8.46 18.38 L6.63 19.96 L4.04 17.37 L5.62 15.54 L4.98 14.01 L2.58 13.83 L2.58 10.17 L4.98 9.99 L5.62 8.46 L4.04 6.63 L6.63 4.04 L8.46 5.62 L9.99 4.98 L10.17 2.58 L13.83 2.58 L14.01 4.98 L15.54 5.62 L17.37 4.04 L19.96 6.63 L18.38 8.46Z"/><circle cx="12" cy="12" r="3"/></symbol>
 <symbol id="camera" viewBox="0 0 24 24"><path d="M4 8h3l1.5-2.5h7L17 8h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></symbol>
 <symbol id="upload" viewBox="0 0 24 24"><path d="M12 15V4.5"/><path d="M7.5 9 12 4.5 16.5 9"/><path d="M4.5 15v4.5h15V15"/></symbol>
 <symbol id="video" viewBox="0 0 24 24"><rect x="3.5" y="6" width="12" height="12" rx="2"/><path d="m15.5 10.5 5-3v9l-5-3"/></symbol>

@@ -1,13 +1,13 @@
 "use strict";
 /*
   経過（docs/DESIGN_v2.md §10 T）。[課題ごと｜記録ごと]。
-  - 課題ごと: 動いているプランの進み（最初の「いつも通り」の推移）と、あなたの記録（プランごとの件数。割合は出さない）。
-    推移の図と数字は「なぜそう言える？」のシートの中。
+  - 課題ごと: 進行中のプランの進み（最初の「いつも通り」の推移・練習の回数）と、これまでのプラン（件数。割合は出さない）。
+    同じプランを2回並べない（進行中のものは上のカードだけ）。推移の図と数字は「推移を見る」のシートの中。
   - 記録ごと: 日ごとの記録の一覧（押すと診断）と、2日の比較（前の「前回と比べる」）。
 */
 const Progress = (() => {
   const { $, esc, lab, S, api, fmt, LABEL } = App;
-  const STATUS = { active: ["動いている", "good"], done: ["次に進んだ", "brand"], switched: ["替えた", "none"], blocked: ["詰まった", "warn"], abandoned: ["やめた", "none"] };
+  const STATUS = { active: ["進行中", "brand"], done: ["次に進んだ", "brand"], switched: ["替えた", "none"], blocked: ["詰まった", "warn"], abandoned: ["やめた", "none"] };
   const VAL = { reduce_abs: ["mean_abs", "ずれの大きさの平均"], reduce_sd: ["sd", "ばらつき"], increase: ["mean", "平均"], decrease: ["mean", "平均"] };
 
   function progressSvg(pts, metric, label) {
@@ -35,10 +35,19 @@ const Progress = (() => {
     return `<figure class="fig" data-t="progfig">${s}</svg></figure>`;
   }
 
-  async function planPart(box) {
+  // 練習の回数の1行（0回なら数字を出さずに、何をすれば出るかを書く）
+  function runsLine(x) {
+    if (!x || !x.runs.length) return `<p class="sub" data-t="progruns">まだ練習していません。練習の結果を入れると、ここに変化が出ます。</p>`;
+    const ev = x.runs.filter((y) => y.evaluated);
+    const good = ev.filter((y) => y.counts_as_worked).length;
+    return `<p class="sub" data-t="progruns">練習 ${lab("count", x.runs.length + "回")}・判定した ${lab("count", ev.length + "回")}・良くなった ${lab("count", good + "回")}</p>`;
+  }
+
+  async function planPart(box, rows) {
     await Practice.load().catch(() => false);
     const p = Practice.plan();
-    if (!p) { box.innerHTML = `<p class="sub" data-t="noplan">動いているプランはありません。</p>`; return; }
+    if (!p) { box.innerHTML = `<p class="sub" data-t="noplan">進行中のプランはありません。</p>`; return; }
+    const mine = (rows || []).find((x) => x.plan && x.plan.id === p.id);
     const r = await App.request("GET", `/v1/plans/${p.id}/progress`).catch(() => ({ ok: false, status: 0 }));
     if (!r.ok) { box.innerHTML = App.errorHtml({ what: "進み具合を読めませんでした", next: r.status === 0 ? "電波のあるところで開き直してください。" : ((r.body && r.body.error) || "") }); return; }
     const pl = r.body.plan, runs = r.body.runs || [];
@@ -50,9 +59,10 @@ const Progress = (() => {
       return { i, date: x.date, a: (fa.measured ?? fa.n ?? 0) >= 5 ? fa[key] : null, an: fa.measured ?? fa.n ?? 0, b: (b.n || 0) >= 5 ? b[key] : null, bn: b.n || 0,
         ev: e, fresh: x.fresh, ref: refRun != null && x.run_id === refRun };
     });
-    box.innerHTML = `<article class="card" data-t="prog"><p class="label">いまのプラン</p><h3>${esc(Practice.planTitle(p))}</h3>
-      ${latest ? `<p data-t="progplain"><b>${esc(latest.title || "")}</b> ${esc(latest.text || "")}</p>` : `<p class="sub">まだ判定した練習がありません。</p>`}
-      <button class="textbtn" data-t="progwhy">なぜそう言える？（推移の図と数字）</button></article>`;
+    box.innerHTML = `<article class="card" data-t="prog"><p class="label">いまのプラン <span class="chip brand">進行中</span></p><h3>${esc(Practice.planTitle(p))}</h3>
+      ${latest ? `<p data-t="progplain"><b>${esc(latest.title || "")}</b> ${esc(latest.text || "")}</p>` : ""}
+      ${runsLine(mine)}
+      <button class="textbtn" data-t="progwhy">推移を見る</button></article>`;
     box.querySelector("[data-t=progwhy]").addEventListener("click", () => {
       let h = progressSvg(pts, pl.target_metric, label);
       h += `<div class="scroll"><table data-t="trend"><tr><th class="l">練習</th><th>最初の「いつも通り」</th><th>本番</th><th class="l">その日</th></tr>${pts.map((x) => {
@@ -70,20 +80,24 @@ const Progress = (() => {
     });
   }
 
-  async function recordPart(box) {
-    if (!S.player) { box.innerHTML = ""; return; }
+  async function records() {
+    if (!S.player) return { ok: true, rows: [] };
     const r = await App.request("GET", `/v1/players/${S.player.id}/record`).catch(() => ({ ok: false, status: 0 }));
-    if (!r.ok) { box.innerHTML = App.errorHtml({ what: "記録を読めませんでした", next: "電波のあるところで開き直してください。" }); return; }
-    const rows = r.body || [];
-    if (!rows.length) { box.innerHTML = `<p class="sub">まだプランの記録がありません。</p>`; return; }
+    return r.ok ? { ok: true, rows: r.body || [] } : { ok: false, rows: [] };
+  }
+
+  // これまでのプラン（進行中のものは上のカードにあるので除く）
+  function recordPart(box, got) {
+    if (!got.ok) { box.innerHTML = App.errorHtml({ what: "記録を読めませんでした", next: App.netDown() ? "電波のあるところで開き直してください。" : "少し待ってから開き直してください。" }); return; }
+    const rows = got.rows.filter((x) => x.plan.status !== "active");
+    if (!rows.length) { box.innerHTML = `<p class="sub">これまでのプランはまだありません。</p>`; return; }
     box.innerHTML = rows.map((x) => {
       const p = x.plan, [sl, sc] = STATUS[p.status] || [p.status, "none"];
       const ev = x.runs.filter((y) => y.evaluated);
-      const good = ev.filter((y) => y.counts_as_worked).length;
       return `<div class="card" data-t="rec"><h3>${esc(Practice.planTitle(p))} <span class="chip ${sc}">${esc(sl)}</span>${x.state_title ? ` <span class="chip none">${esc(x.state_title)}</span>` : ""}</h3>
-        <p class="sub">やり方: ${p.drill_id ? esc(p.drill_id) : `自分で書いた1点「${esc(p.cue)}」`}・${esc(App.clubJa(p.club))}</p>
-        <p class="sub">練習: ${x.runs.length}回（判定した ${ev.length}回のうち、良くなった回 ${good}）</p>
-        <details class="folded"><summary>日ごとの判定</summary>${ev.map((y) => { const [rl, rc] = Practice.plainOf(y); return `<p>${esc(y.date)} <span class="chip ${rc}">${esc(rl)}</span></p>`; }).join("") || "—"}</details></div>`;
+        <p class="sub">やり方: ${p.drill_id ? esc(p.drill_id) : `自分で書いた1点「${esc(p.cue)}」`}・${lab("club", App.clubJa(p.club))}</p>
+        ${runsLine(x)}
+        <details class="folded"><summary>日ごとの判定</summary>${ev.map((y) => { const [rl, rc] = Practice.plainOf(y); return `<p>${lab("date", App.dateJa(y.date, false))} <span class="chip ${rc}">${esc(rl)}</span></p>`; }).join("") || "—"}</details></div>`;
     }).join("") + `<p class="caption">同じ直しで次のやり方を選ぶときは、記録のあるやり方を先に試します。</p>`;
   }
 
@@ -93,15 +107,28 @@ const Progress = (() => {
       <div class="seg" role="group" aria-label="見るもの" data-progress-tabs><a href="#/progress" ${tab === "plans" ? 'aria-current="page"' : ""}>課題ごと</a><a href="#/progress?tab=records" ${tab === "records" ? 'aria-current="page"' : ""}>記録ごと</a></div>
       <div data-body class="block"></div>`;
     const body = $("[data-body]", el);
-    if (tab === "plans") {
-      body.innerHTML = `<section data-part="plan"></section><section class="block"><h2>あなたの記録</h2><div data-part="rec"></div></section>`;
-      const stop = App.loading($("[data-part=plan]", body));
-      await planPart($("[data-part=plan]", body)).finally(stop);
-      if (!alive()) return;
-      await recordPart($("[data-part=rec]", body));
+    if (!S.player) {
+      body.innerHTML = `<div class="empty" data-t="noplayer"><svg class="art" viewBox="0 0 96 96" aria-hidden="true"><path d="M14 78l22-24 16 14 30-36"/><path d="M66 32h16v16"/></svg>
+        <p class="t-headline">まだ記録がありません。</p><p class="sub">記録と練習を入れると、ここに日ごとの変化が出ます。</p></div>
+        <a class="btn primary block" data-primary href="#/record">最初の記録を入れる</a>`;
       return;
     }
+    if (tab === "plans") {
+      body.innerHTML = `<section data-part="plan"></section><section class="block"><h2>これまでのプラン</h2><div data-part="rec"></div></section>`;
+      // 読み込みの段（1秒で骨組み・3秒で文）は、あとから埋まる部分にもかける
+      const stop = App.loading($("[data-part=plan]", body));
+      const stop2 = App.loading($("[data-part=rec]", body));
+      const got = await records();
+      if (!alive()) return;
+      await planPart($("[data-part=plan]", body), got.rows).finally(stop);
+      if (!alive()) return;
+      stop2();
+      recordPart($("[data-part=rec]", body), got);
+      return;
+    }
+    const stop = App.loading(body);
     const ss = await App.sessions(true).catch(() => []);
+    stop();
     if (!alive()) return;
     body.innerHTML = `<ul class="navlist" data-t="sessions">${ss.map((s) => App.navItem(`#/session/${s.id}`,
       `${lab("date", App.dateJa(s.date))}${s.location ? "・" + esc(s.location) : ""}`, `${s.n_shots || 0}球${(s.clubs || []).length ? "・" + (s.clubs || []).map((c) => esc(App.clubJa(c.club))).join("・") : ""}`,
@@ -109,25 +136,31 @@ const Progress = (() => {
       ${ss.filter((s) => s.n_shots).length > 1 ? `<div class="block"><a class="btn block" href="#/progress/compare">2日を比べる</a></div>` : ""}`;
   }
 
+  // 最初の面は言葉だけ（何が変わったか・当たる瞬間の動きで説明できるか）。数字と専門用語は「数字を見る」の中（§3 R1）
+  const PLAIN_OUT = { carry: "飛んだ距離", side: "落ちた左右の位置", launch_direction: "打ち出した向き", spin_axis: "曲がり方", ball_speed: "球の速さ", launch_angle: "打ち出しの高さ" };
   function renderCompareOut(r) {
     let h = "";
     for (const [club, c] of Object.entries(r.clubs)) {
-      h += `<section class="card"><h3>${esc(club)} <span class="caption">前 ${c.n[0]}球 → 後 ${c.n[1]}球</span></h3>`;
+      h += `<section class="card" data-t="cmpclub"><h3>${lab("club", App.clubJa(club))} <span class="caption">前 ${lab("count", c.n[0] + "球")} → 後 ${lab("count", c.n[1] + "球")}</span></h3>`;
       if (!c.explanations.length) {
         const ins = Object.values(c.l0).some((x) => x.status === "insufficient");
-        h += `<p class="sub">${ins ? "球が足りないので比べられない項目があります。" : "球筋に意味のある変化はありません。"}</p>`;
+        h += `<p class="sub">${ins ? "球が足りないので比べられないものがあります。" : "球筋に、はっきりした変化はありません。"}</p>`;
+      } else {
+        h += `<ul class="plainlist">${c.explanations.map((e) => `<li>${esc(PLAIN_OUT[e.outcome] || "球筋")}が変わりました。${e.explained_by.length ? "当たる瞬間のクラブの動きの変化で説明できます。" : "当たる瞬間の測れているものでは説明できません。"}</li>`).join("")}</ul>`;
       }
+      let nums = "";
       for (const e of c.explanations) {
         const why = e.explained_by.length
           ? e.explained_by.map((x) => `<b>${esc(LABEL[x.metric] || x.metric)} ${fmt(x.metric, x.diff, true)}</b>`).join("、") + " が変わったため"
-          : `インパクトの測れている値では説明できません${e.unmeasured.length ? `（測れていない: ${e.unmeasured.map((m) => esc(LABEL[m] || m)).join("・")}）` : ""}`;
-        h += `<div class="finding">${esc(LABEL[e.outcome] || e.outcome)}が <b>${fmt(e.outcome, e.diff, true)}</b> 変わりました ―― ${why}。</div>`;
+          : `当たる瞬間の測れている値では説明できません${e.unmeasured.length ? `（測れていない: ${e.unmeasured.map((m) => esc(LABEL[m] || m)).join("・")}）` : ""}`;
+        nums += `<div class="finding">${esc(LABEL[e.outcome] || e.outcome)}が <b>${fmt(e.outcome, e.diff, true)}</b> 変わりました ―― ${why}。</div>`;
       }
       const changed = Object.entries(c.l1).filter(([, x]) => x.status === "changed");
-      if (changed.length) h += `<p class="caption">インパクトで変わったもの: ${changed.map(([k, x]) => `${esc(LABEL[k] || k)} ${fmt(k, x.diff, true)}`).join(" / ")}</p>`;
+      if (changed.length) nums += `<p class="caption">当たる瞬間に変わったもの: ${changed.map(([k, x]) => `${esc(LABEL[k] || k)} ${fmt(k, x.diff, true)}`).join(" / ")}</p>`;
+      if (nums) h += `<details class="folded" data-t="cmpnums"><summary>数字を見る</summary>${nums}</details>`;
       h += `</section>`;
     }
-    if (r.only_in_a.length || r.only_in_b.length) h += `<p class="caption">片方にしか無いクラブ: ${[...r.only_in_a, ...r.only_in_b].map(esc).join("、")}</p>`;
+    if (r.only_in_a.length || r.only_in_b.length) h += `<p class="caption">片方にしか無いクラブ: ${[...r.only_in_a, ...r.only_in_b].map((c) => esc(App.clubJa(c))).join("、")}</p>`;
     return h || `<p class="sub">共通のクラブがありません。</p>`;
   }
 

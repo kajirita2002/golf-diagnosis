@@ -110,7 +110,9 @@ docker run -p 8080:8080 -e APP_PASSWORD=... -e DB_PATH=postgres://... -e ANTHROP
 
 ```sh
 cd api && go vet ./... && go test ./...
-TEST_DATABASE_URL=postgres://... go test ./internal/httpapi/   # PostgreSQL でも同じテストを通す（golf スキーマを作り直す）
+TEST_DATABASE_URL=postgres://... go test -p 1 ./...   # PostgreSQL でも同じテストを通す（golf スキーマを作り直す）
+TEST_DATABASE_URL=postgres://... STORE_PG_TEST=1 go test -p 1 ./internal/store/   # store の PostgreSQL の分（列を足す仕組みなど）。
+                                   # ほかのパッケージと golf スキーマを取り合うので、-p 1 のときだけ STORE_PG_TEST=1 で開く
 cd analysis && uv run pytest -q
 python3 scripts/e2e.py        # 2つのサービスを本当に立てて通しで確かめる
 python3 scripts/ui_check.py   # 画面をブラウザで操作（Playwright。320/360/390px と PC・横溢れ・44px・コントラスト・JSエラー）

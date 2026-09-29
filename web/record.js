@@ -6,6 +6,9 @@
   - スクショは読む → 表を確かめる（検算）→ 直す → 取り込む。見出しの無い続きの画像は、見出しのある表へつなげる。
   - 同じ日にもう記録があれば、その記録に足すか、別の記録として入れるかを選べる
     （練習のプランは、きっかけの診断の記録とは別の記録に入れる約束があるため）。
+    動いているプランのきっかけの記録がその日にあれば、既定は「新しい記録として入れる」にする
+    （練習の球が診断の記録に混ざると診断が変わり、しかもその記録は練習として記録できない）。
+  - 使う人がまだいなければ、最初の取り込みで作る。利き手は、ようこそ・設定で選んだもの（App.pendingHand）。
   - 失敗はその場に出す（alert を使わない）。検算が合わないまま取り込むときはシートで確かめる。
 */
 const Record = (() => {
@@ -96,31 +99,18 @@ const Record = (() => {
     el.innerHTML = `<div class="pagehead"><h1>記録</h1></div><div data-body></div>`;
     const body = $("[data-body]", el);
     const stop = App.loading(body);
-    const all = S.player ? await App.sessions(true).catch(() => []) : [];
+    const [all, trig] = S.player ? await Promise.all([App.sessions(true).catch(() => []), triggerSession()]) : [[], null];
     stop();
     if (!alive()) return;
     const onDay = all.filter((s) => s.date === date);
-    let target = query.target && onDay.some((s) => String(s.id) === query.target) ? Number(query.target) : (query.new ? "new" : (onDay[0] ? onDay[0].id : "new"));
+    // 既定の入れ先: その日のいちばん新しい記録。ただしプランのきっかけの記録なら新しい記録にする
+    const def = onDay.find((s) => s.id !== trig);
+    let target = query.target && onDay.some((s) => String(s.id) === query.target) ? Number(query.target) : (query.new ? "new" : (def ? def.id : "new"));
     const h = S.health || {};
     const warn = [];
     if (h.db_persistent === false) warn.push("保存先が一時的です。再起動すると入れた記録が消えます（サーバーの設定 DB_PATH が未設定）。");
-    if (h.anthropic_key === false) warn.push("スクショの読み取りは使えません（サーバーに Claude の API キーがありません）。表の貼り付けと CSV は使えます。");
-    body.innerHTML = `
-      ${warn.map((w) => `<div class="note warn">${esc(w)}</div>`).join("")}
-      <div class="row"><span class="t-headline" data-record-date>${lab("date", App.dateJa(date))}</span>
-        <label class="grow1" style="text-align:right"><span class="visually-hidden">日付を変える</span><input type="date" data-date value="${esc(date)}" aria-label="日付を変える"></label></div>
-      <label class="field"><span>場所（任意）</span><input data-loc placeholder="例: 練習場" autocomplete="off"></label>
-      <div class="field" data-target-wrap ${onDay.length ? "" : "hidden"}><span>入れる先</span>
-        <select data-target aria-label="入れる先">${onDay.map((s) => `<option value="${s.id}">この日の記録${s.location ? "・" + esc(s.location) : ""}（${s.n_shots || 0}球）</option>`).join("")}<option value="new">新しい記録として入れる（同じ日）</option></select></div>
-      <section class="card block" aria-labelledby="h-tm">
-        <h2 id="h-tm">TrackMan のスクショ</h2>
-        <p class="sub">クラブごとの表を、Average の行まで入れてスクショします。</p>
-        <label class="drop" data-drop tabindex="-1">${icon("camera")}
-          <input type="file" data-shot-file accept="image/*" multiple class="visually-hidden">
-          <span><b>写真・スクショを選ぶ</b><span class="caption">何枚でも。パソコンなら貼り付け（Ctrl+V）やドロップも</span></span></label>
-        <p class="sub" data-shot-msg role="status"></p>
-        <div data-shot-out></div>
-        <details class="block" data-other><summary class="textbtn">ほかの入れ方（表の貼り付け・CSV・レポートのリンク）</summary>
+    const canRead = h.anthropic_key !== false; // スクショを読めるか（分からなければ読める側で出す）
+    const other = `
           <label class="field"><span>単位の書いていない列</span><select data-units><option value="imperial">mph・yd・in</option><option value="metric">m/s・m・cm</option></select></label>
           <h3>表を貼り付ける</h3>
           <p class="sub">TrackMan の画面の表の見出し（Club Speed など）から最後の行までを選んでコピーし、貼り付けます。表にクラブの列が無いので、クラブ名を入れてください。</p>
@@ -132,17 +122,38 @@ const Record = (() => {
           <h3 style="margin-top:var(--s5)">レポートのリンクから表を開く</h3>
           <p class="sub">TrackMan のレポートの URL を貼ると、10項目の表の画面で開きます。そこでスクショします。</p>
           <div class="row"><input type="url" data-tm-url placeholder="https://web-dynamic-reports.trackmangolf.com/?a=..." class="grow1" aria-label="レポートの URL"><button class="btn" data-tm-open>表で開く</button></div>
-          <div data-tm-err></div>
-        </details>
+          <div data-tm-err></div>`;
+    // スクショを読めないときは、使える「表の貼り付け」を主役にし、使えないスクショの枠は出さない
+    const shotPart = canRead ? `
+        <p class="sub">クラブごとの表を、一番下の平均（Average）の行まで入れてスクショします。</p>
+        <label class="drop" data-drop tabindex="-1">${icon("camera")}
+          <input type="file" data-shot-file accept="image/*" multiple class="visually-hidden">
+          <span><b>写真・スクショを選ぶ</b><span class="caption">何枚でも。パソコンなら貼り付け（Ctrl+V）やドロップも</span></span></label>
+        <p class="sub" data-shot-msg role="status"></p>
+        <div data-shot-out></div>`
+      : `<p class="note" data-noshot>いまはスクショを読めません。表の貼り付けか CSV で入れてください。</p>
+        <input type="file" data-shot-file accept="image/*" multiple hidden><div data-drop hidden></div><p data-shot-msg hidden></p><div data-shot-out></div>`;
+    body.innerHTML = `
+      ${warn.map((w) => `<div class="note warn">${esc(w)}</div>`).join("")}
+      <div class="daterow"><span class="t-headline" data-record-date>${lab("date", App.dateJa(date))}</span>
+        <label><span class="visually-hidden">日付を変える</span><input type="date" data-date value="${esc(date)}" aria-label="日付を変える"></label></div>
+      <div class="field" data-target-wrap ${onDay.length ? "" : "hidden"}><span>入れる先</span>
+        <select data-target aria-label="入れる先">${onDay.map((s) => `<option value="${s.id}">この日の記録${s.location ? "・" + esc(s.location) : ""}（${s.n_shots || 0}球）${s.id === trig ? "・プランのきっかけ" : ""}</option>`).join("")}<option value="new">新しい記録として入れる（同じ日）</option></select>
+        <p class="caption" data-trig-note hidden>プランのきっかけの診断の記録です。練習の球はここに入れず、新しい記録として入れてください（混ぜると診断が変わり、練習としても記録できません）。</p></div>
+      <label class="field" data-loc-wrap><span>場所（任意）</span><input data-loc placeholder="例: 練習場" autocomplete="off"></label>
+      <p class="caption" data-loc-fixed hidden></p>
+      <section class="card block" aria-labelledby="h-tm">
+        <h2 id="h-tm">${canRead ? "TrackMan のスクショ" : "TrackMan の表を入れる"}</h2>
+        ${shotPart}
+        ${canRead ? `<details class="block" data-other><summary class="textbtn">ほかの入れ方（表の貼り付け・CSV・レポートのリンク）</summary>${other}</details>` : `<div data-other>${other}</div>`}
+
         <div data-import-msg role="status"></div>
       </section>
       <section class="block" aria-labelledby="h-day"><h2 id="h-day">この日に入っているもの</h2><div data-day></div></section>
       <div class="block" data-primary-wrap></div>
       <ul class="navlist block">${App.navItem("#/progress?tab=records", "過去の記録", "日ごとの記録と診断")}</ul>`;
-    active = { el, date, fromPractice, target: () => target, setTarget: (v) => { target = v; } };
-    const loc = $("[data-loc]", el);
-    const cur = onDay.find((s) => s.id === target);
-    if (cur && cur.location) loc.value = cur.location;
+    active = { el, date, fromPractice, trig, target: () => target, setTarget: (v) => { target = v; showTarget(el); } };
+    showTarget(el);
 
     $("[data-date]", el).addEventListener("change", (ev) => {
       const v = ev.target.value;
@@ -151,7 +162,7 @@ const Record = (() => {
     const tsel = $("[data-target]", el);
     if (tsel) {
       tsel.value = String(target);
-      tsel.addEventListener("change", () => { target = tsel.value === "new" ? "new" : Number(tsel.value); });
+      tsel.addEventListener("change", () => { active.setTarget(tsel.value === "new" ? "new" : Number(tsel.value)); });
     }
     renderDay(el, onDay);
 
@@ -184,6 +195,31 @@ const Record = (() => {
     });
   }
 
+  // 動いているプランのきっかけの記録（無ければ null）。一覧だけを読む軽い口（解説は作らない）
+  async function triggerSession() {
+    try {
+      const ps = await api("GET", `/v1/players/${S.player.id}/plans`);
+      const p = (ps || []).find((x) => x.status === "active");
+      return (p && p.trigger && p.trigger.session_id) || null;
+    } catch { return null; }
+  }
+
+  // 入れる先に合わせて、場所の欄と注意書きを出し分ける。
+  // 場所は新しい記録を作るときだけ入る（既にある記録の場所を直す口は無いので、直せるように見せない）
+  function showTarget(el) {
+    const a = active;
+    if (!a || a.el !== el) return;
+    const t = a.target();
+    const all = (S.cache.sessions || []).filter((s) => s.date === a.date);
+    const cur = all.find((s) => s.id === t);
+    $("[data-loc-wrap]", el).hidden = t !== "new";
+    const fixed = $("[data-loc-fixed]", el);
+    fixed.hidden = t === "new";
+    fixed.textContent = cur ? `場所: ${cur.location || "（書いていません）"}（場所は新しい記録を作るときに入れます）` : "";
+    const note = $("[data-trig-note]", el);
+    if (note) note.hidden = !(a.trig && t === a.trig);
+  }
+
   function renderDay(el, onDay) {
     const box = $("[data-day]", el);
     const withShots = onDay.filter((s) => s.n_shots);
@@ -201,8 +237,15 @@ const Record = (() => {
   // 取り込み先の記録（無ければこの日の記録を作る）
   async function ensureTarget(el) {
     const a = active;
-    if (a.target() !== "new") return a.target();
-    const p = await App.ensurePlayer("R");
+    if (a.target() !== "new") {
+      if (a.trig && a.target() === a.trig && !(await App.ask({ title: "プランのきっかけの記録です", text: "練習の球をここに入れると、診断が変わります。この記録は練習としても記録できません。練習の球なら、新しい記録として入れてください。", ok: "それでもこの記録に入れる", cancel: "やめる" }))) {
+        const err = new Error("入れるのをやめました。入れる先を「新しい記録として入れる」にしてから、もう一度押してください。");
+        err.cancelled = true;
+        throw err;
+      }
+      return a.target();
+    }
+    const p = await App.ensurePlayer();
     const loc = $("[data-loc]", el).value.trim();
     const s = await api("POST", "/v1/sessions", { player_id: p.id, date: a.date, location: loc });
     a.setTarget(s.id);
@@ -220,10 +263,11 @@ const Record = (() => {
     const onDay = all.filter((s) => s.date === active.date);
     const tsel = $("[data-target]", el);
     if (tsel) {
-      tsel.innerHTML = onDay.map((s) => `<option value="${s.id}">この日の記録${s.location ? "・" + esc(s.location) : ""}（${s.n_shots || 0}球）</option>`).join("") + `<option value="new">新しい記録として入れる（同じ日）</option>`;
+      tsel.innerHTML = onDay.map((s) => `<option value="${s.id}">この日の記録${s.location ? "・" + esc(s.location) : ""}（${s.n_shots || 0}球）${s.id === active.trig ? "・プランのきっかけ" : ""}</option>`).join("") + `<option value="new">新しい記録として入れる（同じ日）</option>`;
       tsel.value = String(sid);
       $("[data-target-wrap]", el).hidden = false;
     }
+    showTarget(el);
     renderDay(el, onDay);
   }
 
@@ -247,7 +291,7 @@ const Record = (() => {
     try {
       await importText(el, text, $("[data-paste-club]", el).value.trim(), $("[data-units]", el).value);
       $("[data-paste]", el).value = "";
-    } catch (e) { msg.innerHTML = App.errOf(e, { what: "取り込めませんでした", saved: "貼り付けた表はそのまま残してあります。", next: "表の見出しの行から貼り付けたか、クラブ名を入れたかを確かめてください。" }); }
+    } catch (e) { msg.innerHTML = e.cancelled ? `<p class="fielderr">${esc(e.message)}</p>` : App.errOf(e, { what: "取り込めませんでした", saved: "貼り付けた表はそのまま残してあります。", next: "表の見出しの行から貼り付けたか、クラブ名を入れたかを確かめてください。" }); }
   }
 
   async function importCsv(el) {
@@ -263,7 +307,7 @@ const Record = (() => {
       $("[data-csv]", el).value = "";
       $("[data-csv-name]", el).textContent = "まだ選んでいません";
       await afterImport(el, sid, r);
-    } catch (e) { msg.innerHTML = App.errOf(e, { what: "CSV を取り込めませんでした", saved: "何も取り込んでいません。", next: "TrackMan から書き出した CSV か、単位の選び方を確かめてください。" }); }
+    } catch (e) { msg.innerHTML = e.cancelled ? `<p class="fielderr">${esc(e.message)}</p>` : App.errOf(e, { what: "CSV を取り込めませんでした", saved: "何も取り込んでいません。", next: "TrackMan から書き出した CSV か、単位の選び方を確かめてください。" }); }
   }
 
   // 見出しの無い続きのカードを、見出しのある表（取り込む前のもの）につなげる

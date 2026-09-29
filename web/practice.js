@@ -61,8 +61,8 @@ const Practice = (() => {
   }
   async function load() {
     const pid = S.player ? S.player.id : LS.get("golf.player");
-    T.pid = pid; T.run = null; T.eval = null;
-    if (pid == null) { T.data = null; return false; }
+    T.pid = pid; T.run = null; T.eval = null; T.noPlayer = false;
+    if (pid == null) { T.data = null; T.noPlayer = true; return false; }
     const r = await call("GET", `/v1/players/${pid}/today`);
     if (r.ok) {
       T.data = r.body; T.offline = false; T.savedAt = new Date().toISOString();
@@ -142,8 +142,14 @@ const Practice = (() => {
   }
 
   function offlineNote() {
-    return T.offline ? `<div class="note warn" data-t="offline">圏外です。${T.savedAt && App.localTime(T.savedAt) ? `${esc(App.localTime(T.savedAt))} に写した内容で動いています。` : ""}ブロックは進められます（送るのは取り込むときです）。</div>` : "";
+    const where = App.netDown() ? "圏外です。" : "サーバーにつながりません。";
+    return T.offline ? `<div class="note warn" data-t="offline">${where}${T.savedAt && App.localTime(T.savedAt) ? `${esc(App.localTime(T.savedAt))} に写した内容で動いています。` : ""}ブロックは進められます（送るのは取り込むときです）。</div>` : "";
   }
+  // 使う人がまだいない（最初の記録の前）。圏外の文ではなく、空の状態を出す
+  const noPlayerHtml = () => `<div class="empty" data-t="noplayer"><svg class="art" viewBox="0 0 96 96" aria-hidden="true"><circle cx="48" cy="48" r="34"/><path d="M40 34v28l22-14z"/></svg>
+      <p class="t-headline">まだ記録がありません。</p><p class="sub">最初の記録を入れて診断すると、課題の練習をここで組めます。</p></div>
+      <a class="btn primary block" data-primary href="#/record">最初の記録を入れる</a>`;
+  const noCopyHtml = () => `<div class="note">まだ一度も開いていないので、${App.netDown() ? "圏外" : "サーバーにつながらない"}あいだは出せません。つながるところで一度開くと、練習場でも使えます。</div>`;
 
   // ==== P 練習（組み方） ====
   async function renderOverview({ el, alive }) {
@@ -152,10 +158,8 @@ const Practice = (() => {
     const stop = App.loading(body);
     try { await load(); } finally { stop(); }
     if (!alive()) return;
-    if (!T.data) {
-      body.innerHTML = `<div class="note">まだ一度も開いていないので、圏外では出せません。電波のあるところで一度開くと、練習場でも使えます。</div>`;
-      return;
-    }
+    if (T.noPlayer) { body.innerHTML = noPlayerHtml(); return; }
+    if (!T.data) { body.innerHTML = noCopyHtml(); return; }
     const p = plan();
     if (!p) {
       const ss = await App.sessions().catch(() => []);
@@ -240,7 +244,9 @@ const Practice = (() => {
       <div class="now" data-t="now" aria-live="polite"></div>
       <div class="ctl">
         <button class="btn primary next" data-primary data-t="next" id="tNext"></button>
-        <div class="row" style="margin-top:var(--s2)"><button class="btn" data-t="plus">1球足す</button><button class="btn" data-t="minus">1球引く</button><button class="btn" data-t="back">1つ戻る</button></div>
+        <div class="row" style="margin-top:var(--s2)"><button class="btn" data-t="plus" aria-label="このブロックに1球足す">＋1球</button><button class="btn" data-t="minus" aria-label="このブロックから1球引く">−1球</button></div>
+        <div class="row" style="margin-top:var(--s2)"><button class="btn" data-t="back">1つ前のブロックへ</button></div>
+        <p class="caption why" data-t="why" aria-live="polite"></p>
       </div></div>`;
     const root = $("[data-t=run]", body);
     const draw = () => {
@@ -258,9 +264,19 @@ const Practice = (() => {
         const nx = tpl[st.idx + 1];
         next.textContent = nx ? `次のブロックへ（${no(st.idx + 1)} ${BLK[nx.kind] || nx.kind}）` : "最後のブロックを打ち終えた";
       }
-      $("[data-t=minus]", root).disabled = st.done || st.counts[st.idx] <= 0;
-      $("[data-t=plus]", root).disabled = st.done;
-      $("[data-t=back]", root).disabled = !st.done && st.idx === 0;
+      // 押せないボタンは aria-disabled にして、理由を1行で書く（disabled だけだと、なぜ押せないかが分からない。§11.4）
+      const why = [];
+      const off = (k, on) => { const b = $(`[data-t=${k}]`, root); if (on) b.setAttribute("aria-disabled", "true"); else b.removeAttribute("aria-disabled"); };
+      off("minus", st.done || st.counts[st.idx] <= 0);
+      off("plus", st.done);
+      off("back", !st.done && st.idx === 0);
+      if (st.done) why.push("打ち終えたので、球の数はもう変えられません。直すときは「1つ前のブロックへ」で戻ります。");
+      else {
+        if (st.counts[st.idx] <= 0) why.push("このブロックは0球なので、これ以上引けません。");
+        if (st.idx === 0) why.push("最初のブロックなので、前には戻れません。");
+        else why.push("打ち直した球があれば「＋1球」を押します（1球ごとには押しません）。");
+      }
+      $("[data-t=why]", root).textContent = why.join(" ");
     };
     draw();
     keepAwake();
@@ -269,6 +285,7 @@ const Practice = (() => {
       if (!b) return;
       const act = b.dataset.t;
       if (act === "quit") { App.go("/practice"); return; }
+      if (b.getAttribute("aria-disabled") === "true") return;
       const st = practice();
       const n = p.template.length;
       if (act === "next") {
@@ -285,12 +302,20 @@ const Practice = (() => {
   }
 
   // ==== P2 練習の結果（記録・区切り・判定・次の手） ====
-  async function renderResult({ el, alive }) {
+  async function renderResult({ el, query, alive }) {
     el.innerHTML = `<div class="pagehead">${App.backBtn("#/practice", "練習へ戻る")}<h1>練習の結果</h1></div><div data-body></div>`;
     const body = $("[data-body]", el);
     const stop = App.loading(body);
     try { await load(); } finally { stop(); }
     if (!alive()) return;
+    if (T.noPlayer) { body.innerHTML = noPlayerHtml(); return; }
+    // ホームの「合格しました／止める」から来たら、最後に判定した回を開いて、その判定と選ぶボタンを最初から出す
+    if (query.show === "last") {
+      const lastRun = [...((T.data && T.data.runs) || [])].reverse().find((r) => r.evaluated);
+      if (lastRun) T.sessPick = lastRun.session_id;
+      history.replaceState(null, "", "#/practice/result");
+    }
+    if (!T.data) { body.innerHTML = noCopyHtml(); return; }
     const p = plan();
     if (!p) {
       body.innerHTML = `${offlineNote()}<p class="sub">動いているプランはありません。</p><a class="btn primary block" data-primary href="#/practice">練習へ</a>`;
@@ -399,6 +424,10 @@ const Practice = (() => {
     const r = await call("GET", `/v1/plan-runs/${r0.id}`);
     if (!r.ok) { box.innerHTML = App.errorHtml({ what: "練習の記録を読めませんでした", next: errText(r) }); return; }
     T.run = r.body;
+    // 最後に判定した回なら、保存してある判定を最初から出す（もう一度「判定する」を押させない）
+    const runs = (T.data && T.data.runs) || [];
+    const lastEv = [...runs].reverse().find((x) => x.evaluated);
+    if (lastEv && lastEv.id === r0.id && T.data.last_evaluation) T.eval = T.data.last_evaluation;
     renderRun(body);
   }
 

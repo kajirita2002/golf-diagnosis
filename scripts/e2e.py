@@ -117,6 +117,10 @@ class Services:
                 "DB_PATH": os.path.join(tmp, "e2e.db"),
                 "WEB_DIR": os.path.join(ROOT, "web"),
                 "REPORT_LLM": llm,
+                # 偽のスクショの答えがあるときは、Claude の鍵がある状態として画面に出す（/healthz の anthropic_key）。
+                # 無いときは、鍵が無い状態（手元の環境変数に鍵が残っていても）
+                "ANTHROPIC_API_KEY": "fake-for-test" if self.fake_screenshot else "",
+                "ANTHROPIC_AUTH_TOKEN": "",
             },
         )
         try:

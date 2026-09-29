@@ -135,6 +135,8 @@ type homePlan struct {
 	Last       json.RawMessage `json:"last"`      // 最後に判定した回の {date, plain, progress}（無ければ null）
 	LastDate   string          `json:"last_date"` // 最後に判定した回の日付
 	TriggerSID int64           `json:"trigger_session_id,omitempty"`
+	Issue      string          `json:"issue"`             // 直す候補の id（要点の候補と突き合わせる）
+	Advance    string          `json:"advance,omitempty"` // 次に進む条件（定型文。数字入りなので画面は「なぜ？」の層で出す）
 }
 
 func (s *Server) home(w http.ResponseWriter, r *http.Request) {
@@ -173,7 +175,7 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// プラン（動いているもの）。課題はプランのきっかけの診断から取る（今日の1点がプランと食い違わないように）
-	focusSID, focusScope := int64(0), ""
+	focusSID, focusScope, planIssue := int64(0), "", ""
 	p, err := s.Store.ActivePlan(r.Context(), pid)
 	switch {
 	case err == nil:
@@ -183,7 +185,7 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		out["plan"] = hp
-		focusSID, focusScope = trig, scope
+		focusSID, focusScope, planIssue = trig, scope, p.Issue
 	case !errors.Is(err, store.ErrNotFound):
 		s.fail(w, err)
 		return
@@ -193,7 +195,7 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) {
 	}
 	if focusSID != 0 {
 		ctx, cancel := context.WithTimeout(r.Context(), homeReportTimeout)
-		f, state := s.homeFocusOf(ctx, focusSID, focusScope)
+		f, state := s.homeFocusOf(ctx, focusSID, focusScope, planIssue)
 		cancel()
 		out["focus_state"] = state
 		if f != nil {
@@ -224,12 +226,25 @@ func (s *Server) homePlan(ctx context.Context, p *model.Plan) (*homePlan, int64,
 	if title == "" {
 		title = p.Issue
 	}
+	var rat struct {
+		Claims []struct {
+			ID   string `json:"id"`
+			Text string `json:"text"`
+		} `json:"claims"`
+	}
+	_ = json.Unmarshal(p.Rationale, &rat)
+	advance := ""
+	for _, c := range rat.Claims {
+		if strings.HasSuffix(c.ID, ".advance") {
+			advance = c.Text
+		}
+	}
 	total := 0
 	for _, b := range p.Template {
 		total += b.N
 	}
 	hp := &homePlan{ID: p.ID, Title: title, Cue: p.Cue, Club: p.Club, NextIndex: len(runs), Total: total, CreatedAt: p.CreatedAt,
-		Last: json.RawMessage("null"), TriggerSID: trig.SessionID}
+		Last: json.RawMessage("null"), TriggerSID: trig.SessionID, Issue: p.Issue, Advance: advance}
 	for i := len(runs) - 1; i >= 0; i-- {
 		if string(runs[i].Evaluation) == "null" || len(runs[i].Evaluation) == 0 {
 			continue
@@ -256,7 +271,12 @@ func nz(r json.RawMessage) json.RawMessage {
 
 // homeFocusOf は解説を作り、課題の範囲（scope が空なら、課題のある最初の本体の範囲）の要点を取り出す。
 // 状態: found（課題あり）/ no_focus（言えることがまだ無い）/ unavailable（分析サービスに届かない）。
-func (s *Server) homeFocusOf(ctx context.Context, sid int64, scope string) (*homeFocus, string) {
+//
+// planIssue はプランの候補の id（プランが無ければ空）。要点の「まずここ」は解説が選んだ候補なので、
+// 本人が「次」の候補でプランを始めたときは食い違う。そのときは課題をプランの候補にし、
+// 要点の「まずここ」のための材料（理想との差の図と文・意識する一点・「次に見る」）は返さない
+// （別の候補の図や文をプランの課題の横に並べない。docs/DESIGN_v2.md §3 R4）。
+func (s *Server) homeFocusOf(ctx context.Context, sid int64, scope, planIssue string) (*homeFocus, string) {
 	se, err := s.Store.GetSession(ctx, sid)
 	if err != nil {
 		return nil, "unavailable"
@@ -360,6 +380,18 @@ func (s *Server) homeFocusOf(ctx context.Context, sid int64, scope string) (*hom
 					f.NextTitle = st.Text[i+len("「") : j]
 				}
 			}
+		}
+		if f.NextTitle == f.Title {
+			f.NextTitle = ""
+		}
+		if planIssue != "" && planIssue != f.CandidateID {
+			title := ""
+			if c, ok := sc.Gist.Candidates[planIssue]; ok {
+				title = c.Title
+			}
+			// 「次に見る」は解説の順（まずここ → 次）なので、プランの候補の次は分からない。出さない
+			*f = homeFocus{SessionID: f.SessionID, SessionDate: f.SessionDate, ScopeID: f.ScopeID, Label: f.Label,
+				CandidateID: planIssue, Title: title, Startable: true}
 		}
 		return f, "found"
 	}

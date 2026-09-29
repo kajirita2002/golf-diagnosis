@@ -14,7 +14,8 @@ const Report = (() => {
   const CURVE = { hook: "フック", draw: "ドロー", straight: "まっすぐ", fade: "フェード", slice: "スライス", unknown: "—" };
   const START = { push: "プッシュ", pull: "プル", straight: "まっすぐ", unknown: "—" };
   const CAUSE = { face_to_path: "フェース・トゥ・パス", strike: "打点", mixed: "両方", none: "—", unknown: "—" };
-  const CONTACT = { center: "芯", heel: "ヒール", toe: "トゥ", heel_extreme: "ヒール（ネック寄り）", toe_extreme: "トゥ（先端寄り）", unknown: "—" };
+  // 当たる場所の呼び名は最初の面の「ネック寄り」「先端寄り」にそろえ、専門の言い方は括弧で添える
+  const CONTACT = { center: "芯", heel: "ネック側（ヒール）", toe: "先端側（トゥ）", heel_extreme: "ネック寄り（ヒール側）", toe_extreme: "先端寄り（トゥ側）", unknown: "—" };
   const REASON = { thin: "トップ・薄い当たり", short_carry: "キャリーが極端に短い", extreme_axis: "スピン軸が極端" };
   const causeChip = (c) => `<span class="chip ${c === "strike" ? "warn" : c === "face_to_path" ? "brand" : "none"}">${esc(CAUSE[c] || c)}</span>`;
   const GRADE = {
@@ -62,11 +63,15 @@ const Report = (() => {
   const GSTAT = { gap: ["△ 差がある", "warn"], ok: ["✓ このままでよい", "good"], keep: ["― 今は触らない", "none"], unknown: ["― まだ分からない", "none"] };
   const GIST_SEC = { now: "s1", issue: "s7", gap: "s6", action: "s7" };
 
+  // 各塊は要約の1文だけを見せ、残りは開いたときに出す（最初の面が長く、プランを始めるボタンが遠かった）。
+  // 「意識すること・やること」は短いので全部出す。理想との差の図と比べる表は「図で比べる」の中
   function gistHtml(sc) {
     const g = sc.gist;
     const cand = (id) => sc.candidates && (sc.candidates.candidates || []).find((c) => c.id === id);
     return g.blocks.map((b) => {
-      const lines = (b.lines || []).map((ln) => `<p class="gline">${esc(ln.text)}</p>`).join("");
+      const all = (b.lines || []).map((ln) => `<p class="gline">${esc(App.textJa(ln.text))}</p>`);
+      const keep = b.id === "action" ? all.length : 1;
+      const lines = all.slice(0, keep).join("") + (all.length > keep ? `<details class="gmore"><summary class="textbtn">続きを読む</summary>${all.slice(keep).join("")}</details>` : "");
       let extra = "";
       if (b.id === "gap") {
         const fig = b.figure && sc.figures && sc.figures[b.figure] ? `<div class="figslot" data-fig="${esc(b.figure)}"></div>` : "";
@@ -75,15 +80,27 @@ const Report = (() => {
           return `<div class="grow" data-grow="${esc(r.id)}"><div class="gasp">${esc(r.aspect)} <span class="chip ${scls}">${esc(sl)}</span></div>
             <div class="gpair"><span class="glab">いま</span><span>${esc(r.now)}</span><span class="glab">理想</span><span>${esc(r.ideal)}</span></div></div>`;
         }).join("");
-        extra = `${fig}<div class="gcmp">${rows}</div>`;
+        extra = fig || rows ? `<details class="gmore" data-gap-more><summary class="textbtn">図で比べる</summary>${fig}<div class="gcmp">${rows}</div></details>` : "";
       }
       if (b.id === "action") {
         const c0 = b.start && cand(b.start);
         if (c0 && c0.kind !== "measure") extra = `<div class="block"><button class="btn primary block" data-primary data-act="startplan" data-cand="${esc(c0.id)}" data-which="now">このプランで始める</button></div>`;
       }
+      // 同じ名前のボタンが4つ並ばないよう、読み上げには塊の名前を足す
       return `<section class="gblock gb-${esc(b.id)}" data-block="${esc(b.id)}"><h2>${esc(b.title)}</h2>${lines}${extra}
-        <button class="textbtn" data-why="${esc(b.id)}">なぜそう言える？</button></section>`;
+        <button class="textbtn" data-why="${esc(b.id)}">なぜそう言える？<span class="visually-hidden">（${esc(b.title)}）</span></button></section>`;
     }).join("");
+  }
+
+  // 根拠の定型文1つ。「／」で原因を並べた長い文は、原因ごとの箇条書きにする（1段落に詰めない）
+  function claimBody(c) {
+    const t = App.textJa(c.text);
+    const bits = t.split("／").map((x) => x.trim()).filter(Boolean);
+    if (bits.length < 2) return `<p class="claim" data-claim="${esc(c.id)}">${esc(t)}</p>`;
+    const m = /^([^：:]{1,24}[：:])\s*(.*)$/.exec(bits[0]);
+    const head = m ? m[1] : "";
+    if (m) bits[0] = m[2];
+    return `<div class="claim" data-claim="${esc(c.id)}">${head ? `<p style="margin:0">${esc(head)}</p>` : ""}<ul class="parts">${bits.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>`;
   }
 
   // 「なぜそう言える？」: 文ごとに、その根拠の定型文（数字入り）を並べたシート
@@ -92,15 +109,20 @@ const Report = (() => {
     if (!b) return;
     const lines = (b.lines || []).concat((b.rows || []).map((r) => ({ text: `${r.aspect}: ${r.now}`, evidence: r.evidence })));
     const seen = new Set();
+    let said = "";
     const parts = lines.map((ln) => {
       const cs = (ln.evidence || []).filter((id) => !seen.has(id) && seen.add(id)).map((id) => claimById(rep, sc, id)).filter(Boolean)
         .map((c) => ({ ...c, text: fillBand(c.text, sc, hand) })).filter((c) => c.text);
       if (!cs.length) return "";
-      return `<div class="wgrp"><p class="wq">${esc(ln.text)}</p>${cs.map((c) => `<p class="claim" data-claim="${esc(c.id)}">${esc(c.text)}</p>`).join("")}</div>`;
+      said += ln.text + cs.map((c) => c.text).join("");
+      return `<div class="wgrp"><p class="wq">${esc(App.textJa(ln.text))}</p>${cs.map(claimBody).join("")}</div>`;
     }).join("");
+    // 出てきた専門用語に一行の説明を添える（解説の用語集から。ここで説明を作らない）
+    const gl = ((rep && rep.glossary) || []).filter((g) => g.term && said.includes(g.term));
     const sec = GIST_SEC[blockId];
     App.openSheet({ title: "なぜそう言える？", label: "why", size: "full",
       html: `${parts || `<p class="sub">この塊の根拠になる文はありません。</p>`}
+        ${gl.length ? `<div class="gloss-list" data-why-gloss><p class="label">言葉の意味</p>${gl.map((g) => `<p class="gloss"><b>${esc(g.term)}</b>: ${esc(g.text)}</p>`).join("")}</div>` : ""}
         <p class="caption">文は全部、計測の数字から決まった型で作ったものです（AI の文ではありません）。</p>
         ${sec ? `<a class="btn block" href="#/session/${sid}/detail?scope=${encodeURIComponent(sc.scope_id)}&sec=${sec}">図と数字をくわしく見る</a>` : ""}` });
   }
@@ -119,7 +141,9 @@ const Report = (() => {
       ${App.navItem(`#/session/${sid}/shots`, "一球ずつ", "除外・当たった場所の入力も")}
       ${App.navItem(`#/session/${sid}/experiments`, "一回だけの実験", "仮説とブロックを自分で決める")}</ul>`;
     if (!r.available || !r.report) {
-      body.innerHTML = `<div class="note warn" data-report-unavailable>解説は、分析のサービスが動いているときだけ出ます${r.reason ? `（${esc(r.reason)}）` : ""}。一球ずつの分解は見られます。</div>${links}`;
+      // 理由の文（サーバー）と同じことを2回言わない。こちらの1文だけにし、サーバーの文は「くわしく」に畳む
+      body.innerHTML = `<div class="note warn" data-report-unavailable><p style="margin:0">分析のサービスが止まっているので、解説は出せません。一球ずつの分解は見られます。</p>
+        ${r.reason ? `<details><summary class="textbtn">くわしく</summary><p class="caption">${esc(r.reason)}</p></details>` : ""}</div>${links}`;
       return;
     }
     const rep = r.report, hand = rep.handedness === "L" ? "L" : "R";
@@ -131,8 +155,9 @@ const Report = (() => {
     const sc = mains.find((x) => x.scope_id === query.scope) || mains.find((x) => x.gist.focus) || mains[0];
     const seg = mains.length > 1 ? `<div class="seg" role="group" aria-label="範囲" data-scopes>${mains.map((x) =>
       `<a href="#/session/${sid}?scope=${encodeURIComponent(x.scope_id)}" ${x === sc ? 'aria-current="page"' : ""} data-scope="${esc(x.scope_id)}">${scopeLab(x)}</a>`).join("")}</div>` : "";
+    // 範囲のセグメントがあるときは、同じ名前をカードの中でくり返さない
     body.innerHTML = `${seg}<article class="card block" data-gist data-scope="${esc(sc.scope_id)}">
-        <p class="label">${scopeLab(sc)}</p>${gistHtml(sc)}</article>${links}`;
+        ${seg ? "" : `<p class="label">${scopeLab(sc)}</p>`}${gistHtml(sc)}</article>${links}`;
     const slot = $(".figslot", body);
     if (slot) {
       try {
@@ -246,8 +271,9 @@ const Report = (() => {
   }
 
   function sectionHtml(rep, sc, sec, hand, first) {
-    const claims = (sec.claims || []).map((c) => ({ ...c, text: fillBand(c.text, sc, hand) })).filter((c) => c.text !== null);
-    const lead = fillBand(sec.lead, sc, hand) ?? (claims[0] ? claims[0].text : "");
+    const claims = (sec.claims || []).map((c) => { const t = fillBand(c.text, sc, hand); return { ...c, text: t === null ? null : App.textJa(t) }; }).filter((c) => c.text !== null);
+    const lf = fillBand(sec.lead, sc, hand);
+    const lead = lf != null ? App.textJa(lf) : (claims[0] ? claims[0].text : "");
     const nr = narrOf(sc, sec.id);
     const claimHtml = (c) => `${nr ? bridgeHtml(nr.before[c.id]) : ""}<p class="claim ${c.layer === "meta" ? "meta" : c.layer === "hint" ? "hint" : ""}" data-claim="${esc(c.id)}">${esc(c.text)}</p>${extrasFor(c, sc)}${nr ? glossHtml(rep, nr.glossAfter[c.id]) : ""}`;
     const figs = (sec.figures || []).filter((f) => sc.figures && sc.figures[f]).map((f) => `<div class="figslot" data-scope="${esc(sc.scope_id)}" data-fig="${esc(f)}"></div>`).join("");
@@ -270,7 +296,7 @@ const Report = (() => {
   function scopeCard(rep, sc, hand, nested) {
     sc.__hand = hand;
     const excl = sc.mishit_excluded ? `・ミスヒットの候補 ${sc.mishit_excluded}球を除く（${(sc.mishit_seqs || []).map((q) => "#" + q).join(" ")}）` : "";
-    const clubs = (sc.clubs || []).length > 1 ? `${sc.clubs.map(esc).join("・")}／` : "";
+    const clubs = (sc.clubs || []).length > 1 ? `${sc.clubs.map((c) => esc(App.clubJa(c))).join("・")}／` : "";
     let h = `<article class="rcard" id="rc-${esc(sc.scope_id)}" data-scope="${esc(sc.scope_id)}" data-kind="${esc(sc.kind)}">
       <h2>${esc(scopeName(sc))} <span class="caption">${clubs}${sc.n}球${esc(excl)}</span></h2>`;
     h += (sc.sections || []).map((sec, i) => sectionHtml(rep, sc, sec, hand, i === 0)).join("");
@@ -300,7 +326,7 @@ const Report = (() => {
         return `<b>${esc(LABEL[f.metric] || f.metric)}の向きだけで、左右のばらつき${f.outcome === "side_pct" ? "（キャリーに対する割合）" : ""}の${Math.round(r2 * 100)}%</b>を説明できます（${f.evidence.n}球・単回帰）。`;
       }
       case "extreme_strike": {
-        const e = f.evidence, where = f.contact === "heel_extreme" ? "ヒール（ネック寄り）" : "トゥ（先端寄り）";
+        const e = f.evidence, where = f.contact === "heel_extreme" ? "ネック寄り（ヒール側）" : "先端寄り（トゥ側）";
         const noFace = e.no_face ?? e.no_club_data ?? 0, noBoth = e.no_face_and_path || 0;
         const miss = noFace ? `（うち${noFace}球は TrackMan がフェースを取れていません${noBoth ? `。${noBoth}球はパスも` : ""}）` : "";
         return `<b>${e.count}球${ids}が極端な${where}</b>の当たりです。左右のずれは平均 <b>${fmt("side", e.mean_abs_side)}</b>（ほかの球は ${fmt("side", e.mean_abs_side_others)}）です${miss}。フェースとは別の問題です。`;
@@ -337,7 +363,7 @@ const Report = (() => {
     for (const g of a.groups || []) {
       const fs = a.findings.filter((f) => f.club === g.name);
       const v = g.variability;
-      h += `<section class="rcard"><h2>${esc(g.name)} <span class="caption">${g.clubs.map(esc).join("・")}／${g.n}球</span></h2>${exclNote(v)}
+      h += `<section class="rcard"><h2>${esc(App.textJa(g.name))} <span class="caption">${g.clubs.map((c) => esc(App.clubJa(c))).join("・")}／${g.n}球</span></h2>${exclNote(v)}
         <div class="kpi">${["face_angle", "club_path", "face_to_path", "impact_offset"].filter((k) => v[k]).map((k) =>
           `<div><div class="caption">${esc(LABEL[k])}</div><div class="v">${fmt(k, v[k].mean, true)}</div><div class="caption">ばらつき ±${v[k].sd != null ? fmt(k, v[k].sd) : "—"}</div></div>`).join("")}</div>
         ${fs.map(fcard).join("") || `<p class="sub">まとめて言えることはまだありません。</p>`}${tendencyHtml(g.profile, hand)}</section>`;
@@ -345,7 +371,7 @@ const Report = (() => {
     for (const c of a.clubs) {
       const fs = a.findings.filter((f) => f.club === c.club);
       const v = c.variability;
-      h += `<section class="rcard"><h2>${esc(c.club)} <span class="caption">${c.n}球</span></h2>${exclNote(v)}
+      h += `<section class="rcard"><h2>${esc(App.clubJa(c.club))} <span class="caption">${c.n}球</span></h2>${exclNote(v)}
         <div class="kpi"><div><div class="caption">Good</div><div class="v">${c.good.n_good} / ${c.n}</div></div>
           <div><div class="caption">キャリーの中央値</div><div class="v">${fmt("carry", c.carry_median)}</div></div>
           ${["face_to_path", "face_angle", "club_path"].filter((k) => v[k]).map((k) =>
@@ -542,8 +568,13 @@ const Report = (() => {
   // ==== 一球ずつ ====
   async function renderShots({ el, params, query, alive }) {
     const sid = Number(params.id);
+    // 操作（良い球の印・当たった場所・除外）は番号とクラブのすぐ右に置く（右端だと、スマホでは表を大きく横に動かさないと見つからない）
     el.innerHTML = `<div class="pagehead">${App.backBtn(`#/session/${sid}`, "診断へ戻る")}<h1>一球ずつ</h1></div>
-      <p class="sub">曲がりの原因は物理（D-plane）で分けたもの。打点はインパクトテープの結果を mm で入れられます（トゥ ＋ / ヒール −）。「切替」は自動 → Good → Miss → 自動の順に回ります。</p>
+      <p class="sub">球ごとに、良い球の印を付け直す・当たった場所を入れる・計算から外すことができます。</p>
+      <details class="folded"><summary>表の見方</summary>
+        <p class="caption">「曲がりの原因」は、当たる瞬間のクラブの向きと動きから計算で分けたものです。</p>
+        <p class="caption">「当たった場所」には、フェースに貼るシールなどで見た位置を、芯からの mm で入れます（先の側がプラス、ネックの側がマイナス）。</p>
+        <p class="caption">「良い球」を押すたびに、自動 → 良い球 → 良くない球 → 自動 の順に替わります。</p></details>
       <div data-err></div><div class="scroll card" style="padding:0"><table data-shots></table></div>`;
     const table = $("[data-shots]", el);
     const stop = App.loading(table);
@@ -565,22 +596,22 @@ const Report = (() => {
     const cols = ["carry", "side", "launch_direction", "spin_axis", "face_angle", "club_path", "face_to_path", "attack_angle", "impact_offset"];
     const signed = ["side", "launch_direction", "spin_axis", "face_angle", "club_path", "face_to_path", "impact_offset"];
     const draw = () => {
-      const head = `<tr><th>#</th><th class="l">クラブ</th>${cols.map((c) => `<th>${esc(LABEL[c])}</th>`).join("")}<th class="l">球筋</th><th class="l">曲がりの原因</th><th class="l">当たり</th><th class="l">Good</th><th class="l">打点mm</th><th></th></tr>`;
+      const head = `<tr><th>#</th><th class="l">クラブ</th><th class="l">良い球</th><th class="l">当たった場所（mm）</th><th class="l">計算</th>${cols.map((c) => `<th>${esc(LABEL[c])}</th>`).join("")}<th class="l">球筋</th><th class="l">曲がりの原因</th><th class="l">当たり</th></tr>`;
       const rows = list.map((s) => {
         const m = s.metrics, d = s.decomposition, g = goodOf(s);
         const gChip = !g || g.good === null ? `<span class="chip none">—</span>`
-          : `<span class="chip ${g.good ? "good" : "bad"}" title="${esc((g.failed || []).join(", "))}">${g.good ? "✓ Good" : "× Miss"}${g.by === "override" ? "✎" : ""}</span>`;
+          : `<span class="chip ${g.good ? "good" : "bad"}" title="${esc((g.failed || []).join(", "))}">${g.good ? "✓ 良い" : "× 良くない"}${g.by === "override" ? "✎" : ""}</span>`;
         const manual = (s.manual || []).includes("impact_offset");
         const cand = candidateOf(s);
         return `<tr class="${s.excluded ? "excluded" : ""} ${String(s.id) === query.sel ? "sel" : ""}" data-id="${s.id}">
-          <td>${s.seq}</td><td class="l">${esc(s.club)}</td>
+          <td>${s.seq}</td><td class="l">${esc(App.clubJa(s.club))}</td>
+          <td class="l"><button class="btn small" data-act="good" aria-label="#${s.seq} の良い球の印を切り替える（いま: ${!g || g.good === null ? "決まっていない" : g.good ? "良い" : "良くない"}）">${gChip}</button></td>
+          <td class="l"><input type="number" step="1" min="-60" max="60" data-act="offset" aria-label="#${s.seq} の当たった場所（mm）" value="${m.impact_offset != null && manual ? Math.round(m.impact_offset * 1000) : ""}"></td>
+          <td class="l"><button class="btn small" data-act="excl">${s.excluded ? "戻す" : "除外"}</button></td>
           ${cols.map((c) => `<td>${fmt(c, m[c], signed.includes(c))}${c === "impact_offset" && manual ? "✎" : ""}</td>`).join("")}
           <td class="l">${esc(START[d.start_line])}・${esc(CURVE[d.curve])}</td>
           <td class="l">${causeChip(d.curve_cause)}${(d.notes || []).length ? ` <span title="${esc(d.notes.join("\n"))}">⚠︎</span>` : ""}</td>
-          <td class="l"><span class="chip ${/extreme/.test(d.contact) ? "bad" : d.contact === "center" ? "good" : "none"}">${esc(CONTACT[d.contact] || "—")}</span>${(d.flags || []).includes("thin") ? ` <span class="chip warn">薄い</span>` : ""}${cand ? ` <span class="chip warn" title="${esc(cand.reasons.map((x) => REASON[x] || x).join("・"))}">除外候補</span>` : ""}</td>
-          <td class="l">${gChip} <button class="btn small" data-act="good" aria-label="#${s.seq} の Good を切り替える">切替</button></td>
-          <td class="l"><input type="number" step="1" min="-60" max="60" data-act="offset" aria-label="#${s.seq} の打点（mm）" value="${m.impact_offset != null && manual ? Math.round(m.impact_offset * 1000) : ""}"></td>
-          <td><button class="btn small" data-act="excl">${s.excluded ? "戻す" : "除外"}</button></td></tr>`;
+          <td class="l"><span class="chip ${/extreme/.test(d.contact) ? "bad" : d.contact === "center" ? "good" : "none"}">${esc(CONTACT[d.contact] || "—")}</span>${(d.flags || []).includes("thin") ? ` <span class="chip warn">薄い</span>` : ""}${cand ? ` <span class="chip warn" title="${esc(cand.reasons.map((x) => REASON[x] || x).join("・"))}">除外候補</span>` : ""}</td></tr>`;
       }).join("");
       table.innerHTML = head + rows;
     };
@@ -731,10 +762,14 @@ const Report = (() => {
       ${gc && gc.why ? `<p class="sub">${esc(gc.why)}</p>` : ""}
       <p class="caption">${esc(scopeName(sc))}${cand.club && cand.club.club ? `・${esc(App.clubJa(cand.club.club))}で打つ` : ""}<span data-ps="total"></span></p>
       <div data-ps="drills" class="sub">ドリル集を読み込み中…</div>
-      <label class="field"><span>本番で意識する1点</span><input data-ps="cue" maxlength="120" placeholder="例: 向こうにボールがあるつもりで打つ"></label>
+      <label class="field"><span>本番で意識する1点</span><textarea class="plain" data-ps="cue" rows="3" maxlength="120" placeholder="例: 向こうにボールがあるつもりで打つ"></textarea></label>
       <div class="note caption">1回の練習は「いつも通り → 本番 → 本番 → いつも通り」の順に打ちます。別の日にもう一回同じ結果が出たら「効いた」と言います。飛ぶ距離か振りの速さが続けて落ちたら知らせます。</div>
+      <div data-ps="advance"></div>
       <div class="block"><button class="btn primary block" data-ps="go">プランを作る</button><div data-ps="err"></div></div>` });
     const q = (k) => $(`[data-ps=${k}]`, sh.el);
+    // 次に進む条件（定型文。数字はここ＝シートの中で出してよい層）
+    const adv = fillBand(claimOf(sc, `${which}.advance`), sc, rep.handedness === "L" ? "L" : "R");
+    if (adv) q("advance").innerHTML = `<p class="label" style="margin:var(--s3) 0 0">次に進む条件</p><p class="caption" style="margin-top:var(--s1)">${esc(App.textJa(adv.replace(/^次に進む条件:\s*/, "")))}</p>`;
     // 意識する1点の初期値: 要点が「意識する一点」と言った文（数字・専門用語の検査を通ったもの）。直せる
     const g = sc.gist || {};
     if (g.focus && g.focus.candidate_id === cand.id) {

@@ -496,12 +496,16 @@
   //   球の散らばり（上から見た着弾。縦は飛んだ距離・横は左右。緑の帯が狙いの幅）
   //   クラブの面の向き（扇。1本が1球。角度は見やすいよう大きく描いた模式）
   //   当たる場所（クラブの面の形の上の点。目標側から見た形で、右打ちはネックが右）
+  // ctx.compact（ホームの小さな版）: 球の散らばりの段だけ。件数の文と注記は出さない（ホームに数字を置かない）。
+  // 字はスマホの幅（図が約 256px に縮む）でも 12px 前後になる大きさ（.fig-cmp の t11 など）。
+  // 左右の段のあいだは、左の「右」と右の「左」が接して読めないので広めに空ける。
   function C1(fig, ctx) {
     const L = ctx.hand === "L";
-    const gap = 12, pw = (W - gap) / 2, px = [0, pw + gap];
-    const rows = [{ id: "landing", h: 176 }];
-    if ((fig.face || {}).show) rows.push({ id: "face", h: 96 });
-    if ((fig.strike || {}).show) rows.push({ id: "strike", h: 78 });
+    const compact = !!ctx.compact;
+    const gap = 28, pw = (W - gap) / 2, px = [0, pw + gap];
+    const rows = [{ id: "landing", h: compact ? 150 : 176 }];
+    if (!compact && (fig.face || {}).show) rows.push({ id: "face", h: 96 });
+    if (!compact && (fig.strike || {}).show) rows.push({ id: "strike", h: 78 });
     const head = 24, rowGap = 22;
     const H = head + rows.reduce((a, r) => a + r.h + rowGap, 0);
     const s = svgRoot(fig, H);
@@ -511,7 +515,7 @@
     let y0 = head;
     const mir = (v) => (L ? -v : v);
     for (const r of rows) {
-      s.appendChild(el("text", { x: W / 2, y: y0 + 12, class: "g-sub t12", "text-anchor": "middle" }, lb[r.id] || ""));
+      if (!compact) s.appendChild(el("text", { x: W / 2, y: y0 + 12, class: "g-sub t12", "text-anchor": "middle" }, lb[r.id] || ""));
       const top = y0 + 18, bot = y0 + r.h;
       if (r.id === "landing") {
         const now = (fig.now || {}).points || [], idl = (fig.ideal || {}).points || [];
@@ -547,6 +551,9 @@
           }
           if (i && !vals.length) s.appendChild(el("text", { x: ox, y: top + 20, class: "g-sub t11", "text-anchor": "middle" }, "狙いの方向にそろう"));
           s.appendChild(el("circle", { cx: ox, cy: oy, r: 3, class: "g-text-fill" }));
+          // どちらへ向いたかの目印（上の段と同じく、画面の左が左）
+          s.appendChild(el("text", { x: x0 + 6, y: oy, class: "g-sub t11" }, "← 左"));
+          s.appendChild(el("text", { x: x0 + pw - 6, y: oy, class: "g-sub t11", "text-anchor": "end" }, "右 →"));
         });
       } else {
         const st = fig.strike || {};
@@ -571,12 +578,12 @@
             const cy = fy + fh / 2 + ((used[k] % 2 ? 1 : -1) * Math.floor(used[k] / 2) * 5);
             s.appendChild(el("circle", { cx, cy: Math.max(fy + 3, Math.min(fy + fh - 3, cy)), r: 3.5, class: i || Math.abs(mm) <= st.center_mm ? "g-good" : "g-miss" }));
           }
-          if (i && !vals.length) s.appendChild(el("text", { x: x0 + pw / 2, y: fy - 3, class: "g-sub t11", "text-anchor": "middle" }, "芯の近くに当たる"));
+          if (i && !vals.length) s.appendChild(el("text", { x: x0 + pw / 2, y: fy + fh / 2 + 6, class: "g-sub t11", "text-anchor": "middle" }, "芯の近くに当たる"));
         });
       }
-      if (r.id === "landing") {
-        s.appendChild(el("text", { x: pw / 2, y: bot + 16, class: "g-text t12", "text-anchor": "middle" }, (fig.now || {}).caption || ""));
-        s.appendChild(el("text", { x: pw + gap + pw / 2, y: bot + 16, class: "g-good g-strong t12", "text-anchor": "middle" }, (fig.ideal || {}).caption || ""));
+      if (r.id === "landing" && !compact) {
+        s.appendChild(el("text", { x: pw / 2, y: bot + 16, class: "g-text t12 c1-cap", "text-anchor": "middle" }, (fig.now || {}).caption || ""));
+        s.appendChild(el("text", { x: pw + gap + pw / 2, y: bot + 16, class: "g-good g-strong t12 c1-cap", "text-anchor": "middle" }, (fig.ideal || {}).caption || ""));
         y0 += 12;
       }
       y0 += r.h + rowGap;
@@ -585,7 +592,8 @@
     const f = h("figure", "fig fig-cmp");
     f.dataset.fig = fig.id;
     f.appendChild(s);
-    if (fig.note) f.appendChild(h("p", "fig-note", fig.note));
+    if (fig.note && !compact) f.appendChild(h("p", "fig-note", fig.note));
+    if (compact) f.classList.add("fig-mini");
     return f;
   }
 
