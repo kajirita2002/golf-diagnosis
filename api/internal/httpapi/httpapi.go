@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/kajirita2002/golf-diagnosis/api/internal/analysis"
 	"github.com/kajirita2002/golf-diagnosis/api/internal/ingest"
@@ -51,6 +52,49 @@ type Status struct {
 	DBPersistent bool   // false なら DB_PATH が未設定で、再起動で消える
 	AnthropicKey bool   // Claude の API キーがあるか（中身は出さない）
 	Commit       string // 動いているコミット（Render の RENDER_GIT_COMMIT）
+	AnalysisURL  string // 分析サービス。/healthz で生きているかを見る
+}
+
+// HealthJSON は /healthz の中身。起動中（データベースにつながる前）も同じ形で返す。
+// state: starting / ready。dbError: つながらない理由（接続文字列は伏せてある）。
+func HealthJSON(st Status, state, dbError string) []byte {
+	out := map[string]any{
+		"ok":            true,
+		"state":         state,
+		"physics":       physics.EngineVersion,
+		"commit":        st.Commit,
+		"db":            st.DB,
+		"db_persistent": st.DBPersistent,
+		"anthropic_key": st.AnthropicKey,
+		"analysis":      analysisAlive(st.AnalysisURL),
+	}
+	if dbError != "" {
+		out["db_error"] = dbError
+	}
+	b, _ := json.Marshal(out)
+	return b
+}
+
+// ErrorJSON は {"error": msg}。
+func ErrorJSON(msg string) []byte {
+	b, _ := json.Marshal(apiError{msg})
+	return b
+}
+
+func analysisAlive(base string) string {
+	if base == "" {
+		return "unknown"
+	}
+	c := http.Client{Timeout: 1500 * time.Millisecond}
+	resp, err := c.Get(base + "/healthz")
+	if err != nil {
+		return "down"
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "down"
+	}
+	return "up"
 }
 
 // New はサーバーを作る。
@@ -68,14 +112,8 @@ func New(st *store.Store, an Analyzer) *Server {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"ok":            true,
-			"physics":       physics.EngineVersion,
-			"commit":        s.Status.Commit,
-			"db":            s.Status.DB,
-			"db_persistent": s.Status.DBPersistent,
-			"anthropic_key": s.Status.AnthropicKey,
-		})
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_, _ = w.Write(HealthJSON(s.Status, "ready", ""))
 	})
 	mux.HandleFunc("GET /v1/players", s.listPlayers)
 	mux.HandleFunc("POST /v1/players", s.createPlayer)

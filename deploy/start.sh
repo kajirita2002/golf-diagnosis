@@ -1,15 +1,16 @@
 #!/bin/bash
-# 分析サービスと API を立てる。どちらかが落ちたら全体を落とす（デプロイ先が再起動する）。
-# 片方だけ死んだまま動き続けると、画面は出るのに診断だけ失敗する、が見えにくい。
+# 分析サービス（Python）と API（Go）を立てる。
+#
+# **待ち受け（Go）を道連れにしない。** 前はどちらかが落ちたら全体を落としていたので、
+# 分析サービスが起動で転ぶと Render は「起動中」のまま再起動を繰り返し、原因が外から見えなかった。
+# いまは分析サービスだけ落ちても繰り返し立て直し、Go は動き続けて /healthz で "analysis":"down" と返す。
 set -u
-cd /app/analysis
-.venv/bin/uvicorn golf_analysis.app:app --host 127.0.0.1 --port 8001 --log-level warning &
-PY=$!
-/app/server &
-GO=$!
-trap 'kill -TERM $PY $GO 2>/dev/null' TERM INT
-wait -n $PY $GO
-code=$?
-kill -TERM $PY $GO 2>/dev/null
-wait
-exit $code
+(
+  cd /app/analysis
+  while true; do
+    .venv/bin/uvicorn golf_analysis.app:app --host 127.0.0.1 --port 8001 --log-level warning
+    echo "analysis exited with $?; restarting in 3s" >&2
+    sleep 3
+  done
+) &
+exec /app/server

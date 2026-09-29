@@ -2,11 +2,16 @@
 //
 //	DB_PATH       保存先。SQLite のファイルか PostgreSQL の URL（postgres://...。golf スキーマに作る）
 //	              未設定なら DEFAULT_DB_PATH（コンテナでは /app/data/golf.db）、それも無ければ golf.db。
-//	              **未設定のまま公開すると再起動で消える**ので、/healthz と画面にそう出す（落とさない）。
+//	              **未設定のまま公開すると再起動で消える**ので、/healthz と画面にそう出す。
 //	ANALYSIS_URL  Python の分析サービス（既定 http://127.0.0.1:8001）
 //	WEB_DIR       画面の静的ファイル（既定 ../web。無ければ配らない）
 //	PORT          待ち受け（既定 8080）
 //	APP_PASSWORD  空でなければ全部に Basic 認証を掛ける（公開するときは必ず入れる）
+//
+// **起動の約束: 待ち受けは最初に開き、何があっても落とさない。**
+// Render は待ち受けが開かないと「起動中」の画面のまま再起動を繰り返し、原因が外から見えない
+// （2026-09-29 に実際に踏んだ）。データベースは裏でつなぎ、つながるまでは
+// /healthz が理由を返し、ほかは 503 を返す。
 package main
 
 import (
@@ -17,6 +22,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -32,43 +38,56 @@ func env(k, def string) string {
 	return def
 }
 
+// gate はデータベースがつながるまでの受付。つながったら本物のハンドラへ切り替える。
+type gate struct {
+	mu      sync.RWMutex
+	ready   http.Handler
+	status  httpapi.Status
+	lastErr string
+}
+
+func (g *gate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	g.mu.RLock()
+	h, st, lastErr := g.ready, g.status, g.lastErr
+	g.mu.RUnlock()
+	if h != nil {
+		h.ServeHTTP(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	if r.URL.Path == "/healthz" {
+		// 起動中でも 200 で返す（Render の死活監視を通して、再起動の繰り返しにしない）
+		_, _ = w.Write(httpapi.HealthJSON(st, "starting", lastErr))
+		return
+	}
+	w.Header().Set("Retry-After", "10")
+	w.WriteHeader(http.StatusServiceUnavailable)
+	msg := "起動中です。データベースに接続しています"
+	if lastErr != "" {
+		msg = "データベースに接続できません: " + lastErr
+	}
+	_, _ = w.Write(httpapi.ErrorJSON(msg))
+}
+
 func main() {
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	dbPath, persistent := os.Getenv("DB_PATH"), true
 	if dbPath == "" {
-		// 落として再起動を繰り返すと、原因が外から見えない（Render の画面は起動中のまま回り続ける）。
-		// 一時的な保存先で動かして、/healthz と画面に「再起動で消える」と出す。
 		dbPath, persistent = env("DEFAULT_DB_PATH", "golf.db"), false
 		log.Warn("DB_PATH が未設定です。一時的な保存先で動きます（再起動で消えます）", "path", dbPath)
 	}
-	st, err := openWithRetry(log, dbPath)
-	if err != nil {
-		log.Error("DB を開けません", "kind", dbKind(dbPath), "err", err)
-		os.Exit(1)
-	}
-	defer st.Close()
-
-	srv := httpapi.New(st, analysis.New(env("ANALYSIS_URL", "http://127.0.0.1:8001")))
-	srv.Log = log
-	srv.Password = os.Getenv("APP_PASSWORD")
-	srv.Status = httpapi.Status{
+	status := httpapi.Status{
 		DB:           dbKind(dbPath),
 		DBPersistent: persistent,
 		AnthropicKey: os.Getenv("ANTHROPIC_API_KEY") != "",
 		Commit:       short(os.Getenv("RENDER_GIT_COMMIT")),
+		AnalysisURL:  env("ANALYSIS_URL", "http://127.0.0.1:8001"),
 	}
-	if srv.Password == "" {
-		log.Warn("APP_PASSWORD が未設定です。パスワード無しで動きます（手元で使うときだけにしてください）")
-	}
-	if dir := env("WEB_DIR", "../web"); dir != "" {
-		if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
-			srv.Static = http.FileServer(http.Dir(dir))
-		}
-	}
+	g := &gate{status: status}
 
 	hs := &http.Server{
 		Addr:              ":" + env("PORT", "8080"),
-		Handler:           srv.Handler(),
+		Handler:           g,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() {
@@ -78,12 +97,61 @@ func main() {
 			os.Exit(1)
 		}
 	}()
+
+	// データベースは裏でつなぐ。つながるまで諦めない（落とすと原因が見えなくなる）。
+	var (
+		stMu sync.Mutex
+		st   *store.Store
+	)
+	go func() {
+		wait := 2 * time.Second
+		for try := 1; ; try++ {
+			s, err := store.Open(dbPath)
+			if err == nil {
+				stMu.Lock()
+				st = s
+				stMu.Unlock()
+				srv := httpapi.New(s, analysis.New(status.AnalysisURL))
+				srv.Log = log
+				srv.Password = os.Getenv("APP_PASSWORD")
+				srv.Status = status
+				if srv.Password == "" {
+					log.Warn("APP_PASSWORD が未設定です。パスワード無しで動きます（手元で使うときだけにしてください）")
+				}
+				if dir := env("WEB_DIR", "../web"); dir != "" {
+					if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
+						srv.Static = http.FileServer(http.Dir(dir))
+					}
+				}
+				g.mu.Lock()
+				g.ready, g.lastErr = srv.Handler(), ""
+				g.mu.Unlock()
+				log.Info("ready", "db", status.DB, "persistent", status.DBPersistent)
+				return
+			}
+			msg := sanitize(err.Error(), dbPath)
+			g.mu.Lock()
+			g.lastErr = msg
+			g.mu.Unlock()
+			log.Error("DB を開けません。待ってやり直します", "kind", status.DB, "try", try, "wait", wait.String(), "err", msg)
+			time.Sleep(wait)
+			if wait < 30*time.Second {
+				wait *= 2
+			}
+		}
+	}()
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	<-ctx.Done()
 	shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = hs.Shutdown(shutdown)
+	stMu.Lock()
+	if st != nil {
+		st.Close()
+	}
+	stMu.Unlock()
 }
 
 func dbKind(dsn string) string {
@@ -100,20 +168,19 @@ func short(commit string) string {
 	return commit
 }
 
-// openWithRetry は PostgreSQL が起きるのを待つ（無料の PostgreSQL は寝ていると最初の接続に数秒かかる）。
-// エラーに接続文字列（パスワードを含む）を載せない。
-func openWithRetry(log *slog.Logger, dsn string) (*store.Store, error) {
-	var err error
-	for i, wait := 0, 2*time.Second; i < 6; i, wait = i+1, wait*2 {
-		var st *store.Store
-		if st, err = store.Open(dsn); err == nil {
-			return st, nil
-		}
-		if dbKind(dsn) != "postgres" {
-			return nil, err
-		}
-		log.Warn("PostgreSQL に接続できません。待ってやり直します", "try", i+1, "wait", wait.String(), "err", err)
-		time.Sleep(wait)
+// sanitize は外へ出すエラーから接続文字列（パスワードを含む）を消し、長さを切る。
+func sanitize(msg, dsn string) string {
+	if dsn != "" {
+		msg = strings.ReplaceAll(msg, dsn, "(DB_PATH)")
 	}
-	return nil, err
+	if i := strings.Index(msg, "://"); i >= 0 {
+		// user:pass@host の形が残っていたら丸ごと伏せる
+		if j := strings.Index(msg[i:], "@"); j >= 0 {
+			msg = msg[:i+3] + "***" + msg[i+j:]
+		}
+	}
+	if len(msg) > 300 {
+		msg = msg[:300] + "…"
+	}
+	return msg
 }
