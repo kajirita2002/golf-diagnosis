@@ -484,3 +484,23 @@ func Testパスワードを設定すると全部に掛かる(t *testing.T) {
 		t.Fatal("安全のためのヘッダーが無い")
 	}
 }
+
+func Test死活監視は設定の状態を値を出さずに返す(t *testing.T) {
+	st := openStore(t)
+	defer st.Close()
+	srv := New(st, &fakeAnalyzer{})
+	srv.Password = "secret"
+	srv.Status = Status{DB: "sqlite", DBPersistent: false, AnthropicKey: true, Commit: "abc1234"}
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+	resp, err := http.Get(ts.URL + "/healthz") // パスワード無しで見られる
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var out map[string]any
+	_ = json.NewDecoder(resp.Body).Decode(&out)
+	if out["db_persistent"] != false || out["anthropic_key"] != true || out["commit"] != "abc1234" {
+		t.Fatalf("%v", out)
+	}
+}

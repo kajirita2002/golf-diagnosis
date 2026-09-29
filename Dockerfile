@@ -21,8 +21,9 @@ RUN cd analysis && uv sync --frozen --no-dev
 COPY web/ web/
 COPY --from=build /out/server /app/server
 COPY deploy/start.sh /app/start.sh
-RUN chmod +x /app/start.sh && useradd -r -u 10001 app
+# /app/data は DB_PATH が無いときの一時的な保存先（書けないと起動で落ちて再起動を繰り返した）
+RUN chmod +x /app/start.sh && useradd -r -u 10001 app && mkdir -p /app/data && chown app /app/data
 USER app
-ENV WEB_DIR=/app/web ANALYSIS_URL=http://127.0.0.1:8001 PORT=8080
+ENV WEB_DIR=/app/web ANALYSIS_URL=http://127.0.0.1:8001 PORT=8080 DEFAULT_DB_PATH=/app/data/golf.db
 EXPOSE 8080
 CMD ["/app/start.sh"]

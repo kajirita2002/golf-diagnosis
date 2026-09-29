@@ -40,12 +40,23 @@ type Server struct {
 	Adapters map[string]ingest.Adapter
 	Static   http.Handler // 画面（nil なら配らない）
 	Password string       // 空でなければ全部に Basic 認証を掛ける（auth.go）
+	Status   Status       // /healthz に出す動作の状態
 	Log      *slog.Logger
+}
+
+// Status は動いているものの状態。/healthz（パスワード不要）で外から見られる。
+// 「設定したのに効いていない」を URL を開くだけで確かめるため。値そのもの（URL・キー）は出さない。
+type Status struct {
+	DB           string // sqlite / postgres
+	DBPersistent bool   // false なら DB_PATH が未設定で、再起動で消える
+	AnthropicKey bool   // Claude の API キーがあるか（中身は出さない）
+	Commit       string // 動いているコミット（Render の RENDER_GIT_COMMIT）
 }
 
 // New はサーバーを作る。
 func New(st *store.Store, an Analyzer) *Server {
 	return &Server{
+		Status:   Status{DB: "sqlite", DBPersistent: true},
 		Store:    st,
 		Analyzer: an,
 		Adapters: map[string]ingest.Adapter{"trackman": ingest.TrackMan{}},
@@ -57,7 +68,14 @@ func New(st *store.Store, an Analyzer) *Server {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "physics": physics.EngineVersion})
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":            true,
+			"physics":       physics.EngineVersion,
+			"commit":        s.Status.Commit,
+			"db":            s.Status.DB,
+			"db_persistent": s.Status.DBPersistent,
+			"anthropic_key": s.Status.AnthropicKey,
+		})
 	})
 	mux.HandleFunc("GET /v1/players", s.listPlayers)
 	mux.HandleFunc("POST /v1/players", s.createPlayer)

@@ -79,6 +79,7 @@ tr.sel td{background:var(--accent-weak)}
 </header>
 
 <main>
+  <div id="statusBanner" class="finding" style="border-color:var(--bad);background:var(--bad-weak)" hidden></div>
   <section id="newPlayer" hidden>
     <h2>選手を追加</h2>
     <div class="row">
@@ -694,6 +695,14 @@ document.addEventListener("paste", (ev) => {
   const files = [...(ev.clipboardData ? ev.clipboardData.files : [])].filter((f) => f.type.startsWith("image/"));
   if (files.length && !ev.target.closest("textarea,input")) { ev.preventDefault(); readShots(files); }
 });
+
+// 動作の状態（/healthz）。保存先が一時的なときは、入れたデータが消える前に分かるようにする
+fetch("/healthz").then((r) => r.json()).then((h) => {
+  const msgs = [];
+  if (h.db_persistent === false) msgs.push("<b>保存先が一時的です。</b>再起動すると入れたデータが消えます（サーバーの DB_PATH が未設定）。");
+  if (h.anthropic_key === false) msgs.push("スクショの読み取りは使えません（サーバーに Claude の API キーがありません）。表の貼り付けは使えます。");
+  if (msgs.length) { $("statusBanner").innerHTML = msgs.join("<br>"); $("statusBanner").hidden = false; }
+}).catch(() => {});
 
 loadPlayers().catch((e) => { $("sessErr").textContent = "API に接続できません: " + e.message; });
 </script>
