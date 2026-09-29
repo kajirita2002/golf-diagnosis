@@ -263,3 +263,81 @@ def band_request(p: dict, request_id: str) -> dict | None:
         "window_path": path.get("median"),
         "face_extent": [face.get("min"), face.get("max")],
     }
+
+
+# ---------------------------------------------------------------- C1: いま と 理想（要点の「理想との差」）
+
+
+def compare(p: dict, shots: list[dict], skip: set, carry_medians: dict, hand: str = "R") -> dict | None:
+    """要点の「理想との差」に置く比べる図（利用者の方針 2026-09-29。§0・§6.1）。
+
+    左に「いま」、右に「理想」を同じ縮尺で並べる。**細かい軸や目盛りは出さない**（数字は件数だけ）。
+    理想は §7 の①「今日すでに打てている球」から作る（予測や手本の絵は使わない）:
+      - 帯を使える種類: インパクトが帯に入った球（l1_in_band）
+      - 帯を使わない種類（式が合わない・球が足りない）: 実際に狙いの幅に落ちた球（L0 の実測）
+    3つの段: 着弾の散らばり（左右 ÷ 飛んだ距離）・当たる瞬間の面の向き（扇）・当たる場所（面の形の上の点）。
+    座標は右打ち（+ が右）。左打ちは画面が左右を反転する。当たる場所（ネック／先）は F5 と同じく目標側から見た形。
+    """
+    status = {x["shot_id"]: x for x in (p.get("band") or {}).get("statuses") or []}
+    band_used = bool((p.get("band") or {}).get("used"))
+    group = p["scope"] == "group"
+    now_pts, lims = [], []
+    in_target_ids = set()
+    for s in shots:
+        side, carry = m(s, "side"), m(s, "carry")
+        if side is None or carry is None or carry <= 0:
+            continue
+        lim = band_mod.lim_of(p["category"], carry)
+        base = carry_medians.get(s.get("club")) or p.get("carry_median_m") or carry
+        lims.append(lim / carry)
+        if abs(side) <= lim:
+            in_target_ids.add(s["id"])
+        now_pts.append({"id": s["id"], "x": side / carry, "y": carry / base if base else 1.0, "in": abs(side) <= lim,
+                        "mishit": s["id"] in skip, "ext": is_extreme(s)})
+    if len(now_pts) < config.MIN_SCOPE_N:
+        return None
+    if band_used:
+        ideal_ids = {sid for sid, st in status.items() if st.get("counted") and st.get("status") == "in"}
+        ideal_from = "band"
+    else:
+        ideal_ids = {s["id"] for s in shots if s["id"] in in_target_ids and s["id"] not in skip}
+        ideal_from = "landed"
+    ideal_pts = [pt for pt in now_pts if pt["id"] in ideal_ids]
+    half = float(np.median(lims)) if lims else config.DEFAULT_TARGET["side_pct"]
+
+    def faces(ids=None):
+        return [float(m(s, "face_angle")) for s in shots
+                if s["id"] not in skip and m(s, "face_angle") is not None and (ids is None or s["id"] in ids)]
+
+    def strikes(ids=None):
+        return [float(m(s, "impact_offset")) * 1000 for s in shots
+                if m(s, "impact_offset") is not None and (ids is None or s["id"] in ids)]
+
+    now_face, ideal_face = faces(), faces(ideal_ids)
+    now_strike = strikes()
+    # 当たる場所の理想は、理想の球のうち芯に当たった球（本人の良い球。§7.3 の l1_good と同じ考え）
+    ideal_strike = [v for v in strikes(ideal_ids) if abs(v) <= config.CENTER_STRIKE_M * 1000]
+    n_now, n_in = len(now_pts), sum(1 for pt in now_pts if pt["in"])
+    return {
+        "id": "C1",
+        "title": "いま と 理想",
+        "group": group,
+        "band_used": band_used,
+        "ideal_from": ideal_from,
+        "target_half": half,  # 狙いの幅（左右 ÷ 飛んだ距離）の半分。画面は帯として描くだけで数字は出さない
+        "now": {"n": n_now, "in_target": n_in, "points": [{k: v for k, v in pt.items() if k != "id"} for pt in now_pts],
+                "caption": f"{n_now}球中{n_in}球が狙いの幅"},
+        "ideal": {"n": len(ideal_pts), "points": [{k: v for k, v in pt.items() if k != "id"} for pt in ideal_pts],
+                  "caption": (f"今日すでに打てた{len(ideal_pts)}球" if ideal_pts else "狙いの幅にまとまる")},
+        "face": {"now": now_face, "ideal": ideal_face if len(ideal_face) >= 2 else [], "show": len(now_face) >= config.PLAIN_MIN_N},
+        "strike": {
+            "now": now_strike, "ideal": ideal_strike, "show": len(now_strike) >= config.PLAIN_MIN_N,
+            "center_mm": config.CENTER_STRIKE_M * 1000, "extreme_mm": config.EXTREME_STRIKE_M * 1000,
+            "heel_on": "left" if hand == "L" else "right",
+            "club_kind": "wood" if p["category"] in ("driver", "wood", "hybrid") else "iron",
+        },
+        "labels": {"now": "いま", "ideal": "理想", "landing": "球の散らばり", "face": "クラブの面の向き", "strike": "当たる場所",
+                   "heel": "ネック", "toe": "先", "target": "狙いの幅"},
+        # 最初に見える図なので、数字（件数を除く）と専門用語を使わない（gist.check_plain で検査する）
+        "note": "理想の球は、今日あなたが打った球から選んでいます（手本の絵ではありません）",
+    }

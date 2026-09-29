@@ -37,7 +37,7 @@ class ClaimError(ValueError):
 
 # 単位: 左右の向きを持つ量（左打ちで入れ替える）と、持たない量
 LATERAL_UNITS = {"deg_lat", "m_lat", "pct_lat"}
-UNITS = LATERAL_UNITS | {"deg", "m", "mm", "strike", "pct", "count", "ratio", "seqs", "text", "coef"}
+UNITS = LATERAL_UNITS | {"deg", "m", "mm", "mm1", "strike", "pct", "count", "ratio", "seqs", "text", "coef"}
 
 
 @dataclass
@@ -134,6 +134,9 @@ def fmt(f: Fact, hand: str, magnitude_only: bool = False) -> str:
         return f"{_num(v)}m"
     if u == "mm":
         return f"{_num(v * 1000, 0)}mm"
+    if u == "mm1":
+        # 小さな差（練習の判定の改善量）は小数1桁。0.58mm を「1mm」と切り上げて大きく見せない（R4）
+        return f"{_num(v * 1000, 1)}mm"
     if u == "strike":
         mm = v * 1000
         if magnitude_only:

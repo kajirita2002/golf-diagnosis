@@ -489,7 +489,107 @@
     return wrap(fig, s, [fig.legend], legend(items));
   }
 
-  const RENDER = { F1, F2, F3, F4, F5, F6, F7 };
+
+  // ---- C1 いま と 理想（要点の「理想との差」。最初に見える図） ----
+  // 利用者の方針（2026-09-29）: 細かい軸や目盛りは出さない。数字は件数（「26球中9球」）だけ。
+  // 左に「いま」、右に「理想」（今日すでに打てている球）を同じ縮尺で並べる。3つの段:
+  //   球の散らばり（上から見た着弾。縦は飛んだ距離・横は左右。緑の帯が狙いの幅）
+  //   クラブの面の向き（扇。1本が1球。角度は見やすいよう大きく描いた模式）
+  //   当たる場所（クラブの面の形の上の点。目標側から見た形で、右打ちはネックが右）
+  function C1(fig, ctx) {
+    const L = ctx.hand === "L";
+    const gap = 12, pw = (W - gap) / 2, px = [0, pw + gap];
+    const rows = [{ id: "landing", h: 176 }];
+    if ((fig.face || {}).show) rows.push({ id: "face", h: 96 });
+    if ((fig.strike || {}).show) rows.push({ id: "strike", h: 78 });
+    const head = 24, rowGap = 22;
+    const H = head + rows.reduce((a, r) => a + r.h + rowGap, 0);
+    const s = svgRoot(fig, H);
+    const lb = fig.labels || {};
+    px.forEach((x0, i) => s.appendChild(el("text", { x: x0 + pw / 2, y: 15, class: `t13 ${i ? "g-good g-strong" : "g-text"}`, "text-anchor": "middle" }, i ? lb.ideal : lb.now)));
+    s.appendChild(el("line", { x1: pw + gap / 2, x2: pw + gap / 2, y1: 4, y2: H - 4, class: "g-grid" }));
+    let y0 = head;
+    const mir = (v) => (L ? -v : v);
+    for (const r of rows) {
+      s.appendChild(el("text", { x: W / 2, y: y0 + 12, class: "g-sub t12", "text-anchor": "middle" }, lb[r.id] || ""));
+      const top = y0 + 18, bot = y0 + r.h;
+      if (r.id === "landing") {
+        const now = (fig.now || {}).points || [], idl = (fig.ideal || {}).points || [];
+        const half = fig.target_half || 0.05;
+        // 横の縮尺: 外れ値1球で全体が潰れないよう、9割の球が入る幅で決め、はみ出す球は端に置く
+        const ax = now.map((p) => Math.abs(p.x)).sort((a, b) => a - b);
+        const q90 = ax.length ? ax[Math.min(ax.length - 1, Math.floor(ax.length * 0.9))] : half;
+        const xmax = Math.max(half * 2.5, q90) * 1.1;
+        const clampX = (v) => Math.max(-xmax * 0.97, Math.min(xmax * 0.97, v));
+        const ys = now.map((p) => p.y).filter((v) => isFinite(v));
+        const ylo = Math.min(...ys, 0.8), yhi = Math.max(...ys, 1.1);
+        px.forEach((x0, i) => {
+          const x = lin(-xmax, xmax, x0 + 8, x0 + pw - 8), y = lin(ylo - 0.05, yhi + 0.05, bot - 4, top + 4);
+          s.appendChild(el("rect", { x: x(-half), y: top, width: x(half) - x(-half), height: bot - top, class: "g-band" }));
+          s.appendChild(el("line", { x1: x(0), x2: x(0), y1: top, y2: bot, class: "g-axis g-zero" }));
+          s.appendChild(el("text", { x: x0 + 6, y: top + 10, class: "g-sub t11" }, "左"));
+          s.appendChild(el("text", { x: x0 + pw - 6, y: top + 10, class: "g-sub t11", "text-anchor": "end" }, "右"));
+          for (const p of i ? idl : now) {
+            const cx = x(clampX(mir(p.x))), cy = y(p.y);
+            if (i || p.in) s.appendChild(el("circle", { cx, cy, r: 4.5, class: "g-good" }));
+            else s.appendChild(el("circle", { cx, cy, r: 4, class: "g-miss hollow" }));
+          }
+        });
+      } else if (r.id === "face") {
+        const f = fig.face || {};
+        px.forEach((x0, i) => {
+          const ox = x0 + pw / 2, oy = bot - 2, len = bot - top - 6;
+          s.appendChild(el("line", { x1: ox, x2: ox, y1: oy, y2: top, class: "g-axis g-zero" }));
+          const vals = i ? f.ideal || [] : f.now || [];
+          for (const v of vals) {
+            const a = (Math.max(-20, Math.min(20, mir(v))) * 3 * Math.PI) / 180;
+            s.appendChild(el("line", { x1: ox, y1: oy, x2: ox + Math.sin(a) * len, y2: oy - Math.cos(a) * len, class: i ? "g-fan g-fan-good" : "g-fan" }));
+          }
+          if (i && !vals.length) s.appendChild(el("text", { x: ox, y: top + 20, class: "g-sub t11", "text-anchor": "middle" }, "狙いの方向にそろう"));
+          s.appendChild(el("circle", { cx: ox, cy: oy, r: 3, class: "g-text-fill" }));
+        });
+      } else {
+        const st = fig.strike || {};
+        const heelRight = st.heel_on !== "left";
+        const lim = Math.max(35, st.extreme_mm + 8);
+        px.forEach((x0, i) => {
+          const x = lin(-lim, lim, x0 + 12, x0 + pw - 12);
+          const toScreen = (mm) => x(heelRight ? -mm : mm);  // ヒール（負）をネックの側へ
+          const fy = top + 8, fh = bot - top - 22;
+          const rr = st.club_kind === "wood" ? fh / 2 : 6;
+          s.appendChild(el("rect", { x: x0 + 12, y: fy, width: pw - 24, height: fh, rx: rr, class: "g-clubface" }));
+          s.appendChild(el("rect", { x: x(-st.center_mm), y: fy, width: x(st.center_mm) - x(-st.center_mm), height: fh, class: i ? "g-core g-core-strong" : "g-core" }));
+          const hx = heelRight ? x0 + pw - 12 : x0 + 12, tx = heelRight ? x0 + 12 : x0 + pw - 12;
+          s.appendChild(el("text", { x: hx, y: bot + 2, class: "g-sub t11", "text-anchor": heelRight ? "end" : "start" }, lb.heel || "ネック"));
+          s.appendChild(el("text", { x: tx, y: bot + 2, class: "g-sub t11", "text-anchor": heelRight ? "start" : "end" }, lb.toe || "先"));
+          const vals = i ? st.ideal || [] : st.now || [];
+          const used = {};
+          for (const mm of vals) {
+            const cx = toScreen(Math.max(-lim, Math.min(lim, mm)));
+            const k = Math.round(cx / 7);
+            used[k] = (used[k] || 0) + 1;
+            const cy = fy + fh / 2 + ((used[k] % 2 ? 1 : -1) * Math.floor(used[k] / 2) * 5);
+            s.appendChild(el("circle", { cx, cy: Math.max(fy + 3, Math.min(fy + fh - 3, cy)), r: 3.5, class: i || Math.abs(mm) <= st.center_mm ? "g-good" : "g-miss" }));
+          }
+          if (i && !vals.length) s.appendChild(el("text", { x: x0 + pw / 2, y: fy - 3, class: "g-sub t11", "text-anchor": "middle" }, "芯の近くに当たる"));
+        });
+      }
+      if (r.id === "landing") {
+        s.appendChild(el("text", { x: pw / 2, y: bot + 16, class: "g-text t12", "text-anchor": "middle" }, (fig.now || {}).caption || ""));
+        s.appendChild(el("text", { x: pw + gap + pw / 2, y: bot + 16, class: "g-good g-strong t12", "text-anchor": "middle" }, (fig.ideal || {}).caption || ""));
+        y0 += 12;
+      }
+      y0 += r.h + rowGap;
+    }
+    s.setAttribute("viewBox", `0 0 ${W} ${y0}`);
+    const f = h("figure", "fig fig-cmp");
+    f.dataset.fig = fig.id;
+    f.appendChild(s);
+    if (fig.note) f.appendChild(h("p", "fig-note", fig.note));
+    return f;
+  }
+
+  const RENDER = { F1, F2, F3, F4, F5, F6, F7, C1 };
   window.Figures = {
     /** 図1つを <figure> にして返す。fig はサーバーの図の中身、ctx は {hand, bandShape}。 */
     render(fig, ctx) {

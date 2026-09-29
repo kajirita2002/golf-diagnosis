@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 200" role="img">
+<title>フェースの跡で打点を見る</title>
+<desc>フェースを目標側から見た図。ネックが図の片側、先端が反対側。スプレーかシールの跡の位置で、どこに当たったかを見る。</desc>
+<g class="d-shapes"><rect class="g-band" x="90" y="70" width="180" height="80" rx="30"/><line class="g-axis" x1="270" y1="110" x2="310" y2="40" stroke-width="6"/><line class="g-axis" x1="180" y1="74" x2="180" y2="146" stroke-dasharray="3 3"/><circle class="g-miss" cx="232" cy="112" r="9"/></g>
+<g class="d-labels"><text class="g-text t12" x="318" y="84" text-anchor="middle" font-size="12">目標</text><text class="g-text t12" x="300" y="170" text-anchor="middle" font-size="12">ネック</text><text class="g-text t12" x="80" y="170" text-anchor="middle" font-size="12">先端</text><text class="g-text t12" x="180" y="64" text-anchor="middle" font-size="12">真ん中</text><text class="g-text t12" x="232" y="140" text-anchor="middle" font-size="12">跡</text></g>
+</svg>

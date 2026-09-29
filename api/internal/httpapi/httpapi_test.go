@@ -33,6 +33,8 @@ type fakeAnalyzer struct {
 	reportIn       *analysis.ReportInput
 	reportOut      string // 空なら {"fake":"report"}
 	reportErr      error
+	plan           planFake // プランの口（plan_test.go）
+	narr           narrFake // つなぎの文の口（narrative_test.go）
 }
 
 func (f *fakeAnalyzer) Session(_ context.Context, shots []analysis.ShotPayload) (json.RawMessage, error) {

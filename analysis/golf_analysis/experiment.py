@@ -43,10 +43,10 @@ def _compare(a: list[float], b: list[float], goal: str, mmd: float | None) -> di
             "needed": config.MIN_BLOCK_N,
         }
     A, B = np.asarray(a), np.asarray(b)
-    stat = stats.improvement_stat(goal)
-    observed = stat(A, B)
-    lo, hi = stats.bootstrap_ci(A, B, stat)
-    p = stats.permutation_p(A, B, stat)
+    observed = stats.improvement_stat(goal)(A, B)
+    # ベクトル化した bootstrap と並べ替え（analysis/0.4。ループ版は CPU 0.1 で評価1回に数秒かかる）
+    lo, hi = stats.bootstrap_ci_goal(A, B, goal)
+    p = stats.permutation_p_goal(A, B, goal)
     big = mmd is not None and observed >= mmd
     if lo > 0 and (big or mmd is None):
         grade = "strong"

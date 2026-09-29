@@ -33,6 +33,12 @@ type Analyzer interface {
 	Compare(ctx context.Context, a, b []analysis.ShotPayload) (json.RawMessage, error)
 	Screenshot(ctx context.Context, mediaType string, image []byte) (json.RawMessage, error)
 	VerifyTSV(ctx context.Context, tsv string) (json.RawMessage, error)
+	PlanEvaluate(ctx context.Context, in analysis.PlanEvalInput) (json.RawMessage, error)
+	PlanBuild(ctx context.Context, in analysis.PlanBuildInput) (json.RawMessage, error)
+	Drills(ctx context.Context, hand model.Handedness) (json.RawMessage, error)
+	Narrative(ctx context.Context, in analysis.NarrativeInput) (json.RawMessage, error)
+	PlanCandidates(ctx context.Context, in analysis.PlanCandidatesInput) (json.RawMessage, error)
+	Versions(ctx context.Context) (string, error)
 }
 
 // Server は API のハンドラをまとめる。
@@ -44,6 +50,9 @@ type Server struct {
 	Password string       // 空でなければ全部に Basic 認証を掛ける（auth.go）
 	Status   Status       // /healthz に出す動作の状態
 	Log      *slog.Logger
+	LLM      LLMConfig // Claude のつなぎの文（narrative.go）。既定は off
+	llm      llmRuntime
+	ver      versionCache // 分析サービスの版（評価の指紋に入れる。plan.go）
 }
 
 // Status は動いているものの状態。/healthz（パスワード不要）で外から見られる。
@@ -54,6 +63,7 @@ type Status struct {
 	AnthropicKey bool   // Claude の API キーがあるか（中身は出さない）
 	Commit       string // 動いているコミット（Render の RENDER_GIT_COMMIT）
 	AnalysisURL  string // 分析サービス。/healthz で生きているかを見る
+	ReportLLM    bool   // REPORT_LLM=on か（解説のつなぎの文に Claude を使うか）
 }
 
 // HealthJSON は /healthz の中身。起動中（データベースにつながる前）も同じ形で返す。
@@ -67,6 +77,7 @@ func HealthJSON(st Status, state, dbError string) []byte {
 		"db":            st.DB,
 		"db_persistent": st.DBPersistent,
 		"anthropic_key": st.AnthropicKey,
+		"report_llm":    map[bool]string{true: "on", false: "off"}[st.ReportLLM],
 		"analysis":      analysisAlive(st.AnalysisURL),
 	}
 	if dbError != "" {
@@ -106,6 +117,7 @@ func New(st *store.Store, an Analyzer) *Server {
 		Analyzer: an,
 		Adapters: map[string]ingest.Adapter{"trackman": ingest.TrackMan{}},
 		Log:      slog.Default(),
+		LLM:      DefaultLLMConfig(),
 	}
 }
 
@@ -126,6 +138,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/sessions/{id}/shots", s.listShots)
 	mux.HandleFunc("GET /v1/sessions/{id}/analysis", s.sessionAnalysis)
 	mux.HandleFunc("GET /v1/sessions/{id}/report", s.sessionReport)
+	mux.HandleFunc("POST /v1/sessions/{id}/report/narrative", s.startNarrative)
+	mux.HandleFunc("GET /v1/jobs/{id}", s.getJob)
 	mux.HandleFunc("GET /v1/sessions/{id}/compare", s.compareSessions)
 	mux.HandleFunc("POST /v1/sessions/{id}/experiments", s.createExperiment)
 	mux.HandleFunc("GET /v1/sessions/{id}/experiments", s.listExperiments)
@@ -136,6 +150,23 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/experiments/{id}", s.getExperiment)
 	mux.HandleFunc("POST /v1/experiments/{id}/blocks", s.addBlock)
 	mux.HandleFunc("GET /v1/experiments/{id}/evaluation", s.evaluateExperiment)
+	mux.HandleFunc("PUT /v1/experiments/{id}/blocks", s.replaceExperimentBlocks)
+	// プラン（docs/DESIGN_coaching.md §8・§10.2。plan.go）
+	mux.HandleFunc("GET /v1/drills", s.listDrills)
+	mux.HandleFunc("POST /v1/players/{id}/plans", s.createPlan)
+	mux.HandleFunc("GET /v1/players/{id}/plans", s.listPlans)
+	mux.HandleFunc("GET /v1/players/{id}/today", s.today)
+	mux.HandleFunc("GET /v1/players/{id}/record", s.playerRecord)
+	mux.HandleFunc("GET /v1/players/{id}/plan-candidates", s.planCandidates)
+	mux.HandleFunc("POST /v1/plans/{id}/continue", s.continuePlan)
+	mux.HandleFunc("GET /v1/plans/{id}", s.getPlan)
+	mux.HandleFunc("PATCH /v1/plans/{id}", s.patchPlan)
+	mux.HandleFunc("POST /v1/plans/{id}/runs", s.createPlanRun)
+	mux.HandleFunc("GET /v1/plans/{id}/progress", s.planProgress)
+	mux.HandleFunc("GET /v1/sessions/{id}/plan-run", s.sessionPlanRun)
+	mux.HandleFunc("GET /v1/plan-runs/{id}", s.getPlanRun)
+	mux.HandleFunc("PUT /v1/plan-runs/{id}/blocks", s.replaceRunBlocks)
+	mux.HandleFunc("GET /v1/plan-runs/{id}/evaluation", s.evaluatePlanRun)
 	if s.Static != nil {
 		mux.Handle("GET /", s.Static)
 	}
@@ -164,6 +195,8 @@ func (s *Server) fail(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		writeJSON(w, http.StatusNotFound, apiError{"見つかりません"})
+	case errors.Is(err, store.ErrConflict):
+		writeJSON(w, http.StatusConflict, conflictBody(err))
 	case errors.Is(err, analysis.ErrUnavailable):
 		writeJSON(w, http.StatusServiceUnavailable, apiError{err.Error()})
 	case errors.As(err, new(*analysis.ServiceError)):
@@ -590,9 +623,20 @@ func (s *Server) payloads(ctx context.Context, sessionID int64) ([]analysis.Shot
 	if err != nil {
 		return nil, err
 	}
+	return s.sessionPayloads(ctx, sessionID, shots)
+}
+
+// sessionPayloads は球を分析サービスへ渡す形にし、プランの練習のブロックの種類（block_kind）を付ける。
+func (s *Server) sessionPayloads(ctx context.Context, sessionID int64, shots []model.Shot) ([]analysis.ShotPayload, error) {
+	kinds, err := s.blockKinds(ctx, sessionID, shots)
+	if err != nil {
+		return nil, err
+	}
 	ps := make([]analysis.ShotPayload, 0, len(shots))
 	for _, sh := range shots {
-		ps = append(ps, payload(sh))
+		p := payload(sh)
+		p.BlockKind = kinds[sh.ID]
+		ps = append(ps, p)
 	}
 	return ps, nil
 }
@@ -748,7 +792,7 @@ func (s *Server) addBlock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !in.Kind.Valid() {
-		s.fail(w, bad("kind は baseline / intervention / retention"))
+		s.fail(w, bad("kind は warmup / baseline / drill / intervention / retention"))
 		return
 	}
 	if in.SeqFrom < 1 || in.SeqTo < in.SeqFrom {
@@ -769,6 +813,28 @@ func (s *Server) addBlock(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, b)
 }
 
+// blockPayloads はブロックごとに球を拾う（除外した球は入れない。クラブが決まっていれば完全一致の球だけ）。
+// 球にはそのブロックの種類を block_kind として付ける。
+func blockPayloads(club string, blocks []model.Block, shots []model.Shot) []analysis.BlockPayload {
+	out := make([]analysis.BlockPayload, 0, len(blocks))
+	for _, b := range blocks {
+		bp := analysis.BlockPayload{Kind: b.Kind, SeqFrom: b.SeqFrom, SeqTo: b.SeqTo, Shots: []analysis.ShotPayload{}}
+		for _, sh := range shots {
+			if sh.Seq < b.SeqFrom || sh.Seq > b.SeqTo || sh.Excluded {
+				continue
+			}
+			if club != "" && !strings.EqualFold(sh.Club, club) {
+				continue
+			}
+			p := payload(sh)
+			p.BlockKind = b.Kind
+			bp.Shots = append(bp.Shots, p)
+		}
+		out = append(out, bp)
+	}
+	return out
+}
+
 func (s *Server) evaluateExperiment(w http.ResponseWriter, r *http.Request) {
 	id, err := pathID(r)
 	if err != nil {
@@ -785,21 +851,7 @@ func (s *Server) evaluateExperiment(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	blocks := make([]analysis.BlockPayload, 0, len(e.Blocks))
-	for _, b := range e.Blocks {
-		bp := analysis.BlockPayload{Kind: b.Kind, SeqFrom: b.SeqFrom, SeqTo: b.SeqTo, Shots: []analysis.ShotPayload{}}
-		for _, sh := range shots {
-			if sh.Seq < b.SeqFrom || sh.Seq > b.SeqTo || sh.Excluded {
-				continue
-			}
-			if e.Club != "" && !strings.EqualFold(sh.Club, e.Club) {
-				continue
-			}
-			bp.Shots = append(bp.Shots, payload(sh))
-		}
-		blocks = append(blocks, bp)
-	}
-	out, err := s.Analyzer.Experiment(r.Context(), e, blocks)
+	out, err := s.Analyzer.Experiment(r.Context(), e, blockPayloads(e.Club, e.Blocks, shots))
 	if err != nil {
 		s.fail(w, err)
 		return

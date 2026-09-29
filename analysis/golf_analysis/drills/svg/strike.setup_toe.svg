@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 220" role="img">
+<title>ボールを先端寄りに合わせる</title>
+<desc>上から見た図。目標は矢印の向き、打つ人は図の下側に立つ。構えでボールをフェースの真ん中より1〜2cm 先端（向こう側）寄りに合わせる。補正で、根本の直しではない。</desc>
+<g class="d-shapes"><line class="g-axis" x1="20" y1="96" x2="330" y2="96" stroke-dasharray="6 4" stroke-width="1.5"/><polygon class="g-sub" points="340,96 328,90 328,102"/><rect class="g-band" x="170" y="62" width="12" height="62" rx="4"/><line class="g-axis" x1="176" y1="124" x2="168" y2="160" stroke-width="3"/><circle class="g-good" cx="194" cy="86" r="7"/><line class="g-axis" x1="160" y1="93" x2="186" y2="93" stroke-dasharray="2 2"/></g>
+<g class="d-labels"><text class="g-text t12" x="318" y="84" text-anchor="middle" font-size="12">目標</text><text class="g-text t12" x="120" y="97" text-anchor="middle" font-size="12">真ん中</text><text class="g-text t12" x="250" y="70" text-anchor="middle" font-size="12">先端寄りに合わせる</text><text class="g-text t12" x="150" y="176" text-anchor="middle" font-size="12">ネック側</text></g>
+</svg>

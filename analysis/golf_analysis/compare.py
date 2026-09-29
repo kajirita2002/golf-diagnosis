@@ -14,6 +14,7 @@ from collections import Counter, defaultdict
 import numpy as np
 
 from . import config, stats
+from .shots import is_practice
 
 L0_METRICS = ["side", "spin_axis", "launch_direction", "carry", "launch_angle", "spin_rate"]
 
@@ -41,7 +42,7 @@ def _diff(a: list[float], b: list[float], metric: str) -> dict:
         return out
     A, B = np.asarray(a), np.asarray(b)
     stat = lambda x, y: float(np.mean(y) - np.mean(x))  # noqa: E731
-    lo, hi = stats.bootstrap_ci(A, B, stat)
+    lo, hi = stats.bootstrap_ci_goal(A, B, "diff")
     d = stat(A, B)
     mmd = config.MMD.get(metric)
     changed = (lo > 0 or hi < 0) and (mmd is None or abs(d) >= mmd)
@@ -101,11 +102,12 @@ def compare_sessions(a: list[dict], b: list[dict]) -> dict:
     """a = 比べる元（昨日）、b = 今回（今日）。差はすべて b − a。"""
     by_a: dict[str, list[dict]] = defaultdict(list)
     by_b: dict[str, list[dict]] = defaultdict(list)
+    # 準備とドリルの球は比べない（診断と同じ規則。docs/DESIGN_coaching.md §8.3）
     for s in a:
-        if not s.get("excluded"):
+        if not s.get("excluded") and not is_practice(s):
             by_a[s.get("club") or "(クラブ不明)"].append(s)
     for s in b:
-        if not s.get("excluded"):
+        if not s.get("excluded") and not is_practice(s):
             by_b[s.get("club") or "(クラブ不明)"].append(s)
     common = sorted(set(by_a) & set(by_b), key=lambda c: -(len(by_a[c]) + len(by_b[c])))
     return {

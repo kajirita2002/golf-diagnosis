@@ -70,6 +70,14 @@ func (t *txn) QueryRowContext(ctx context.Context, q string, args ...any) *sql.R
 	return t.Tx.QueryRowContext(ctx, rebind(t.pg, q), args...)
 }
 
+func (t *txn) ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error) {
+	return t.Tx.ExecContext(ctx, rebind(t.pg, q), args...)
+}
+
+func (t *txn) QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error) {
+	return t.Tx.QueryContext(ctx, rebind(t.pg, q), args...)
+}
+
 // rebind は SQL を保存先に合わせる。
 //   - {s}（テーブル名の前に付ける印）→ PostgreSQL では "golf."、SQLite では消す
 //   - ? → $1, $2, ...（PostgreSQL のときだけ）
@@ -144,6 +152,76 @@ CREATE TABLE IF NOT EXISTS {s}blocks (
 	kind           TEXT NOT NULL,
 	seq_from       INTEGER NOT NULL,
 	seq_to         INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS blocks_experiment ON {s}blocks(experiment_id);
+-- プラン（docs/DESIGN_coaching.md §10.3）。experiments には列を足さない（移行の仕組みが無い）。
+-- hypothesis / cue は設計書の表に無い列: 実験（experiments.hypothesis / intervention）を
+-- run ごとに作るときの文を、プランを作った時点で固定するため。
+CREATE TABLE IF NOT EXISTS {s}plans (
+	id               {{ID}},
+	player_id        INTEGER NOT NULL REFERENCES {s}players(id),
+	issue            TEXT NOT NULL,
+	lever            TEXT,
+	drill_id         TEXT NOT NULL,
+	catalog_version  TEXT NOT NULL,
+	club             TEXT NOT NULL,
+	target_metric    TEXT NOT NULL,
+	goal             TEXT NOT NULL,
+	hypothesis       TEXT NOT NULL DEFAULT '',
+	cue              TEXT NOT NULL DEFAULT '',
+	template_json    TEXT NOT NULL,
+	params_json      TEXT NOT NULL,
+	trigger_json     TEXT NOT NULL,
+	rationale_json   TEXT NOT NULL,
+	status           TEXT NOT NULL,
+	engine_version   TEXT NOT NULL,
+	created_at       TEXT NOT NULL,
+	closed_at        TEXT,
+	close_reason     TEXT
+);
+-- 動かせるプランは選手ごとに1つ（2つ目は 409）。部分索引は SQLite と PostgreSQL の両方にある。
+CREATE UNIQUE INDEX IF NOT EXISTS plans_one_active ON {s}plans(player_id) WHERE status = 'active';
+CREATE TABLE IF NOT EXISTS {s}plan_runs (
+	id               {{ID}},
+	plan_id          INTEGER NOT NULL REFERENCES {s}plans(id),
+	session_id       INTEGER NOT NULL REFERENCES {s}sessions(id),
+	experiment_id    INTEGER NOT NULL REFERENCES {s}experiments(id),
+	counts_json      TEXT NOT NULL DEFAULT '[]',
+	evaluation_json  TEXT,
+	evaluation_key   TEXT,
+	created_at       TEXT NOT NULL
+);
+-- 1セッションに run は1つまで。診断から外すドリルの球（block_kind）は、この実験のブロックからだけ取る。
+CREATE UNIQUE INDEX IF NOT EXISTS plan_runs_one_per_session ON {s}plan_runs(session_id);
+CREATE INDEX IF NOT EXISTS plan_runs_plan ON {s}plan_runs(plan_id);
+-- Claude の呼び出し（docs/DESIGN_coaching.md §5.8・§10.3。llm.go）。model は実際に答えたモデル。
+CREATE TABLE IF NOT EXISTS {s}llm_jobs (
+	id               {{ID}},
+	kind             TEXT NOT NULL,
+	session_id       INTEGER REFERENCES {s}sessions(id),
+	scope_id         TEXT,
+	input_hash       TEXT NOT NULL,
+	status           TEXT NOT NULL,
+	result_json      TEXT,
+	validation_json  TEXT,
+	usage_json       TEXT,
+	cost_usd         DOUBLE PRECISION,
+	error            TEXT,
+	model            TEXT NOT NULL,
+	prompt_version   TEXT NOT NULL,
+	created_at       TEXT NOT NULL,
+	updated_at       TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS llm_jobs_hash ON {s}llm_jobs(kind, input_hash);
+-- 1日（UTC）・1種類ごとの使った量。上限（LLM_DAILY_LIMIT_*）はここの calls で数える。
+CREATE TABLE IF NOT EXISTS {s}llm_usage (
+	day            TEXT NOT NULL,
+	kind           TEXT NOT NULL,
+	calls          INTEGER NOT NULL DEFAULT 0,
+	input_tokens   INTEGER NOT NULL DEFAULT 0,
+	output_tokens  INTEGER NOT NULL DEFAULT 0,
+	cost_usd       DOUBLE PRECISION NOT NULL DEFAULT 0,
+	PRIMARY KEY (day, kind)
 );
 `
 

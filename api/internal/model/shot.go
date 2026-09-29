@@ -136,10 +136,23 @@ const (
 	BlockBaseline     BlockKind = "baseline"     // 介入前
 	BlockIntervention BlockKind = "intervention" // ドリル・意識した後
 	BlockRetention    BlockKind = "retention"    // 意識を外して戻したあと（定着を見る）
+	// 以下の2つは評価（A と B の比較）に入れない（docs/DESIGN_coaching.md §8.3）。
+	// 分析サービスの evaluate は知らない種類を最初から無視するので、Go で受け付けるだけでよい。
+	BlockWarmup BlockKind = "warmup" // 体を温める球
+	BlockDrill  BlockKind = "drill"  // 道具ありのドリルの球（「ドリル中」の参考にだけ使う）
 )
 
 // Valid は知っている BlockKind か。
 func (k BlockKind) Valid() bool {
+	switch k {
+	case BlockBaseline, BlockIntervention, BlockRetention, BlockWarmup, BlockDrill:
+		return true
+	}
+	return false
+}
+
+// Evaluated は A と B の比較（既存の evaluate）に入る種類か。warmup / drill は入らない。
+func (k BlockKind) Evaluated() bool {
 	switch k {
 	case BlockBaseline, BlockIntervention, BlockRetention:
 		return true

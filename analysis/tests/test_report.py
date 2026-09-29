@@ -67,9 +67,9 @@ def _by_seq(shots):
 # ---------------------------------------------------------------- 版と既存の直し（§12）
 
 
-def test_版はanalysis_0_3(an):
-    assert config.ENGINE_VERSION == "analysis/0.3"
-    assert an["engine_version"] == "analysis/0.3"
+def test_版はanalysis_0_4(an):
+    assert config.ENGINE_VERSION == "analysis/0.4"
+    assert an["engine_version"] == "analysis/0.4"
 
 
 def test_極端な打点のフェースなしとパスなしを分けて数える(an):
@@ -438,7 +438,7 @@ def test_本体の範囲と畳む範囲(rep):
 
 def test_図の中身(rep):
     figs = _scope(rep, "group:iron")["figures"]
-    assert set(figs) == {"F1", "F2", "F3", "F4", "F5", "F6", "F7"}
+    assert set(figs) == {"F1", "F2", "F3", "F4", "F5", "F6", "F7", "C1"}  # C1 は要点の「理想との差」の比べる図
     f1 = figs["F1"]
     assert len(f1["points"]) == 26 and sum(1 for p in f1["points"] if p["mark"] == "in") == 7
     assert f1["ellipse"]["legend"].endswith("確率の範囲ではありません")

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 200" role="img">
+<title>フォローでフェースを空に</title>
+<desc>後ろから見たフォロー（クラブが地面と平行）の図。フェースの面が空を向いて止まる。</desc>
+<g class="d-shapes"><line class="g-axis" x1="60" y1="120" x2="230" y2="120" stroke-width="3"/><line class="g-axis" x1="20" y1="170" x2="340" y2="170"/><rect class="g-band" x="230" y="108" width="48" height="22" rx="6"/><line class="g-good" x1="230" y1="108" x2="278" y2="108" stroke-width="4"/><polygon class="g-good" points="254,76 245,92 263,92"/></g>
+<g class="d-labels"><text class="g-text t12" x="318" y="84" text-anchor="middle" font-size="12">目標</text><text class="g-text t12" x="254" y="70" text-anchor="middle" font-size="12">フェースが空を向く</text><text class="g-text t12" x="180" y="190" text-anchor="middle" font-size="12">地面</text></g>
+</svg>

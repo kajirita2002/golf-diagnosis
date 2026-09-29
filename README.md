@@ -75,6 +75,10 @@ english-tts の Render のブループリント（english-tts の `render.yaml`�
   english-tts と同じデータベースの **`golf` スキーマ**に作る（english-tts のテーブルとぶつけない）。
 - **パスワード（`APP_PASSWORD`）を必ず掛ける。** 掛けないと URL を知った人があなたの API キーで読み取りを動かせる。
 - 環境変数: `DB_PATH`（PostgreSQL の URL）/ `APP_PASSWORD` / `ANTHROPIC_API_KEY`
+- 解説のつなぎの文（Claude。docs/DESIGN_coaching.md §5.8）: `REPORT_LLM`（既定 **off**。off なら Claude を一切呼ばず、
+  解説は定型文だけ）/ `LLM_DAILY_LIMIT_NARRATIVE`（1日に Claude を呼ぶ範囲の数。既定 20、負なら上限なし）。
+  on にするのは、本物の Claude で検証を通る割合・待ち時間・費用を測って、定型文だけと読み比べてから（§11 Phase 1c）。
+  効いているかは `/healthz` の `report_llm` で見られる。
 
 手元で本番と同じ形を試す:
 

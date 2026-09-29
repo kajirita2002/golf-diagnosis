@@ -27,6 +27,7 @@ import numpy as np
 from . import band as band_mod
 from . import config, stats
 from . import profile as profile_mod
+from .shots import PRACTICE_KINDS
 
 
 def _m(shot: dict, key: str):
@@ -246,7 +247,15 @@ def _variability(shots: list[dict], skip: set | None = None) -> dict:
 def analyze_session(shots: list[dict]) -> dict:
     by_club: dict[str, list[dict]] = defaultdict(list)
     excluded = 0
+    # プランの練習の球（準備・ドリル）は診断に入れない。外した数は必ず返す（R6 と同じ考え）。
+    practice = {k: 0 for k in PRACTICE_KINDS}
+    intervention: dict[str, int] = defaultdict(int)
     for s in shots:
+        if s.get("block_kind") in practice:
+            practice[s["block_kind"]] += 1
+            continue
+        if s.get("block_kind") == "intervention" and not s.get("excluded"):
+            intervention[s.get("club") or "(クラブ不明)"] += 1
         if s.get("excluded"):
             excluded += 1
             continue
@@ -298,6 +307,19 @@ def analyze_session(shots: list[dict]) -> dict:
                     "shot_ids": [c["id"] for c in candidates],
                 }
             )
+
+    # 意識して打った球（B）は診断に残すが、入っていることを所見に出す（docs/DESIGN_coaching.md §10.2）
+    for club, k in intervention.items():
+        findings.append(
+            {
+                "id": f"club:{club}:intervention_shots",
+                "club": club,
+                "scope": "club",
+                "kind": "intervention_shots",
+                "evidence": {"count": k, "of": len(by_club.get(club) or [])},
+                "strength": "info",
+            }
+        )
 
     groups = []
     for category, names in by_category.items():
@@ -359,6 +381,7 @@ def analyze_session(shots: list[dict]) -> dict:
         "engine_version": config.ENGINE_VERSION,
         "n_shots": len(shots),
         "n_excluded": excluded,
+        "n_practice_excluded": practice,
         "clubs": clubs,
         "groups": groups,
         "findings": findings,

@@ -7,6 +7,8 @@
 //	WEB_DIR       画面の静的ファイル（既定 ../web。無ければ配らない）
 //	PORT          待ち受け（既定 8080）
 //	APP_PASSWORD  空でなければ全部に Basic 認証を掛ける（公開するときは必ず入れる）
+//	REPORT_LLM    on なら解説のつなぎの文に Claude を使う（既定 off。off なら Claude を一切呼ばない）
+//	LLM_DAILY_LIMIT_NARRATIVE  つなぎの文で Claude を呼ぶ範囲の数の1日の上限（既定 20。負なら上限なし）
 //
 // **起動の約束: 待ち受けは最初に開き、何があっても落とさない。**
 // Render は待ち受けが開かないと「起動中」の画面のまま再起動を繰り返し、原因が外から見えない
@@ -76,7 +78,12 @@ func main() {
 		dbPath, persistent = env("DEFAULT_DB_PATH", "golf.db"), false
 		log.Warn("DB_PATH が未設定です。一時的な保存先で動きます（再起動で消えます）", "path", dbPath)
 	}
+	llmCfg, llmWarns := httpapi.LLMConfigFromEnv(os.Getenv)
+	for _, w := range llmWarns {
+		log.Warn(w)
+	}
 	status := httpapi.Status{
+		ReportLLM:    llmCfg.Enabled,
 		DB:           dbKind(dbPath),
 		DBPersistent: persistent,
 		AnthropicKey: os.Getenv("ANTHROPIC_API_KEY") != "",
@@ -111,8 +118,15 @@ func main() {
 				stMu.Lock()
 				st = s
 				stMu.Unlock()
+				// 走っていたはずの Claude のジョブは、再起動で続きが消えているので failed にする（§5.8）
+				if n, err := s.FailStaleLLMJobs(context.Background()); err != nil {
+					log.Error("途中のジョブを片付けられません", "err", err)
+				} else if n > 0 {
+					log.Warn("再起動で止まったジョブを failed にしました", "n", n)
+				}
 				srv := httpapi.New(s, analysis.New(status.AnalysisURL))
 				srv.Log = log
+				srv.LLM = llmCfg
 				srv.Password = os.Getenv("APP_PASSWORD")
 				srv.Status = status
 				if srv.Password == "" {

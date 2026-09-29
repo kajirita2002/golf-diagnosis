@@ -33,6 +33,8 @@ type reportResponse struct {
 	Reason    string          `json:"reason,omitempty"`
 	Report    json.RawMessage `json:"report"`
 	Shots     []shotView      `json:"shots"`
+	// NarrativeEnabled は Claude のつなぎの文を頼めるか（REPORT_LLM=on）。false なら文章は定型文だけ。
+	NarrativeEnabled bool `json:"narrative_enabled"`
 }
 
 func (s *Server) sessionReport(w http.ResponseWriter, r *http.Request) {
@@ -62,21 +64,29 @@ func (s *Server) sessionReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := reportResponse{
-		SessionID:      id,
-		Handedness:     pl.Handedness,
-		PhysicsVersion: physics.EngineVersion,
-		Report:         json.RawMessage("null"),
-		Shots:          make([]shotView, 0, len(shots)),
+		SessionID:        id,
+		Handedness:       pl.Handedness,
+		PhysicsVersion:   physics.EngineVersion,
+		Report:           json.RawMessage("null"),
+		Shots:            make([]shotView, 0, len(shots)),
+		NarrativeEnabled: s.LLM.Enabled,
 	}
-	ps := make([]analysis.ShotPayload, 0, len(shots))
 	for _, sh := range shots {
 		out.Shots = append(out.Shots, view(sh))
-		ps = append(ps, payload(sh))
+	}
+	ps, err := s.sessionPayloads(r.Context(), id, shots)
+	if err != nil {
+		s.fail(w, err)
+		return
 	}
 
 	raw, err := s.Analyzer.Report(r.Context(), analysis.ReportInput{Shots: ps, Handedness: pl.Handedness, Experiments: exps})
 	if err == nil {
 		raw, err = addBandShapes(raw)
+	}
+	if err == nil {
+		// つなぎの文の入力（Go だけが使う）を外し、on なら保存したつなぎの文を足す（§10.2）
+		raw, err = s.narrativeView(r.Context(), raw)
 	}
 	var se2 *analysis.ServiceError
 	switch {

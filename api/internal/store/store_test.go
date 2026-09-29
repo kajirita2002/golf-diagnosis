@@ -18,12 +18,14 @@ func TestRebindはPostgreSQLのときだけ置き換える(t *testing.T) {
 
 // SQL の中のテーブル名には全部 {s} が付いている（付け忘れると PostgreSQL で public を見に行く）。
 func Testテーブル名は全部スキーマの印付き(t *testing.T) {
-	src, err := os.ReadFile("store.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	re := regexp.MustCompile(`(?i)\b(FROM|INTO|UPDATE|EXISTS|REFERENCES|JOIN)\s+(players|sessions|shots|experiments|blocks)\b`)
-	if m := re.FindAllString(string(src), -1); len(m) > 0 {
-		t.Fatalf("{s} の付いていないテーブル名: %v", m)
+	re := regexp.MustCompile(`(?i)\b(FROM|INTO|UPDATE|EXISTS|REFERENCES|JOIN|ON)\s+(players|sessions|shots|experiments|blocks|plans|plan_runs)\b`)
+	for _, f := range []string{"store.go", "plan.go"} {
+		src, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if m := re.FindAllString(string(src), -1); len(m) > 0 {
+			t.Fatalf("%s: {s} の付いていないテーブル名: %v", f, m)
+		}
 	}
 }

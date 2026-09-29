@@ -1,0 +1,803 @@
+{
+ "version": "drills/0.1",
+ "about": "ドリル集（docs/DESIGN_coaching.md §5.7）。どれも広く使われている練習法の範囲で、この利用者に効くかは確かめていない。効果は書かない（効いたかは本人の実験の記録で持つ）。checked_by（向き・安全・図が正しいかを人が確かめた）が空のドリルは画面に出さない。文の向きの語は差し込み（{dir:right} / {dir:left} / {lead} 目標側 / {trail} 後ろ側）で持ち、利き手で入れる。図は右打ちで描き、左打ちは左右を反転して出す。",
+ "drills": [
+  {
+   "id": "strike.two_balls",
+   "title": "2球並べ（ネック寄りを減らす）",
+   "issues": [
+    "strike_heel"
+   ],
+   "levers": [],
+   "symptoms": [
+    "S1",
+    "S2"
+   ],
+   "categories": [
+    "iron",
+    "hybrid",
+    "wedge"
+   ],
+   "kind": "constraint",
+   "ease": 1,
+   "equipment": [
+    "ball"
+   ],
+   "what_changes": "インパクトでヘッドがボールの向こう側（トゥ側）へずれて通ると、向こうのボールに当たる。触らずに打てれば、当たる場所がネックから離れている",
+   "steps": [
+    "打つボールの向こう側（トゥの先2〜3cm）にもう1つボールを置く",
+    "手前のボールだけを打つ（向こうのボールに触らない）",
+    "7割の振り幅から始め、触らなくなったら振り幅を戻す"
+   ],
+   "cue_drill": "向こうのボールに触らない",
+   "cue_transfer": "向こうにボールがあるつもりで打つ",
+   "diagram": "svg/strike.two_balls.svg",
+   "kpi": {
+    "metric": "impact_offset",
+    "goal": "reduce_abs"
+   },
+   "counts": [
+    "heel_extreme"
+   ],
+   "guardrails": [
+    {
+     "metric": "club_speed",
+     "goal": "increase"
+    },
+    {
+     "metric": "carry",
+     "goal": "increase"
+    }
+   ],
+   "video_checks": [
+    "後方の動画で、構えとインパクトの手元の位置（体からの距離）を比べる"
+   ],
+   "safety": "置くのはボールだけ。硬い物・立てた物は置かない",
+   "note": "",
+   "author": "Claude（下書き。広く使われている練習法をまとめたもの）",
+   "checked_by": null,
+   "coach_reviewed_by": null
+  },
+  {
+   "id": "strike.two_balls_in",
+   "title": "2球並べ（先端寄りを減らす）",
+   "issues": [
+    "strike_toe"
+   ],
+   "levers": [],
+   "symptoms": [],
+   "categories": [
+    "iron",
+    "hybrid",
+    "wedge"
+   ],
+   "kind": "constraint",
+   "ease": 1,
+   "equipment": [
+    "ball"
+   ],
+   "what_changes": "インパクトでヘッドがボールの手前側（ヒール側）へずれて通ると、手前のボールに当たる。触らずに打てれば、当たる場所が先端から離れている",
+   "steps": [
+    "打つボールの手前側（ヒールの手前2〜3cm）にもう1つボールを置く",
+    "向こう側のボールだけを打つ（手前のボールに触らない）",
+    "7割の振り幅から始め、触らなくなったら振り幅を戻す"
+   ],
+   "cue_drill": "手前のボールに触らない",
+   "cue_transfer": "手前にボールがあるつもりで打つ",
+   "diagram": "svg/strike.two_balls_in.svg",
+   "kpi": {
+    "metric": "impact_offset",
+    "goal": "reduce_abs"
+   },
+   "counts": [
+    "toe_extreme"
+   ],
+   "guardrails": [
+    {
+     "metric": "club_speed",
+     "goal": "increase"
+    },
+    {
+     "metric": "carry",
+     "goal": "increase"
+    }
+   ],
+   "video_checks": [
+    "後方の動画で、構えとインパクトの手元の位置（体からの距離）を比べる"
+   ],
+   "safety": "置くのはボールだけ。硬い物・立てた物は置かない",
+   "note": "",
+   "author": "Claude（下書き。広く使われている練習法をまとめたもの）",
+   "checked_by": null,
+   "coach_reviewed_by": null
+  },
+  {
+   "id": "strike.spray",
+   "title": "フェースの跡で打点を見る",
+   "issues": [
+    "strike_heel",
+    "strike_toe",
+    "strike_scatter"
+   ],
+   "levers": [],
+   "symptoms": [
+    "S1",
+    "S2"
+   ],
+   "categories": [
+    "iron",
+    "hybrid",
+    "wedge",
+    "wood",
+    "driver"
+   ],
+   "kind": "feel",
+   "ease": 1,
+   "equipment": [
+    "foot_spray",
+    "impact_tape"
+   ],
+   "what_changes": "1球ごとにフェースのどこに当たったかが見えるので、ずれに気づいて次の球で直せる。打点が測れていない球も埋まる",
+   "steps": [
+    "フェースにフットスプレーを吹くか、インパクトシールを貼る",
+    "1球ごとに跡を見て、ネック寄り・真ん中・先端寄りのどこだったかを確かめる",
+    "跡の位置を「1球ずつ」の打点に手で入れる（打点が「-」の球が埋まる）"
+   ],
+   "cue_drill": "打つ前に跡の位置を予想し、打ったあと見比べる",
+   "cue_transfer": "フェースの真ん中に当てる",
+   "diagram": "svg/strike.spray.svg",
+   "kpi": {
+    "metric": "impact_offset",
+    "goal": "reduce_abs"
+   },
+   "counts": [
+    "heel_extreme",
+    "toe_extreme"
+   ],
+   "guardrails": [
+    {
+     "metric": "club_speed",
+     "goal": "increase"
+    },
+    {
+     "metric": "carry",
+     "goal": "increase"
+    }
+   ],
+   "video_checks": [],
+   "safety": "スプレーは練習場の決まりを確かめてから使う。マットやボールには吹きかけない",
+   "note": "",
+   "author": "Claude（下書き。広く使われている練習法をまとめたもの）",
+   "checked_by": null,
+   "coach_reviewed_by": null
+  },
+  {
+   "id": "strike.setup_toe",
+   "title": "ボールを先端寄りに合わせる",
+   "issues": [
+    "strike_heel"
+   ],
+   "levers": [],
+   "symptoms": [
+    "S1",
+    "S2"
+   ],
+   "categories": [
+    "iron",
+    "hybrid",
+    "wedge",
+    "wood",
+    "driver"
+   ],
+   "kind": "compensation",
+   "ease": 1,
+   "equipment": [],
+   "what_changes": "ボールをフェースのやや先端寄りに合わせて打つと、同じ振り方でも当たる場所が先端側へ動く。根本の直しではなく補正",
+   "steps": [
+    "構えたとき、ボールをフェースの真ん中より1〜2cm 先端（トゥ）寄りに合わせる",
+    "そのままいつも通りに振る",
+    "スプレーかシールの跡で、真ん中に寄ったかを見る"
+   ],
+   "cue_drill": "ボールを先端寄りに合わせてから打つ",
+   "cue_transfer": "ボールを先端寄りに合わせてから打つ",
+   "diagram": "svg/strike.setup_toe.svg",
+   "kpi": {
+    "metric": "impact_offset",
+    "goal": "reduce_abs"
+   },
+   "counts": [
+    "heel_extreme"
+   ],
+   "guardrails": [
+    {
+     "metric": "club_speed",
+     "goal": "increase"
+    },
+    {
+     "metric": "carry",
+     "goal": "increase"
+    }
+   ],
+   "video_checks": [
+    "後方の動画で、構えたときのボールとフェースの合わせ方を見る"
+   ],
+   "safety": "道具は使わない。いつもの打席で行う",
+   "note": "補正です。根本の直しではありません（定着の判定は1回多く見ます）",
+   "author": "Claude（下書き。広く使われている練習法をまとめたもの）",
+   "checked_by": null,
+   "coach_reviewed_by": null
+  },
+  {
+   "id": "tempo.feet_together",
+   "title": "両足をそろえて打つ",
+   "issues": [
+    "strike_scatter",
+    "start_var",
+    "curve_var"
+   ],
+   "levers": [],
+   "symptoms": [],
+   "categories": [
+    "iron",
+    "hybrid",
+    "wedge",
+    "wood",
+    "driver"
+   ],
+   "kind": "constraint",
+   "ease": 1,
+   "equipment": [],
+   "what_changes": "足をそろえると大きく振れないので、振り幅と速さが揃いやすい。当たり方のばらつきが減るかを見られる",
+   "steps": [
+    "両足のかかとをそろえて立つ",
+    "7割の速さで振る",
+    "フィニッシュで3秒止まれなければ、振り幅を小さくする"
+   ],
+   "cue_drill": "フィニッシュで3秒止まる",
+   "cue_transfer": "フィニッシュで3秒止まれる速さで振る",
+   "diagram": "svg/tempo.feet_together.svg",
+   "kpi": {
+    "metric": "face_angle",
+    "goal": "reduce_sd"
+   },
+   "counts": [],
+   "guardrails": [
+    {
+     "metric": "club_speed",
+     "goal": "increase"
+    },
+    {
+     "metric": "carry",
+     "goal": "increase"
+    }
+   ],
+   "video_checks": [],
+   "safety": "足場の悪い所ではしない。ふらついたら足幅を少し開く",
+   "note": "",
+   "author": "Claude（下書き。広く使われている練習法をまとめたもの）",
+   "checked_by": null,
+   "coach_reviewed_by": null
+  },
+  {
+   "id": "face.start_spot",
+   "title": "打ち出しの印",
+   "issues": [
+    "start_right",
+    "start_left",
+    "start_var"
+   ],
+   "levers": [
+    "face"
+   ],
+   "symptoms": [
+    "S3",
+    "S4"
+   ],
+   "categories": [
+    "iron",
+    "hybrid",
+    "wedge",
+    "wood",
+    "driver"
+   ],
+   "kind": "feel",
+   "ease": 1,
+   "equipment": [
+    "tape"
+   ],
+   "what_changes": "打ち出しはほぼフェースの向きで決まるので、目標線の上の印の真上に出すことを狙うと、フェースの向きが揃うかを見られる",
+   "steps": [
+    "ボールの30〜50cm 先の目標線の上に、平らな印（テープなど）を置く",
+    "印の真上を通るように打ち出す",
+    "打ち出し方向を1球ごとに見る"
+   ],
+   "cue_drill": "印の真上に出す",
+   "cue_transfer": "印があるつもりで、その真上に出す",
+   "diagram": "svg/face.start_spot.svg",
+   "kpi": {
+    "metric": "face_angle",
+    "goal": "reduce_abs"
+   },
+   "counts": [],
+   "guardrails": [
+    {
+     "metric": "club_speed",
+     "goal": "increase"
+    },
+    {
+     "metric": "carry",
+     "goal": "increase"
+    }
+   ],
+   "video_checks": [],
+   "safety": "印は平らな物（テープ・コイン）だけ。立てた物は跳ね返るので置かない",
+   "note": "",
+   "author": "Claude（下書き。広く使われている練習法をまとめたもの）",
+   "checked_by": null,
+   "coach_reviewed_by": null
+  },
+  {
+   "id": "face.half_toe_up",
+   "title": "フォローでトゥを上に",
+   "issues": [
+    "start_right",
+    "curve_right"
+   ],
+   "levers": [
+    "face"
+   ],
+   "symptoms": [
+    "S3",
+    "S4"
+   ],
+   "categories": [
+    "iron",
+    "hybrid",
+    "wedge",
+    "wood",
+    "driver"
+   ],
+   "kind": "feel",
+   "ease": 2,
+   "equipment": [],
+   "what_changes": "フォローでトゥが上を向く形で止めると、インパクトでフェースが{dir:right}を向いたままになりにくいかを見られる",
+   "steps": [
+    "腰から腰までの小さな振り幅で打つ",
+    "フォローでクラブが地面と平行になったところで止め、トゥが真上を向いているか確かめる",
+    "できたら振り幅を少しずつ大きくする"
+   ],
+   "cue_drill": "フォローでトゥを上に向けて止める",
+   "cue_transfer": "フォローでトゥが上を向くように振る",
+   "diagram": "svg/face.half_toe_up.svg",
+   "kpi": {
+    "metric": "face_angle",
+    "goal": "decrease"
+   },
+   "counts": [],
+   "guardrails": [
+    {
+     "metric": "club_speed",
+     "goal": "increase"
+    },
+    {
+     "metric": "carry",
+     "goal": "increase"
+    }
+   ],
+   "video_checks": [
+    "後方の動画で、フォローのクラブが地面と平行のコマのトゥの向きを見る"
+   ],
+   "safety": "小さな振り幅から始める。周りに人がいないことを確かめる",
+   "note": "フェースが{dir:left}を向く人には使わない（反対の向きのドリルは「フォローでフェースを空に」）",
+   "author": "Claude（下書き。広く使われている練習法をまとめたもの）",
+   "checked_by": null,
+   "coach_reviewed_by": null
+  },
+  {
+   "id": "face.hold_off",
+   "title": "フォローでフェースを空に",
+   "issues": [
+    "start_left",
+    "curve_left"
+   ],
+   "levers": [
+    "face"
+   ],
+   "symptoms": [],
+   "categories": [
+    "iron",
+    "hybrid",
+    "wedge",
+    "wood",
+    "driver"
+   ],
+   "kind": "feel",
+   "ease": 2,
+   "equipment": [],
+   "what_changes": "フォローでフェースの面が空を向く形で止めると、インパクトでフェースが{dir:left}を向きすぎにくいかを見られる",
+   "steps": [
+    "腰から腰までの小さな振り幅で打つ",
+    "フォローでクラブが地面と平行になったところで止め、フェースの面が空を向いているか確かめる",
+    "できたら振り幅を少しずつ大きくする"
+   ],
+   "cue_drill": "フォローでフェースを空に向けて止める",
+   "cue_transfer": "フォローでフェースが空を向くように振る",
+   "diagram": "svg/face.hold_off.svg",
+   "kpi": {
+    "metric": "face_angle",
+    "goal": "increase"
+   },
+   "counts": [],
+   "guardrails": [
+    {
+     "metric": "club_speed",
+     "goal": "increase"
+    },
+    {
+     "metric": "carry",
+     "goal": "increase"
+    }
+   ],
+   "video_checks": [
+    "後方の動画で、フォローのクラブが地面と平行のコマのフェースの向きを見る"
+   ],
+   "safety": "小さな振り幅から始める。周りに人がいないことを確かめる",
+   "note": "フェースが{dir:right}を向く人には使わない（反対の向きのドリルは「フォローでトゥを上に」）",
+   "author": "Claude（下書き。広く使われている練習法をまとめたもの）",
+   "checked_by": null,
+   "coach_reviewed_by": null
+  },
+  {
+   "id": "face.grip_check",
+   "title": "ナックルの数を数える",
+   "issues": [
+    "start_right",
+    "start_left"
+   ],
+   "levers": [
+    "face"
+   ],
+   "symptoms": [
+    "S3"
+   ],
+   "categories": [
+    "iron",
+    "hybrid",
+    "wedge",
+    "wood",
+    "driver"
+   ],
+   "kind": "setup",
+   "ease": 1,
+   "equipment": [],
+   "what_changes": "毎回同じ形でクラブを持てているかを確かめ、フェースの向きのずれがそこから来ていないかを見る",
+   "steps": [
+    "構えたとき、{lead}手のナックル（指の付け根の山）が上から何個見えるかを数える",
+    "毎球、打つ前に同じ数になっているか確かめる",
+    "数を変えるときはコーチに見てもらう（変え方しだいで逆の向きにずれることがある）"
+   ],
+   "cue_drill": "打つ前にナックルの数を数える",
+   "cue_transfer": "同じ数を確かめてから打つ",
+   "diagram": "svg/face.grip_check.svg",
+   "kpi": {
+    "metric": "face_angle",
+    "goal": "reduce_abs"
+   },
+   "counts": [],
+   "guardrails": [
+    {
+     "metric": "club_speed",
+     "goal": "increase"
+    },
+    {
+     "metric": "carry",
+     "goal": "increase"
+    }
+   ],
+   "video_checks": [
+    "後方か正面の動画で、構えたときのナックルの見え方を毎回比べる"
+   ],
+   "safety": "道具は使わない",
+   "note": "握りを変えるのはコーチの確認を勧めます（定着の判定は1回多く見ます）",
+   "author": "Claude（下書き。広く使われている練習法をまとめたもの）",
+   "checked_by": null,
+   "coach_reviewed_by": null
+  },
+  {
+   "id": "path.outside_cover",
+   "title": "ヘッドカバーを後ろの向こう側に",
+   "issues": [
+    "curve_right"
+   ],
+   "levers": [
+    "path"
+   ],
+   "symptoms": [],
+   "categories": [
+    "iron",
+    "hybrid",
+    "wedge",
+    "wood",
+    "driver"
+   ],
+   "kind": "constraint",
+   "ease": 2,
+   "equipment": [
+    "headcover"
+   ],
+   "what_changes": "ボールの後ろ・向こう側の物に触らずに打つには、ヘッドがボールの内側から来る必要がある。クラブパスが{dir:right}へ動くかを見られる",
+   "steps": [
+    "ボールの20〜30cm 後ろ・向こう側（目標線から10cm ほど外）にヘッドカバーを置く",
+    "ヘッドカバーに触らないように打つ",
+    "7割の振り幅から始め、触らなくなったら振り幅を戻す"
+   ],
+   "cue_drill": "ヘッドカバーに触らない",
+   "cue_transfer": "ヘッドカバーがあるつもりで打つ",
+   "diagram": "svg/path.outside_cover.svg",
+   "kpi": {
+    "metric": "club_path",
+    "goal": "increase"
+   },
+   "counts": [],
+   "guardrails": [
+    {
+     "metric": "club_speed",
+     "goal": "increase"
+    },
+    {
+     "metric": "carry",
+     "goal": "increase"
+    }
+   ],
+   "video_checks": [
+    "後方の動画で、ダウンスイングの手元の通り道を見る"
+   ],
+   "safety": "置くのは柔らかいヘッドカバーだけ。ボールの先（打ち出しの先）には何も置かない",
+   "note": "",
+   "author": "Claude（下書き。広く使われている練習法をまとめたもの）",
+   "checked_by": null,
+   "coach_reviewed_by": null,
+   "path_sign": "negative"
+  },
+  {
+   "id": "path.inside_cover",
+   "title": "ヘッドカバーを後ろの手前に",
+   "issues": [
+    "curve_left"
+   ],
+   "levers": [
+    "path"
+   ],
+   "symptoms": [],
+   "categories": [
+    "iron",
+    "hybrid",
+    "wedge",
+    "wood",
+    "driver"
+   ],
+   "kind": "constraint",
+   "ease": 2,
+   "equipment": [
+    "headcover"
+   ],
+   "what_changes": "ボールの後ろ・手前側の物に触らずに打つには、ヘッドが内側から来すぎないようにする必要がある。クラブパスが{dir:left}へ動くかを見られる",
+   "steps": [
+    "ボールの20〜30cm 後ろ・手前側（目標線から10cm ほど内）にヘッドカバーを置く",
+    "ヘッドカバーに触らないように打つ",
+    "7割の振り幅から始め、触らなくなったら振り幅を戻す"
+   ],
+   "cue_drill": "ヘッドカバーに触らない",
+   "cue_transfer": "ヘッドカバーがあるつもりで打つ",
+   "diagram": "svg/path.inside_cover.svg",
+   "kpi": {
+    "metric": "club_path",
+    "goal": "decrease"
+   },
+   "counts": [],
+   "guardrails": [
+    {
+     "metric": "club_speed",
+     "goal": "increase"
+    },
+    {
+     "metric": "carry",
+     "goal": "increase"
+    }
+   ],
+   "video_checks": [
+    "後方の動画で、ダウンスイングの手元の通り道を見る"
+   ],
+   "safety": "置くのは柔らかいヘッドカバーだけ。ボールの先（打ち出しの先）には何も置かない",
+   "note": "",
+   "author": "Claude（下書き。広く使われている練習法をまとめたもの）",
+   "checked_by": null,
+   "coach_reviewed_by": null,
+   "path_sign": "positive"
+  },
+  {
+   "id": "path.closed_stance",
+   "title": "後ろ足を半歩引く",
+   "issues": [
+    "curve_right"
+   ],
+   "levers": [
+    "path"
+   ],
+   "symptoms": [],
+   "categories": [
+    "iron",
+    "hybrid",
+    "wedge",
+    "wood",
+    "driver"
+   ],
+   "kind": "setup",
+   "ease": 1,
+   "equipment": [],
+   "what_changes": "{trail}足を引いて立つと、クラブの通り道が内側からになりやすいかを見られる",
+   "steps": [
+    "いつも通りに立ってから、{trail}足を半歩（靴1足ぶんほど）後ろへ引く",
+    "ボールの位置は変えずに打つ",
+    "7割の振り幅から始める"
+   ],
+   "cue_drill": "{trail}足を半歩引いて立つ",
+   "cue_transfer": "{trail}足を引いた立ち方で打つ",
+   "diagram": "svg/path.closed_stance.svg",
+   "kpi": {
+    "metric": "club_path",
+    "goal": "increase"
+   },
+   "counts": [],
+   "guardrails": [
+    {
+     "metric": "club_speed",
+     "goal": "increase"
+    },
+    {
+     "metric": "carry",
+     "goal": "increase"
+    }
+   ],
+   "video_checks": [],
+   "safety": "道具は使わない",
+   "note": "立ち方を変える補助です（定着の判定は1回多く見ます）",
+   "author": "Claude（下書き。広く使われている練習法をまとめたもの）",
+   "checked_by": null,
+   "coach_reviewed_by": null,
+   "path_sign": "negative"
+  },
+  {
+   "id": "lowpoint.towel",
+   "title": "ボールの後ろにタオル",
+   "issues": [
+    "top_extreme"
+   ],
+   "levers": [],
+   "symptoms": [],
+   "categories": [
+    "iron",
+    "hybrid",
+    "wedge"
+   ],
+   "kind": "constraint",
+   "ease": 1,
+   "equipment": [
+    "towel"
+   ],
+   "what_changes": "ボールの後ろに置いたタオルに触らずに打つには、ヘッドがボールより先で一番低くなる必要がある。極端なトップ（薄い当たり）が減るかを件数で見る",
+   "steps": [
+    "ボールの10〜15cm 後ろ（目標と反対側）にタオルを平らに置く",
+    "タオルに触らないように打つ",
+    "7割の振り幅から始める"
+   ],
+   "cue_drill": "タオルに触らない",
+   "cue_transfer": "タオルがあるつもりで打つ",
+   "diagram": "svg/lowpoint.towel.svg",
+   "kpi": {
+    "metric": "low_point",
+    "goal": null
+   },
+   "counts": [
+    "thin"
+   ],
+   "guardrails": [
+    {
+     "metric": "club_speed",
+     "goal": "increase"
+    },
+    {
+     "metric": "carry",
+     "goal": "increase"
+    }
+   ],
+   "video_checks": [],
+   "safety": "タオルは平らに置く。硬い物は置かない",
+   "note": "極端なトップしか数えられません（判定はせず件数だけ）",
+   "author": "Claude（下書き。広く使われている練習法をまとめたもの）",
+   "checked_by": null,
+   "coach_reviewed_by": null
+  },
+  {
+   "id": "video.butt_line",
+   "title": "お尻の後ろに椅子",
+   "issues": [
+    "strike_heel"
+   ],
+   "levers": [],
+   "symptoms": [
+    "S1",
+    "S2"
+   ],
+   "categories": [
+    "iron",
+    "hybrid",
+    "wedge",
+    "wood",
+    "driver"
+   ],
+   "kind": "feel",
+   "ease": 2,
+   "equipment": [
+    "chair"
+   ],
+   "what_changes": "お尻の後ろに置いた椅子に触れたまま打てるかで、ボールとの距離がアドレスから変わっていないかを確かめる",
+   "steps": [
+    "構えたとき、お尻の後ろに椅子の背もたれが軽く触れる位置に置く",
+    "ゆっくりの素振りで、インパクトで{lead}側のお尻が椅子に触れているか確かめる（{trail}側は回転して離れてよい）",
+    "できたら7割の振り幅で打つ"
+   ],
+   "cue_drill": "インパクトで{lead}側のお尻を椅子につける",
+   "cue_transfer": "{lead}側のお尻の後ろに椅子があるつもりで打つ",
+   "diagram": "svg/video.butt_line.svg",
+   "kpi": {
+    "metric": "impact_offset",
+    "goal": "reduce_abs"
+   },
+   "counts": [
+    "heel_extreme"
+   ],
+   "guardrails": [
+    {
+     "metric": "club_speed",
+     "goal": "increase"
+    },
+    {
+     "metric": "carry",
+     "goal": "increase"
+    }
+   ],
+   "video_checks": [
+    "後方の動画で、構えとインパクトのお尻の後ろの輪郭を比べる"
+   ],
+   "safety": "椅子はクラブの通り道に入らない位置に置く。倒れにくい物を使い、まず素振りで確かめる",
+   "note": "",
+   "author": "Claude（下書き。広く使われている練習法をまとめたもの）",
+   "checked_by": null,
+   "coach_reviewed_by": null
+  }
+ ],
+ "measures": [
+  {
+   "id": "measure.impact_offset",
+   "title": "打点を測る",
+   "metric": "impact_offset",
+   "steps": [
+    "フェースにインパクトシールを貼るか、フットスプレーを吹いて打つ",
+    "1球ごとに跡の位置（真ん中から何mm ネック寄り・先端寄りか）を見る",
+    "「1球ずつ」でその球の打点に手で入れる"
+   ],
+   "why": "打点が測れた球が少ないと、実験しても判定できません"
+  },
+  {
+   "id": "measure.low_point",
+   "title": "最下点を測る",
+   "metric": "low_point",
+   "steps": [
+    "TrackMan のリンクで開く項目に Low Point を足す",
+    "取り込みは Low Point を読めます"
+   ],
+   "why": "最下点のタイルはリンクの10項目に入っていないので、いまは測れていません"
+  }
+ ]
+}

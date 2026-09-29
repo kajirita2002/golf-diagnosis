@@ -47,6 +47,46 @@ def permutation_p(a: np.ndarray, b: np.ndarray, stat: Stat, n: int = config.PERM
     return (hits + 1) / (n + 1)
 
 
+def improvement_rows(goal: str) -> Callable[[np.ndarray, np.ndarray], np.ndarray]:
+    """improvement_stat の行ごと版（2次元の配列の各行が1回の再標本）。"diff" は b − a の平均の差。"""
+    if goal == "reduce_abs":
+        return lambda a, b: np.abs(a).mean(axis=1) - np.abs(b).mean(axis=1)
+    if goal == "reduce_sd":
+        return lambda a, b: a.std(axis=1, ddof=1) - b.std(axis=1, ddof=1)
+    if goal == "increase" or goal == "diff":
+        return lambda a, b: b.mean(axis=1) - a.mean(axis=1)
+    if goal == "decrease":
+        return lambda a, b: a.mean(axis=1) - b.mean(axis=1)
+    raise ValueError(f"goal {goal!r} は使えません")
+
+
+def bootstrap_ci_goal(a, b, goal: str, n: int = config.BOOTSTRAP_N) -> tuple[float, float]:
+    """bootstrap_ci のベクトル化版（群ごとの復元抽出を2次元の添字で1回に引く）。
+
+    ループ版は1回 0.2秒ほどかかり、CPU 0.1 の環境で評価を4つ回すと数秒になる（docs/DESIGN_coaching.md §8.5）。
+    乱数の引き方はループ版と違うので、これを使う評価は analysis/0.4 から。
+    """
+    A, B = np.asarray(a, dtype=float), np.asarray(b, dtype=float)
+    rng = np.random.default_rng(config.SEED)
+    ia = rng.integers(0, A.size, size=(n, A.size))
+    ib = rng.integers(0, B.size, size=(n, B.size))
+    vals = improvement_rows(goal)(A[ia], B[ib])
+    lo, hi = np.percentile(vals, [2.5, 97.5])
+    return float(lo), float(hi)
+
+
+def permutation_p_goal(a, b, goal: str, n: int = config.PERMUTATION_N) -> float:
+    """permutation_p のベクトル化版（並べ替えを n 行まとめて作る）。"""
+    A, B = np.asarray(a, dtype=float), np.asarray(b, dtype=float)
+    f = improvement_rows(goal)
+    observed = float(f(A[None, :], B[None, :])[0])
+    rng = np.random.default_rng(config.SEED)
+    pooled = np.broadcast_to(np.concatenate([A, B]), (n, A.size + B.size))
+    perm = rng.permuted(pooled, axis=1)
+    hits = int(np.count_nonzero(f(perm[:, : A.size], perm[:, A.size :]) >= observed - 1e-12))
+    return (hits + 1) / (n + 1)
+
+
 def ols_contributions(y: np.ndarray, X: np.ndarray, names: list[str]) -> dict:
     """y のばらつきを X の各列がどれだけ説明するか。
 

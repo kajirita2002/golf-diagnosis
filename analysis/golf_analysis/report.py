@@ -19,11 +19,11 @@ import logging
 from collections import defaultdict
 
 from . import band as band_mod
-from . import config, figures, plan, video_candidates
+from . import config, figures, gist, plan, video_candidates
 from .claims import Claim, ClaimError, Facts, build_claim, dir_word
 from .profile import cross_units
 from .session import analyze_session
-from .shots import dec, is_extreme, m
+from .shots import dec, drop_practice, is_extreme, m
 
 log = logging.getLogger(__name__)
 
@@ -1004,6 +1004,8 @@ def _cross_claims(cross: dict, hand: str) -> list[dict]:
 def build_report(shots: list[dict], handedness: str = "R", experiments: list | None = None) -> dict:
     hand = "L" if handedness == "L" else "R"
     an = analyze_session(shots)
+    # 準備とドリルの球は解説にも入れない（analyze_session と同じ規則。外した数は n_practice_excluded）
+    shots = drop_practice(shots)
     by_club: dict[str, list[dict]] = defaultdict(list)
     for s in shots:
         if s.get("excluded"):
@@ -1084,6 +1086,8 @@ def build_report(shots: list[dict], handedness: str = "R", experiments: list | N
                 "F5": figures.f5(p, sh, skip, good_ids, hand),
                 "F6": figures.f6(p),
                 "F7": figures.f7(units),
+                # 要点の「理想との差」に置く比べる図（最初に見える。数字は件数だけ）
+                "C1": figures.compare(p, sh, skip, carry_medians, hand),
             }
             figs = {k: v for k, v in figs.items() if v}
             # 読み上げ（desc）は、その図が伝えることを言う主張の定型文と同じ文（§5.6）
@@ -1094,6 +1098,13 @@ def build_report(shots: list[dict], handedness: str = "R", experiments: list | N
                     continue
                 figs[fid]["desc"] = next((texts[k] for k in keys if k in texts), s5 if fid == "F7" else None)
                 figs[fid]["desc_claim"] = next((f"{p['scope_id']}/{k}" for k in keys if k in texts), None)
+        g = _gist(p, cands, sections, hand, cross_claims, sh, figs.get("C1")) if sk == "main" and sections and sections[0]["id"] != "error" else None
+        if "C1" in figs:
+            if g:  # 比べる図の読み上げは、要点の「理想との差」の文（数字も専門用語も無い）
+                gap = next((b for b in g["blocks"] if b["id"] == "gap"), None)
+                figs["C1"]["desc"] = gap["lines"][0]["text"] if gap and gap["lines"] else figs["C1"]["title"]
+            else:
+                figs.pop("C1")
         scopes_out.append(
             {
                 "scope_id": p["scope_id"],
@@ -1112,6 +1123,8 @@ def build_report(shots: list[dict], handedness: str = "R", experiments: list | N
                 "candidates": _public_candidates(cands) if cands and sk == "main" else None,
                 "band_request": req,
                 "symptoms": symptoms,
+                # 画面の最初に出す要点（数字も専門用語も使わない。根拠は claims の id。gist.py）
+                "gist": g,
             }
         )
 
@@ -1132,6 +1145,7 @@ def build_report(shots: list[dict], handedness: str = "R", experiments: list | N
         "facts_hash": _hash(all_facts),
         "n_shots": an["n_shots"],
         "n_excluded": an["n_excluded"],
+        "n_practice_excluded": an["n_practice_excluded"],
         "scopes": scopes_out,
         "session_unknowns": session_unknowns,
         "cross_club": {**cross, "claims": [c["claim"] for c in cross_claims]},
@@ -1139,6 +1153,15 @@ def build_report(shots: list[dict], handedness: str = "R", experiments: list | N
         "glossary": glossary(hand),
         "video_symptoms_version": video_candidates.VERSION,
     })
+
+
+def _gist(p: dict, cands, sections: list[dict], hand: str, cross_claims: list[dict], shots=None, compare_fig=None) -> dict | None:
+    cross_ids = [c["claim"]["id"] for c in cross_claims if p["scope_id"] in c["scope_ids"]]
+    try:
+        return gist.scope_gist(p, cands, sections, hand, cross_ids, shots, compare_fig)
+    except Exception:  # noqa: BLE001  要点が作れなくても、解説そのものは出す
+        log.exception("要点を作れませんでした: %s", p["scope_id"])
+        return None
 
 
 def _slim_floats(x):

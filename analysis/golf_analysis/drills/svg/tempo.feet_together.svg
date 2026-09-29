@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 230" role="img">
+<title>両足をそろえて打つ</title>
+<desc>上から見た図。目標は矢印の向き、打つ人は図の下側に立つ。両足のかかとをそろえて立ち、7割の速さで打つ。フィニッシュで3秒止まる。</desc>
+<g class="d-shapes"><line class="g-axis" x1="20" y1="96" x2="330" y2="96" stroke-dasharray="6 4" stroke-width="1.5"/><polygon class="g-sub" points="340,96 328,90 328,102"/><circle class="g-good" cx="180" cy="96" r="7"/><rect class="g-band" x="163" y="168" width="18" height="34" rx="8"/><rect class="g-band" x="181" y="168" width="18" height="34" rx="8"/></g>
+<g class="d-labels"><text class="g-text t12" x="318" y="84" text-anchor="middle" font-size="12">目標</text><text class="g-text t12" x="181" y="218" text-anchor="middle" font-size="12">かかとをそろえる</text></g>
+</svg>

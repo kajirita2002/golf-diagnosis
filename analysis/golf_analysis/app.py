@@ -14,7 +14,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-from . import config
+from . import coaching, config, drills, gist, narrative
 from .compare import compare_sessions
 from .experiment import VALID_GOALS, evaluate
 from .report import build_report
@@ -36,10 +36,68 @@ class ReportIn(BaseModel):
     experiments: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class NarrativeIn(BaseModel):
+    """1範囲ぶんのつなぎの文の依頼。input は /v1/report の narrative_inputs の1つ（Go がそのまま渡す）。"""
+
+    input: dict[str, Any]
+    input_hash: str = ""
+
+
 class ExperimentIn(BaseModel):
     target_metric: str
     goal: str
     blocks: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class PlanCandidatesIn(BaseModel):
+    """候補とドリル。history はこの選手の練習の記録（{drill_id, issue, grade, date}）、plans は前のプラン（{plan_id, issue, drill_id, status, state}）。"""
+
+    shots: list[dict[str, Any]] = Field(default_factory=list)
+    handedness: str = "R"
+    history: list[dict[str, Any]] = Field(default_factory=list)
+    plans: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class PlanBuildIn(BaseModel):
+    """プランを作る（保存は Go）。window は Go の physics.Band の窓（{face_min, face_max, path}・右打ちの座標）。"""
+
+    shots: list[dict[str, Any]] = Field(default_factory=list)
+    handedness: str = "R"
+    scope_id: str
+    candidate_id: str
+    drill_id: str | None = None
+    club: str | None = None
+    window: dict[str, Any] | None = None
+    cue: str | None = None
+    variant: str = "standard"
+
+
+class PlanEvaluateIn(BaseModel):
+    """1回の練習の評価。plan は plans の行（club・target_metric・goal・params）。
+
+    blocks と reference（1回目の練習の評価）を直に渡すか、Go の形（run・experiment・past_runs）で渡す。
+    Go の形なら past_runs の1件目を物差しにし、状態の移り方（progress）も付けて返す。"""
+
+    plan: dict[str, Any]
+    blocks: list[dict[str, Any]] = Field(default_factory=list)
+    reference: dict[str, Any] | None = None
+    experiment: dict[str, Any] | None = None
+    run: dict[str, Any] | None = None
+    past_runs: list[dict[str, Any]] = Field(default_factory=list)
+    history: list[dict[str, Any]] = Field(default_factory=list)
+    continue_after_stop: bool = False
+    continue_after_run: int | None = None
+    handedness: str = "R"
+
+
+class PlanProgressIn(BaseModel):
+    """進捗と状態。runs は古い順の {run_id, session_id, date, evaluation}。history はほかのプラン（{issue, drill_id, state}）。"""
+
+    plan: dict[str, Any]
+    runs: list[dict[str, Any]] = Field(default_factory=list)
+    history: list[dict[str, Any]] = Field(default_factory=list)
+    continue_after_stop: bool = False
+    handedness: str = "R"
 
 
 class CompareIn(BaseModel):
@@ -85,7 +143,8 @@ def _client():
 
 @app.get("/healthz")
 def healthz() -> dict:
-    return {"ok": True, "engine_version": config.ENGINE_VERSION}
+    # plan_version / engine_version は Go が保存した評価の版と比べる（版が変われば作り直す。§8.5）
+    return {"ok": True, "engine_version": config.ENGINE_VERSION, "plan_version": config.PLAN_VERSION}
 
 
 @app.post("/v1/session")
@@ -99,7 +158,79 @@ def report(body: ReportIn) -> dict:
     帯の形と窓の数字は Go が各範囲の band_request を見て band_shape を足す。"""
     if body.handedness not in ("R", "L"):
         raise HTTPException(400, "handedness は R か L です")
-    return build_report(body.shots, body.handedness, body.experiments)
+    out = build_report(body.shots, body.handedness, body.experiments)
+    # 本体の範囲ごとに、つなぎの文（1c）の入力と鍵を足す。Claude はここでは呼ばない
+    narrative.attach_inputs(out)
+    return out
+
+
+@app.post("/v1/report/narrative")
+def report_narrative(body: NarrativeIn) -> dict:
+    """1範囲の claims → 検証済みの並びとつなぎの文（§5.8・§10.1）。
+
+    REPORT_LLM が on でなければ Claude を呼ばずに定型文の並びを返す。キーが無い・断られた・API が落ちている・
+    検証に落ちた、のどれでも定型文に戻して 200 で返す（R10）。called が実際に呼んだ回数、model が実際に答えたモデル。"""
+    inp = body.input
+    secs = inp.get("sections")
+    if not isinstance(inp.get("scope_id"), str) or not isinstance(secs, list) or not all(
+        isinstance(s, dict) and isinstance(s.get("id"), str) and isinstance(s.get("claims"), list) for s in secs
+    ):
+        raise HTTPException(400, "つなぎの文の入力の形が不正です（scope_id と sections）")
+    out = narrative.narrate(narrative.default_client, inp)
+    out["input_hash"] = body.input_hash
+    return out
+
+
+def _hand(h: str) -> str:
+    if h not in ("R", "L"):
+        raise HTTPException(400, "handedness は R か L です")
+    return h
+
+
+@app.get("/v1/drills")
+def drills_list(handedness: str = "R") -> dict:
+    """ドリル集（checked_by のあるものだけ）。docs/DESIGN_coaching.md §5.7。"""
+    return drills.listing(_hand(handedness))
+
+
+@app.post("/v1/plan/candidates")
+def plan_candidates(body: PlanCandidatesIn) -> dict:
+    """候補（いま・次…）と、候補ごとに勧めるドリル（確かめ済みだけ・記録のあるものが先）。"""
+    return coaching.candidates_with_drills(body.shots, _hand(body.handedness), body.history, body.plans)
+
+
+@app.post("/v1/plan/build")
+@app.post("/v1/plan/new")
+def plan_build(body: PlanBuildIn) -> dict:
+    """候補から1つ選んでプランの中身を作る。params は作った時点で固定する（§8.1・§7.3）。"""
+    try:
+        out = coaching.build_plan(body.shots, _hand(body.handedness), body.scope_id, body.candidate_id, body.drill_id, body.club, body.window, body.cue, body.variant)
+    except coaching.PlanError as e:
+        raise HTTPException(422, str(e)) from e
+    # 今日の練習の画面の最初に出す言葉（数字も専門用語も使わない。gist.py）。trigger に入れて plans に残す
+    pl = out.get("plan") or {}
+    if isinstance(pl.get("trigger"), dict):
+        pl["trigger"]["plain"] = {
+            "title": gist.plain_title({"id": pl.get("issue"), "lever": pl.get("lever"), "target_metric": pl.get("target_metric"), "goal": pl.get("goal")}, _hand(body.handedness)),
+            "why": gist.why_first({"why_first": (pl.get("rationale") or {}).get("why_first")}),
+        }
+    return out
+
+
+@app.post("/v1/plan/evaluate")
+def plan_evaluate(body: PlanEvaluateIn) -> dict:
+    """1回の練習（A-B-B-A）の評価（§8.5）。Go は plan_runs.evaluation_json に入力の指紋と版と一緒に保存する。"""
+    try:
+        _hand(body.handedness)
+        return coaching.evaluate_request(body.model_dump())
+    except coaching.PlanError as e:
+        raise HTTPException(422, str(e)) from e
+
+
+@app.post("/v1/plan/progress")
+def plan_progress(body: PlanProgressIn) -> dict:
+    """推移と状態と次の手（§8.6）。"""
+    return coaching.progress(body.plan, body.runs, body.history, body.continue_after_stop, _hand(body.handedness))
 
 
 @app.post("/v1/experiment")

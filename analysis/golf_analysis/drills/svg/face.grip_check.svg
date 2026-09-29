@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 190" role="img">
+<title>ナックルの数を数える</title>
+<desc>構えて上から見たときに見える、目標側の手のナックル（指の付け根の山）の数を数える図。見える数を毎回そろえる。</desc>
+<g class="d-shapes"><rect class="g-band" x="100" y="72" width="160" height="56" rx="24" fill-opacity="0.3"/><circle class="g-good" cx="130" cy="100" r="12"/><circle class="g-good" cx="164" cy="100" r="12"/><circle class="g-band" cx="198" cy="100" r="12"/><circle class="g-band" cx="232" cy="100" r="12"/></g>
+<g class="d-labels"><text class="g-text t12" x="318" y="84" text-anchor="middle" font-size="12">目標</text><text class="g-text t12" x="180" y="160" text-anchor="middle" font-size="12">見えるナックルを数える（例: 2つ）</text></g>
+</svg>
