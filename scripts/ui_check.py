@@ -203,6 +203,74 @@ def check_screenshot(page, root: str, shots_dir: str, tag: str, errors: list[str
         errors.append(f"[{tag}] スクショの表を取り込めない: {cards.nth(0).locator('[data-f=err]').inner_text()!r} / 行 {page.locator('#shotTable tr[data-id]').count()}（前 {before}）")
 
 
+def check_continuation(page, root: str, shots_dir: str, tag: str, errors: list[str]) -> None:
+    """見出しの無い続きの画像（2026-09-29 の実機: 5W の 12〜23 球目）をつなげる・消す。
+
+    読み取りの答えだけ差し替える（偽の Claude は1通りしか返せない）。検算は本物のサーバーがやる。
+    選んだ順が「続き → 見出しのある表」でも、番号順につながること。
+    """
+    real = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "testdata", "real", "2026-09-17")
+    lines = open(os.path.join(real, "5w.tsv"), encoding="utf-8").read().strip("\n").split("\n")
+    head, units, body = lines[0], lines[1], [l for l in lines[2:] if not l.startswith(("Average", "Consistency"))]
+    avg = next(l for l in lines if l.startswith("Average"))
+    first = "\n".join([head, units, *body[:11]]) + "\n"
+    cont = "\n".join(["#", "", *body[11:], avg]) + "\n"  # 見出しも単位も写っていない
+    answers = [
+        {"tables": [{"club": None, "tsv": cont, "check": {"ok": False, "continuation": True, "problems": ["続き"], "columns": []}}]},
+        {"tables": [{"club": "5Wood", "tsv": first, "check": {"ok": False, "problems": ["Average"], "columns": []}}]},
+        {"tables": [{"club": None, "tsv": cont, "check": {"ok": False, "continuation": True, "problems": ["続き"], "columns": []}}]},
+    ]
+    calls = []
+
+    def answer(route):
+        calls.append(1)
+        route.fulfill(status=200, content_type="application/json",
+                      body=json.dumps({**answers[len(calls) - 1], "usage": {"cost_usd": 0}}))
+
+    page.goto(root + "/")
+    page.wait_for_selector("#work:not([hidden])")
+    page.route("**/v1/screenshot", answer)
+    a, b = os.path.join(shots_dir, "cont-a.png"), os.path.join(shots_dir, "cont-b.png")
+    for p in (a, b):
+        with open(p, "wb") as f:
+            f.write(tiny_png())
+    page.set_input_files("#shotFile", [a, b])
+    try:
+        page.wait_for_function("document.querySelector('#shotMsg').textContent.includes('読み取りました')"
+                               " && document.querySelectorAll('.shotcard').length === 1"
+                               " && document.querySelector('.shotcard').innerText.includes('検算OK')", timeout=15000)
+    except Exception:
+        errors.append(f"[{tag}] 続きの画像がつながらない: {page.inner_text('#shotOut')[:400]!r}")
+        return
+    card = page.locator(".shotcard").first
+    text = card.inner_text()
+    if "23球" not in text or "12.〜23." not in text:
+        errors.append(f"[{tag}] つなげた表の球数・注記が違う: {text[:300]!r}")
+    if card.locator("[data-f=club]").input_value() != "5 Wood":
+        errors.append(f"[{tag}] つなげた表のクラブが「5 Wood」にならない")
+    tsv = card.locator("[data-f=tsv]").input_value().split("\n")
+    if not (tsv[2].startswith("1.") and tsv[13].startswith("12.")):
+        errors.append(f"[{tag}] つなげた表が番号順に並んでいない: {tsv[2][:5]!r} {tsv[13][:5]!r}")
+    page.screenshot(path=os.path.join(shots_dir, f"{tag}-8-continuation.png"), full_page=True)
+    card.locator("button[data-act=drop]").click()
+    if page.locator(".shotcard").count() != 0:
+        errors.append(f"[{tag}] 「消す」で表が消えない")
+
+    # 見出しのある表が無いときは、続きだと分かる言葉で残し、取り込ませない。消せる。
+    page.set_input_files("#shotFile", a)
+    page.wait_for_function("document.querySelectorAll('.shotcard').length === 1")
+    card = page.locator(".shotcard").first
+    if "続き" not in card.inner_text():
+        errors.append(f"[{tag}] 見出しの無い画像で「続き」だと言わない: {card.inner_text()[:200]!r}")
+    card.locator("button[data-act=import]").click()
+    if "見出し" not in card.locator("[data-f=err]").inner_text():
+        errors.append(f"[{tag}] 見出しの無い表を取り込もうとして止まらない")
+    card.locator("button[data-act=drop]").click()
+    if page.locator(".shotcard").count() != 0:
+        errors.append(f"[{tag}] 見出しの無い表を「消す」で消せない")
+    page.unroute("**/v1/screenshot")
+
+
 def main() -> None:
     shots_dir = os.environ.get("SHOTS_DIR") or tempfile.mkdtemp(prefix="ui-")
     os.makedirs(shots_dir, exist_ok=True)
@@ -221,6 +289,7 @@ def main() -> None:
             check(page, sv.root, shots_dir, tag, errors)
             check_real(page, sv.root, real_id, shots_dir, tag, errors)
             check_screenshot(page, sv.root, shots_dir, tag, errors)
+            check_continuation(page, sv.root, shots_dir, tag, errors)
             page.close()
         browser.close()
     print("スクリーンショット:", shots_dir)

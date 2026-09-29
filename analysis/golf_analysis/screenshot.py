@@ -85,7 +85,9 @@ Do not include the shot-number column or icon columns.
 
 Copy each cell exactly as displayed. Keep the R or L suffix on side values ("40.7R", "2.2L"), keep minus signs, \
 and write "-" for an empty cell. Do not convert, round, or compute anything. \
-If a table is cut off at the top or bottom of the screenshot, transcribe only the rows that are fully visible."""
+If a table is cut off at the top or bottom of the screenshot, transcribe only the rows that are fully visible. \
+If the screenshot shows only the continuation of a table and its header row is not visible, return empty lists for \
+columns and units and still transcribe every visible row with all of its cells."""
 
 
 class Client(Protocol):
@@ -181,12 +183,25 @@ def verify_tsv(tsv: str) -> dict:
     画面の値は丸めてあるので、丸めた値の平均は少しずれる（実データで最大 0.06・0.38）。
     1桁の読み違いや R/L の落としは、8球でも平均を 0.7 以上動かすので超える。
     """
-    rows = [r.split("\t") for r in tsv.strip("\n").split("\n") if r.strip()]
+    # 1行目が見出し、2行目が単位。**2行目は位置で取る** ―― 単位が写っていないと空行になり、
+    # 空行を捨ててから数えると1球目のデータが単位の行として消える（続きの画像で実際に 12. が消えた）。
+    lines = tsv.replace("\r", "").strip("\n").split("\n")
+    rows = [lines[0].split("\t")] + ([lines[1].split("\t")] if len(lines) > 1 else []) + [r.split("\t") for r in lines[2:] if r.strip()]
     if len(rows) < 3:
         return {"ok": False, "problems": ["表として読める行がありません"], "columns": []}
     header = rows[0]
     body = [r for r in rows[2:] if r and r[0] not in ("Average", "Consistency")]
-    avg = next((r for r in rows if r and r[0] == "Average"), None)
+    avg = next((r for r in rows[2:] if r and r[0] == "Average"), None)
+    if len(header) <= 1:
+        # 見出しが写っていない（表の続きだけを撮った画像）。列の意味が分からないので検算しない。
+        # 画面が、見出しのある表につなげる。
+        return {
+            "ok": False,
+            "continuation": True,
+            "problems": ["見出し（列の名前）が写っていない、表の続きの画像です。見出しが写った画像と一緒に読み込むと、自動でつなげます"],
+            "columns": [],
+            "n_rows": len(body),
+        }
     problems: list[str] = []
     cols: list[dict] = []
 

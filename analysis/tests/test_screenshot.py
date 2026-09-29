@@ -117,6 +117,26 @@ def test_人が直した_TSV_を再検算できる():
     assert ss.verify_tsv(tsv.replace("\t30.7\t", "\t36.7\t", 1))["ok"]
 
 
+def test_見出しの無い続きの画像は1球目を落とさず続きだと言う():
+    # 2026-09-29 の実機: 5W の 12〜23 球目だけを撮った画像。見出しも単位も写っていない。
+    # 前は単位の空行を捨ててから数えたので 12. が単位の行として消え、13.〜23. が「列の数が合わない」になった。
+    t = table_from_tsv("5w.tsv", None)
+    t.update(columns=[], units=[], club=None, row_labels=t["row_labels"][11:], rows=t["rows"][11:])
+    tsv = ss.to_tsv(ss.Table(**t))
+    check = ss.verify_tsv(tsv)
+    assert check.get("continuation") is True and not check["ok"]
+    assert check["n_rows"] == len(t["rows"])  # 12. も数えている
+    assert len(check["problems"]) == 1 and "続き" in check["problems"][0]
+
+
+def test_単位の行が空でも1球目を落とさない():
+    t = table_from_tsv("6i.tsv", "6Iron")
+    t["units"] = [""] * len(t["columns"])
+    check = ss.verify_tsv(ss.to_tsv(ss.Table(**t)))
+    assert check["ok"], check["problems"]
+    assert check["n_rows"] == len(t["rows"])
+
+
 def test_断られた_途中で切れた_形が不正():
     with pytest.raises(ss.ExtractError, match="断られ"):
         ss.extract(FakeClient({}, stop_reason="refusal"), PNG, "image/png")

@@ -637,30 +637,92 @@ function checkHtml(c) {
   return `<div>${head}</div><div style="margin-top:4px">${cols}</div>${(c.problems || []).map((p) => `<div class="err">・${esc(p)}</div>`).join("")}`;
 }
 
+// ---- 読み取った表（TSV）の分解と結合 ----
+// 1行目が見出し、2行目が単位（**位置で取る**。単位が写っていないと空行になる）。
+function splitTsv(tsv) {
+  const lines = tsv.replace(/\r/g, "").replace(/^\n+|\n+$/g, "").split("\n");
+  const cells = (l) => (l || "").split("\t");
+  const rest = lines.slice(2).filter((l) => l.trim()).map(cells);
+  return {
+    head: cells(lines[0]), units: cells(lines[1]),
+    body: rest.filter((r) => r[0] !== "Average" && r[0] !== "Consistency"),
+    avg: rest.find((r) => r[0] === "Average") || null,
+    cons: rest.find((r) => r[0] === "Consistency") || null,
+  };
+}
+const joinTsv = (t) => [t.head, t.units, ...t.body, t.avg, t.cons].filter(Boolean).map((r) => r.join("\t")).join("\n") + "\n";
+const headless = (tsv) => splitTsv(tsv).head.length <= 1;
+// 続きの画像の1行あたりの列の数（いちばん多い数）
+function bodyWidth(tsv) {
+  const n = {};
+  for (const r of splitTsv(tsv).body) n[r.length - 1] = (n[r.length - 1] || 0) + 1;
+  return +Object.keys(n).sort((a, b) => n[b] - n[a])[0] || 0;
+}
+// 見出しのある表に、見出しの無い続きをつなげる。同じ番号の行は前のほうを残し、番号順に並べ直す
+// （画像を選ぶ順が逆でも、12. が 1. より前に来ない）。
+function mergeTsv(base, cont) {
+  const a = splitTsv(base), b = splitTsv(cont);
+  const seen = new Set(a.body.map((r) => r[0]));
+  a.body = [...a.body, ...b.body.filter((r) => !seen.has(r[0]))];
+  const no = (r) => parseInt(r[0], 10);
+  if (a.body.every((r) => !isNaN(no(r)))) a.body.sort((x, y) => no(x) - no(y));
+  a.avg = a.avg || b.avg; a.cons = a.cons || b.cons;
+  return joinTsv(a);
+}
+
+// 見出しの無い続きのカードを、見出しのある表（取り込む前のもの）につなげる。
+// 相手は画面で直前にある表、無ければ直後の表。列の数が合わないものにはつなげない。
+async function joinContinuations() {
+  const cards = [...$("shotOut").querySelectorAll(".shotcard")];
+  for (const [i, c] of cards.entries()) {
+    if (!c.isConnected || !headless(c.tsv())) continue;
+    const w = bodyWidth(c.tsv());
+    const fits = (x) => x.isConnected && x !== c && !x.imported && !headless(x.tsv()) && splitTsv(x.tsv()).head.length - 1 === w;
+    const target = cards.slice(0, i).reverse().find(fits) || cards.slice(i + 1).find(fits);
+    if (!target) continue;
+    const labels = splitTsv(c.tsv()).body.map((r) => r[0]);
+    target.setTsv(mergeTsv(target.tsv(), c.tsv()));
+    target.note(`続きの画像（${labels[0]}〜${labels[labels.length - 1]}）をこの表につなげました`);
+    c.remove();
+    await target.recheck().catch(() => {});
+  }
+}
+
 function shotCard(t) {
   const box = document.createElement("div");
   box.className = "shotcard";
   box.innerHTML = `
     <div class="row"><b>表</b><input data-f="club" placeholder="クラブ（例: 6 Iron）"><span class="muted">読み取ったクラブ: ${esc(t.club || "—")}</span></div>
+    <div class="muted" data-f="note"></div>
     <div data-f="check" style="margin-top:6px">${checkHtml(t.check)}</div>
     <details ${t.check && t.check.ok ? "" : "open"} style="margin-top:6px"><summary class="muted">読み取った表（直せます）</summary>
       <textarea data-f="tsv" rows="8"></textarea>
       <button class="ghost small" data-act="recheck">もう一度検算</button>
     </details>
-    <div class="row" style="margin-top:8px"><button data-act="import">この表を取り込む</button><span class="err" data-f="err"></span></div>`;
+    <div class="row" style="margin-top:8px"><button data-act="import">この表を取り込む</button><button class="ghost" data-act="drop">消す（取り込まない）</button><span class="err" data-f="err"></span></div>`;
   box.querySelector("[data-f=club]").value = clubName(t.club);
   box.querySelector("[data-f=tsv]").value = t.tsv;
   const q = (f) => box.querySelector(`[data-f=${f}]`);
+  box.tsv = () => q("tsv").value;
+  box.setTsv = (v) => { q("tsv").value = v; };
+  box.note = (m) => { q("note").textContent = m; };
+  box.recheck = async () => {
+    const c = await api("POST", "/v1/screenshot/verify", { tsv: q("tsv").value });
+    q("check").innerHTML = checkHtml(c);
+    q("check").nextElementSibling.open = !c.ok;
+    return c;
+  };
   box.addEventListener("click", async (ev) => {
     const b = ev.target.closest("button[data-act]");
     if (!b) return;
     q("err").textContent = "";
+    if (b.dataset.act === "drop") { box.remove(); return; }
     try {
       if (b.dataset.act === "recheck") {
-        const c = await api("POST", "/v1/screenshot/verify", { tsv: q("tsv").value });
-        q("check").innerHTML = checkHtml(c);
+        await box.recheck();
         return;
       }
+      if (headless(q("tsv").value)) throw new Error("見出し（列の名前）が無いので取り込めません。見出しが写った画像も読み込むと、自動でつながります");
       if (!S.session) throw new Error("先にセッションを選ぶか作ってください");
       if (!q("club").value.trim()) throw new Error("クラブを入れてください");
       const c = await api("POST", "/v1/screenshot/verify", { tsv: q("tsv").value });
@@ -672,6 +734,8 @@ function shotCard(t) {
       if (!r.ok) throw new Error(j.error || r.statusText);
       showImport(j);
       b.disabled = true; b.textContent = `取り込みました（#${j.seq_from}〜${j.seq_to}）`;
+      box.imported = true;
+      box.querySelector("[data-act=drop]").textContent = "閉じる";
       await loadShots();
     } catch (e) { q("err").textContent = e.message; }
   });
@@ -733,6 +797,7 @@ async function readShots(files) {
       $("shotOut").insertAdjacentHTML("beforeend", `<p class="err">${esc(f.name || "画像")}: ${esc(e.message)}</p>`);
     }
   }
+  await joinContinuations();
   $("shotMsg").textContent = `${imgs.length}枚を読み取りました（Claude の利用料 約 $${cost.toFixed(3)}）。確かめてから取り込んでください。`;
 }
 
