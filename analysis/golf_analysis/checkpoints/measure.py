@@ -422,8 +422,9 @@ def compute(ctx: Ctx, spec: dict) -> dict:
         P, Q = ctx.pt(p, spec["pt"]), ctx.pt(p, spec["to"])
         unit = spec.get("unit", "ball")
         d = _unit_len(ctx, p, unit)
-        side = "inside" if P[0] < Q[0] else "outside"
-        return {"v": _dist(P, Q) / d, "err": config.CP_POS_ERR_BALL, "unit": unit, "extra": {"side": side}}
+        # 外れた向き（後ろからは +x がボールの側＝外側）。範囲の side と名前を分ける
+        way = "inside" if P[0] < Q[0] else "outside"
+        return {"v": _dist(P, Q) / d, "err": config.CP_POS_ERR_BALL, "unit": unit, "extra": {"dir": way}}
     if k == "dy":
         P, R = ctx.pt(p, spec["pt"]), ctx.pt(p, spec["ref"])
         d = _unit_len(ctx, p, spec.get("unit", "ball"))
@@ -531,6 +532,23 @@ def camera_check(ctx: Ctx) -> dict:
     return {"ok": all(c["ok"] for c in checks), "checks": checks}
 
 
+def view_check(ctx: Ctx) -> dict:
+    """P1 の姿勢から向きを確かめる（§6.1）。正面なら両肩が横に並び、後ろなら重なる。食い違えば画面が聞く。"""
+    f = ctx.frames.get("P1")
+    if f is None or not f.has_pose:
+        return {"ok": None}
+    try:
+        a, b = f.point("lead_shoulder"), f.point("trail_shoulder")
+        t = f.torso()
+    except (Invalid, KeyError):
+        return {"ok": None}
+    if min(a[2], b[2]) < config.CP_MIN_VISIBILITY or t < 1:
+        return {"ok": None}
+    spread = abs(a[0] - b[0]) / t
+    guess = "fo" if spread >= config.CP_VIEW_FO_SPREAD else ("dtl" if spread <= config.CP_VIEW_DTL_SPREAD else None)
+    return {"ok": None if guess is None else guess == ctx.view, "guess": guess, "spread": round(spread, 2)}
+
+
 def scale_check(ctx: Ctx) -> dict:
     """ボールの直径と靴の長さの二つの物差しの食い違い（後ろからだけ。§5.4）。"""
     if ctx.view != "dtl" or not ctx.ball:
@@ -568,9 +586,9 @@ def _fault_for(it: dict, res: str, extra: dict, part_fault: str | None = None) -
     if part_fault:
         return part_fault
     want = {"out_lo": "lo", "out_hi": "hi"}.get(res)
-    if extra.get("side"):
+    if extra.get("dir"):
         for f in fs:
-            if f["when"] == extra["side"]:
+            if f["when"] == extra["dir"]:
                 return f["id"]
     for f in fs:
         if f["when"] == want:
@@ -741,7 +759,7 @@ def measure_swing(swing: dict, vision: dict | None = None) -> dict:
             r["reason_text"] = REASON_TEXT.get(r["reason"], r["reason"])
     return {
         "catalog_version": version(), "judge_version": config.JUDGE_VERSION, "view": ctx.view, "handedness": ctx.hand,
-        "club_class": cls, "club_number": num, "fps": ctx.fps, "camera": cam, "scale": scale,
+        "club_class": cls, "club_number": num, "fps": ctx.fps, "camera": cam, "scale": scale, "view_check": view_check(ctx),
         "ball": bool(ctx.ball), "items": res,
     }
 

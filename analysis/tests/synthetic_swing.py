@@ -134,14 +134,14 @@ def _fo(p: str, faults: set) -> tuple[dict, dict]:
         e, w = _arm(sh_l, 140.0 if "p3_bent" in faults else 165.0, 110, 110, 268, bend_sign=1)
         pts.update({"left_elbow": e, "left_wrist": w, "right_wrist": (w[0] + 4, w[1] - 4), "right_elbow": (w[0] + 30, w[1] + 20)})
         g = (w[0] - 6, w[1] - 4)
-        taps = {"grip": g, "head": _club(g, 20.0, 160, up=True, toward=-1)}
+        taps = {"grip": g, "head": _club(g, 20.0, 100, up=True, toward=-1)}  # 画面の上に収まる長さ
     elif p == "P4":
         e, w = _arm(sh_l, 155.0, 110, 110, 300, bend_sign=1)
         pts.update({"left_elbow": e, "left_wrist": w})
         tw = (w[0] + 2, w[1] + 2)
         pts.update({"right_elbow": _elbow(sh_r, tw, 115.0, side=-1), "right_wrist": tw})
         g = (w[0] - 4, w[1] - 4)
-        taps = {"grip": g, "head": _club(g, 55.0, 160, up=True, toward=1)}
+        taps = {"grip": g, "head": _club(g, 55.0, 100, up=True, toward=1)}
     elif p == "P5":
         e, w = _arm(sh_l, 165.0, 110, 110, 262, bend_sign=1)
         pts.update({"left_elbow": e, "left_wrist": w, "right_wrist": (w[0] + 4, w[1]), "right_elbow": (w[0] + 34, w[1] + 18)})
@@ -199,6 +199,9 @@ def swing(view: str = "dtl", faults=(), hand: str = "R", club: str = "7 Iron", f
         ball = [[648 - BALL_D / 2, 640], [648 + BALL_D / 2, 640]]
     if hand == "L":
         ball = [[W - x, y] for x, y in ball]
+    for f in frames.values():
+        for x, y in f["taps"].values():
+            assert 0 <= x <= W and 0 <= y <= H, "タップが画面の外"
     return {"view": view, "handedness": hand, "club": club, "fps": fps, "width": W, "height": H, "ball": ball, "frames": frames, "missing": []}
 
 

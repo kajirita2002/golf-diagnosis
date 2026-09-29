@@ -182,6 +182,15 @@ def test_撮り方の直す向きは左打ちでも本物のカメラの向き()
     assert "右へ" in hint(right) and "右へ" in hint(left)
 
 
+def test_構えの形から向きを確かめる():
+    assert cm.measure_swing(syn.swing("dtl"))["view_check"] == {"ok": True, "guess": "dtl", "spread": pytest.approx(0.06, abs=0.05)}
+    assert cm.measure_swing(syn.swing("fo"))["view_check"]["ok"] is True
+    wrong = syn.swing("fo")
+    wrong["view"] = "dtl"
+    v = cm.measure_swing(wrong)["view_check"]
+    assert v["ok"] is False and v["guess"] == "fo"
+
+
 def test_基準の無い番手ではPの項目が参考になる():
     s = states(cm.measure_swing(syn.swing("dtl", club="5 Wood", faults=("p2_inside",))))
     x = s["iron.p2.dtl.head_vs_hands"]

@@ -2,11 +2,12 @@
   圏外でも画面を開き直せるようにする Service Worker（docs/DESIGN_coaching.md §8.7・docs/DESIGN_v2.md §12）。
   - 置くのは画面のファイル（殻・デザインシステム・各画面の JS・アイコン・図）だけ。API（/v1/…）には触らない
     （古い数字を出さない。使う人・ホーム・今日の練習の写しは app.js / home.js / practice.js が localStorage に持つ）。
-  - /vendor/（段2の MediaPipe など）は入れない（大きく、開いたときだけ読む）。
+  - /vendor/（MediaPipe・mp4box。約18MB）は入れない（大きく、開いたときだけ読む。サーバーが immutable で配るので、ブラウザの
+    キャッシュに残る）。video.js と checkpoints.js は入れる（圏外でもコマ選びの画面とチェックの写しが開けるように）。
   - ネットワークを先に使い、届かないときだけ手元の写しを返す（直した画面がすぐ届く）。
 */
-const CACHE = "golf-shell-v2";
-const SHELL = ["./", "index.html", "tokens.css", "icons.svg", "app.js", "home.js", "record.js", "report.js", "practice.js", "progress.js", "settings.js", "figures.js"];
+const CACHE = "golf-shell-v3";
+const SHELL = ["./", "index.html", "tokens.css", "icons.svg", "app.js", "home.js", "record.js", "report.js", "practice.js", "progress.js", "settings.js", "figures.js", "video.js", "checkpoints.js"];
 
 self.addEventListener("install", (ev) => {
   ev.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).catch(() => {}));

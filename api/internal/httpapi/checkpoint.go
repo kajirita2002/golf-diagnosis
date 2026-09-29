@@ -527,6 +527,7 @@ type measureResult struct {
 	CatalogVersion string            `json:"catalog_version"`
 	Camera         json.RawMessage   `json:"camera"`
 	Scale          json.RawMessage   `json:"scale"`
+	ViewCheck      json.RawMessage   `json:"view_check"`
 	Items          []json.RawMessage `json:"items"`
 }
 
@@ -584,7 +585,7 @@ func (s *Server) measureSwing(r *http.Request, sw *model.Swing) (json.RawMessage
 		}
 		checks = append(checks, model.SwingCheck{SwingID: sw.ID, ItemID: h.ID, CatalogVersion: m.CatalogVersion, State: st, FaultID: h.Fault, Basis: h.Basis, Reason: h.Reason, Evidence: it})
 	}
-	meta, _ := json.Marshal(map[string]any{"camera": m.Camera, "scale": m.Scale})
+	meta, _ := json.Marshal(map[string]any{"camera": m.Camera, "scale": m.Scale, "view_check": m.ViewCheck})
 	if err := s.Store.PutSwingChecks(r.Context(), sw.ID, m.CatalogVersion, meta, checks); err != nil {
 		return nil, err
 	}

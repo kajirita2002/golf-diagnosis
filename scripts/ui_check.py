@@ -1032,7 +1032,7 @@ def check_settings(browser, root: str, base: str, pid: int, sid: int, shots_dir:
 
 ROUTES = ["/home", "/record", "/record/2026-09-17", "/session/{sid}", "/session/{sid}/detail", "/session/{sid}/detail?tab=num",
           "/session/{sid}/shots", "/session/{sid}/experiments", "/practice", "/practice/result", "/progress", "/progress?tab=records",
-          "/progress/compare", "/settings"]
+          "/progress/compare", "/settings", "/video/2026-09-17", "/session/{sid}/check", "/guide/dtl", "/guide/fo"]
 
 
 def check_routes(browser, root: str, pid: int, sid: int, shots_dir: str, errors: list[str]) -> None:
@@ -1093,6 +1093,206 @@ def check_narrative(browser, shots_dir: str, errors: list[str]) -> None:
         no_overflow(page, tag, "つなぎの文", errors)
         shot(page, shots_dir, f"{tag}-detail")
         ctx.close()
+
+
+# ============================================================ 4. 動画の P1〜P7（段2a）
+
+SYN = os.path.join(ROOT, "testdata", "synthetic")
+sys.path.insert(0, os.path.join(ROOT, "analysis", "tests"))
+import synthetic_swing as SYNTH  # noqa: E402
+
+FAKE_POSE_JS = """(() => {
+  const POSE = %s;
+  const PS = ["P1", "P2", "P3", "P4", "P5", "P6", "P7"];
+  // 合成の動画は1つの P を 0.5 秒ずつ映す。時刻 → そのコマに写っている P の棒人間の点（MediaPipe の代わり）
+  window.__FAKE_POSE = (m) => { const i = Math.max(0, Math.min(6, Math.floor((m.t + 1e-6) / 0.5))); return POSE[m.view][PS[i]]; };
+})();"""
+
+
+def canvas_click(page, sel: str, x: float, y: float, w: int = SYNTH.W, h: int = SYNTH.H) -> None:
+    box = page.locator(sel).bounding_box()
+    page.mouse.click(box["x"] + x / w * box["width"], box["y"] + y / h * box["height"])
+
+
+def tap_points(page, pts: list[tuple[float, float]], p: str) -> None:
+    # 前のコマの画面が残っているあいだに押さないよう、見出しがそのコマになるのを待つ
+    page.wait_for_selector(f"[data-body] h2:text-matches('^{p} ')", timeout=15000)
+    page.wait_for_selector("[data-stage] canvas.tapimg")
+    for x, y in pts:
+        canvas_click(page, "[data-stage] canvas.tapimg", x, y)
+    page.click("[data-done]")
+
+
+def seed_swings(base: str, sid: int, n: int, faults=("p2_inside",)) -> None:
+    """同じ記録に、API で合成のスイングを足す（画面で選ぶのと同じ口）。"""
+    for _ in range(n):
+        sw = SYNTH.swing("dtl", faults=faults)
+        s = call("POST", f"{base}/sessions/{sid}/swings", {"view": "dtl", "club": "7 Iron", "club_class": "iron", "fps": 60, "fps_source": "container",
+                                                            "width": SYNTH.W, "height": SYNTH.H, "ball": sw["ball"]})
+        frames = [{"checkpoint": p, "t": f["t"], "frame": int(f["t"] * 60), "landmarks": f["landmarks"], "taps": f["taps"]} for p, f in sw["frames"].items()]
+        call("PUT", f"{base}/swings/{s['id']}/frames", {"frames": frames, "missing": []})
+
+
+def check_video(browser, root: str, base: str, pid: int, shots_dir: str, errors: list[str]) -> None:
+    """合成の棒人間の動画で: 向きと番手 → P1〜P7 を手で選ぶ → ボールとクラブのタップ（拡大鏡・1画素のボタン）→ チェック一覧・項目1つ。"""
+    tag = "video"
+    ses = call("POST", f"{base}/sessions", {"player_id": pid, "date": "2026-09-28", "location": "練習場"})
+    sid = ses["id"]
+    ctx, page = new_page(browser, 390, 844, errors, tag, pid)
+    pose = SYNTH.pose_json()
+    ctx.add_init_script(FAKE_POSE_JS % json.dumps({"dtl": pose["dtl"], "fo": pose["fo"]}))
+    sent: list[tuple[str, str, int]] = []
+    page.on("request", lambda r: sent.append((r.method, r.url, len(r.post_data_buffer or b""))) if r.method in ("POST", "PUT", "PATCH") else None)
+    # 記録の画面から入る（入れ先の記録を渡す）
+    goto(page, root, "/record/2026-09-28", "[data-video]")
+    href = page.get_attribute("[data-video]", "href")
+    if f"session={sid}" not in (href or ""):
+        errors.append(f"[{tag}] 記録の「動画を入れる」が入れ先の記録を渡さない: {href}")
+    shot(page, shots_dir, f"{tag}-record")
+    page.click("[data-video]")
+    page.wait_for_selector("[data-file]", state="attached")
+    no_overflow(page, tag, "向きと番手", errors)
+    targets(page, tag, "向きと番手", errors)
+    shot(page, shots_dir, f"{tag}-1-setup")
+    page.set_input_files("[data-file]", os.path.join(SYN, "stick_dtl.webm"))
+    page.wait_for_selector("[data-vframe] video", timeout=30000)
+    chips = page.locator("[data-pchips] .pchip")
+    need = ["P1", "P2", "P3", "P4", "P5", "P6", "P7"]
+    got = [c.get_attribute("data-p") for c in chips.all()]
+    if got[:7] != need:
+        errors.append(f"[{tag}] P1〜P7 のチップが7つ並ばない: {got}")
+    if page.locator("[data-pinfo] svg").count() != 1:
+        errors.append(f"[{tag}] 見本の線画が出ない")
+    no_overflow(page, tag, "P を選ぶ", errors)
+    targets(page, tag, "P を選ぶ", errors)
+    shot(page, shots_dir, f"{tag}-2-choose")
+    for i in range(7):
+        page.click("[data-ok]")
+        if i < 6:
+            page.click('[data-mv="+0.5s"]')
+            page.wait_for_timeout(120)
+    page.wait_for_selector("[data-go-taps]")
+    done = page.locator("[data-pchips] .pchip.done").count()
+    if done != 7:
+        errors.append(f"[{tag}] 選んだ P が7つにならない: {done}")
+    page.click("[data-go-taps]")
+    # ボールの両端: 拡大鏡が出て、1画素のボタンで動かせる
+    page.wait_for_selector("[data-stage] canvas.tapimg")
+    box = page.locator("[data-stage] canvas.tapimg").bounding_box()
+    bx, by = SYNTH.pose_json()["dtl_ball"][0]
+    page.mouse.move(box["x"] + bx / SYNTH.W * box["width"], box["y"] + by / SYNTH.H * box["height"])
+    page.mouse.down()
+    if page.locator("[data-loupe]").is_hidden():
+        errors.append(f"[{tag}] 押しているあいだ拡大鏡が出ない")
+    shot(page, shots_dir, f"{tag}-3-loupe", full=False)
+    page.mouse.up()
+    pts = json.loads(page.get_attribute("[data-body]", "data-pts") or "{}")
+    before = pts.get("b1")
+    page.click("[data-sel] [data-pi='0']")
+    page.click('[data-nd="1,0"]')
+    pts = json.loads(page.get_attribute("[data-body]", "data-pts") or "{}")
+    if not before or not pts.get("b1") or pts["b1"][0] != before[0] + 1 or pts["b1"][1] != before[1]:
+        errors.append(f"[{tag}] 1画素のボタンで点が動かない: {before} → {pts.get('b1')}")
+    page.click('[data-nd="-1,0"]')
+    targets(page, tag, "タップ", errors)
+    no_overflow(page, tag, "タップ", errors)
+    page.click("[data-sel] [data-pi='1']")
+    b2 = SYNTH.pose_json()["dtl_ball"][1]
+    canvas_click(page, "[data-stage] canvas.tapimg", b2[0], b2[1])
+    shot(page, shots_dir, f"{tag}-3-ball")
+    page.click("[data-done]")
+    taps = SYNTH.pose_json()["dtl_taps"]
+    tap_points(page, [taps["P2"]["grip"], taps["P2"]["head"]], "P2")
+    page.wait_for_selector("[data-more]")
+    page.click("[data-more]")
+    for p in ("P1", "P3", "P4", "P5", "P6", "P7"):
+        tap_points(page, [taps[p]["grip"], taps[p]["head"]], p)
+    page.wait_for_function(f"location.hash === '#/session/{sid}/check'", timeout=60000)
+    page.wait_for_selector("[data-summary]", timeout=30000)
+    page.wait_for_load_state("networkidle")
+    # 送ったもの: 動画そのものは送らない（大きな送信が無い）。全解像度のコマも送らない（Go が長辺 360px を超える画像を断る）
+    big = [x for x in sent if x[2] > 3 * 1024 * 1024]
+    if big:
+        errors.append(f"[{tag}] 大きな送信がある（動画を送っていないか）: {big}")
+    sw = call("GET", f"{base}/sessions/{sid}/swings")[0]
+    if not (55 <= (sw.get("fps") or 0) <= 65) or sw.get("fps_source") != "playback":
+        errors.append(f"[{tag}] 再生して測った fps が合わない: {sw.get('fps')} {sw.get('fps_source')}")
+    if "perf" not in (sw.get("capture") or {}) or "pose_ms_per_frame" not in sw["capture"]["perf"]:
+        errors.append(f"[{tag}] 処理の時間を残していない: {sw.get('capture')}")
+    one = call("GET", f"{base}/swings/{sw['id']}")
+    fr = {f["checkpoint"]: f for f in one["frames"]}
+    if sorted(fr) != sorted(need) or not all(fr[p]["has_thumb"] and len(fr[p]["landmarks"]) == 33 for p in need):
+        errors.append(f"[{tag}] P1〜P7 のコマ・点・サムネイルが揃わない: {sorted(fr)}")
+    if abs(fr["P2"]["taps"]["head"][0] - taps["P2"]["head"][0]) > 3:
+        errors.append(f"[{tag}] P2 のクラブの先のタップがずれて届いた: {fr['P2']['taps']}")
+    # チェック一覧（1本だけ）: まずここは出さず、理由を書く。P のチップ7つ。範囲の中は畳む
+    if page.locator("[data-pstrip] [data-pchip]").count() != 7:
+        errors.append(f"[{tag}] チェックの P のチップが7つでない")
+    if not page.locator("[data-nofocus]").count() or "一本だけ" not in page.inner_text("[data-nofocus]"):
+        errors.append(f"[{tag}] 一本だけのときに、課題にしない理由が出ない")
+    if page.locator("details[data-fold=in][open]").count():
+        errors.append(f"[{tag}] 範囲の中が畳まれていない")
+    unk = page.inner_text("details[data-fold=unknown] > summary")
+    if "見た目の評価はまだ" not in unk or "正面から撮ると見られます" not in unk:
+        errors.append(f"[{tag}] 判断できないの理由の束ねが違う: {unk}")
+    plain_first(page, "#view", tag, "チェック一覧（1本）", errors)
+    no_overflow(page, tag, "チェック一覧", errors)
+    targets(page, tag, "チェック一覧", errors)
+    shot(page, shots_dir, f"{tag}-4-check-one")
+    # 同じ記録に2本足す（多数で決め、課題を一つ選ぶ）
+    seed_swings(base, sid, 2)
+    page.reload()
+    page.wait_for_selector("[data-card=focus]", timeout=30000)
+    if page.get_attribute("[data-card=focus]", "data-item") != "iron.p2.dtl.head_vs_hands":
+        errors.append(f"[{tag}] まずここが P2 のクラブの先にならない: {page.get_attribute('[data-card=focus]', 'data-item')}")
+    if "クラブが体の内側に引かれています" not in page.inner_text("[data-card=focus]"):
+        errors.append(f"[{tag}] まずここの文が違う")
+    if page.locator("[data-card=focus] img").count() != 1:
+        errors.append(f"[{tag}] まずここにコマの写真が無い")
+    plain_first(page, "#view", tag, "チェック一覧（3本）", errors)
+    no_overflow(page, tag, "チェック一覧（3本）", errors)
+    shot(page, shots_dir, f"{tag}-5-check-focus")
+    page.click("[data-card=focus]")
+    page.wait_for_selector("[data-why]")
+    plain_first(page, "#view", tag, "項目1つ", errors)
+    targets(page, tag, "項目1つ", errors)
+    shot(page, shots_dir, f"{tag}-6-item")
+    page.click("[data-why]")
+    page.wait_for_selector(".sheet[data-sheet=why]")
+    txt = page.inner_text(".sheet[data-sheet=why]")
+    for need_txt in ("p38-52", "3本中3本が範囲の外", "スイングの前半ほど", "代わりの点", "まだ人がガイドと突き合わせていません"):
+        if need_txt not in txt:
+            errors.append(f"[{tag}] なぜそう言える？に {need_txt!r} が無い: {txt[:200]!r}")
+    page.click(".sheet[data-sheet=why] [data-numbers] > summary")
+    if "誤差" not in page.inner_text(".sheet[data-sheet=why]"):
+        errors.append(f"[{tag}] 数字を見るに誤差が無い")
+    shot(page, shots_dir, f"{tag}-7-why")
+    page.keyboard.press("Escape")
+    page.wait_for_selector(".sheet", state="detached")
+    # 撮り方ガイド
+    goto(page, root, "/guide/dtl", "[data-other]")
+    page.wait_for_function("document.querySelector('[data-other]').textContent.includes('件')", timeout=15000)
+    shot(page, shots_dir, f"{tag}-8-guide")
+    ctx.close()
+    # ファイルの中の fps（mp4 の moov が末尾）: mp4box で 240 と読む
+    ctx, page = new_page(browser, 390, 844, errors, tag + "-mp4", pid)
+    goto(page, root, "/record")
+    import base64 as _b64
+    data = _b64.b64encode(open(os.path.join(SYN, "stick_dtl_240.mp4"), "rb").read()).decode()
+    info = page.evaluate("""async (d) => { const b = Uint8Array.from(atob(d), (c) => c.charCodeAt(0));
+      return await Video.containerInfo(new File([b], 'swing.mp4', {type: 'video/mp4'})); }""", data)
+    if not info or abs(info.get("fps", 0) - 240) > 1 or info.get("samples", 0) < 100:
+        errors.append(f"[{tag}] mp4 の fps を読めない: {info}")
+    # 同梱の MediaPipe が読めて動く（白いコマなので人は見つからない＝ found が false で成功）
+    try:
+        r = page.evaluate("Video.selfTest()")
+        if not r or r.get("found"):
+            errors.append(f"[{tag}] MediaPipe の自己確認: {r}")
+        else:
+            print("MediaPipe:", r)
+    except Exception as e:  # noqa: BLE001
+        errors.append(f"[{tag}] 同梱の MediaPipe が動かない: {e}")
+    ctx.close()
 
 
 def tiny_png() -> bytes:
@@ -1162,6 +1362,7 @@ def main() -> None:
         check_detail(page, sv.root, sv.base, lefty_id, shots_dir, "phone-L", errors, hand="L")
         ctx.close()
         check_settings(browser, sv.root, sv.base, me["id"], real_id, shots_dir, errors)
+        check_video(browser, sv.root, sv.base, me["id"], shots_dir, errors)
         check_routes(browser, sv.root, me["id"], real_id, shots_dir, errors)
         check_narrative(browser, shots_dir, errors)
         browser.close()

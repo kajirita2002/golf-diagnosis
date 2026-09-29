@@ -139,7 +139,8 @@ const Report = (() => {
     const links = `<ul class="navlist block">
       ${App.navItem(`#/session/${sid}/detail${query.scope ? "?scope=" + encodeURIComponent(query.scope) : ""}`, "球の散らばり・くわしい解説", "図と数字")}
       ${App.navItem(`#/session/${sid}/shots`, "一球ずつ", "除外・当たった場所の入力も")}
-      ${App.navItem(`#/session/${sid}/experiments`, "一回だけの実験", "仮説とブロックを自分で決める")}</ul>`;
+      ${App.navItem(`#/session/${sid}/experiments`, "一回だけの実験", "仮説とブロックを自分で決める")}
+      ${App.navItem(`#/session/${sid}/check`, "動画のチェック", "ガイドの基準で動きを見る", `data-link="check"`)}</ul>`;
     if (!r.available || !r.report) {
       // 理由の文（サーバー）と同じことを2回言わない。こちらの1文だけにし、サーバーの文は「くわしく」に畳む
       body.innerHTML = `<div class="note warn" data-report-unavailable><p style="margin:0">分析のサービスが止まっているので、解説は出せません。一球ずつの分解は見られます。</p>

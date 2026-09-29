@@ -299,3 +299,6 @@ CP_IRON_CLASS = {"long_iron": (3, 4, 5), "mid_iron": (6, 7), "short_iron": (8, 9
 # 課題の候補にする条件（§4.4）: 測れた項目は何本以上の多数、見た目は何本以上の一致
 CP_FOCUS_MIN_MEASURED = 3
 CP_FOCUS_MIN_VISUAL = 2
+# 構えの両肩の横の開き（胴の長さとの比）で向きを確かめる（§6.1）。これ以上なら正面、これ以下なら後ろ（仮・要較正）
+CP_VIEW_FO_SPREAD = 0.45
+CP_VIEW_DTL_SPREAD = 0.25

@@ -142,6 +142,8 @@ const Record = (() => {
         <p class="caption" data-trig-note hidden>プランのきっかけの診断の記録です。練習の球はここに入れず、新しい記録として入れてください（混ぜると診断が変わり、練習としても記録できません）。</p></div>
       <label class="field" data-loc-wrap><span>場所（任意）</span><input data-loc placeholder="例: 練習場" autocomplete="off"></label>
       <p class="caption" data-loc-fixed hidden></p>
+      <a class="card vidcard block" data-video href="#/video/${esc(date)}">${icon("video")}<span class="grow1"><b>動画を入れる</b>
+        <span class="caption">後ろから・正面から。端末の中で処理し、送りません</span></span>${icon("chevron-right", "chev")}</a>
       <section class="card block" aria-labelledby="h-tm">
         <h2 id="h-tm">${canRead ? "TrackMan のスクショ" : "TrackMan の表を入れる"}</h2>
         ${shotPart}
@@ -218,6 +220,9 @@ const Record = (() => {
     fixed.textContent = cur ? `場所: ${cur.location || "（書いていません）"}（場所は新しい記録を作るときに入れます）` : "";
     const note = $("[data-trig-note]", el);
     if (note) note.hidden = !(a.trig && t === a.trig);
+    // 動画も同じ入れ先へ（新しい記録なら、動画を送るときに作る）
+    const vid = $("[data-video]", el);
+    if (vid) vid.setAttribute("href", `#/video/${a.date}${t !== "new" ? `?session=${t}` : ""}`);
   }
 
   function renderDay(el, onDay) {
@@ -226,7 +231,18 @@ const Record = (() => {
     box.innerHTML = withShots.length ? `<ul class="navlist">${withShots.map((s) => App.navItem(`#/session/${s.id}`,
       `${s.location ? esc(s.location) + "・" : ""}${lab("count", s.n_shots + "球")}`,
       (s.clubs || []).map((c) => `${esc(App.clubJa(c.club))} ${c.n}`).join("・"), `data-day-session="${s.id}"`)).join("")}</ul>`
-      : `<p class="sub">まだ何も入っていません。</p>`;
+      : `<p class="sub" data-day-empty>まだ何も入っていません。</p>`;
+    // 動画のスイング（記録ごとに数を出し、チェックへ）
+    Promise.all(onDay.map((s) => api("GET", `/v1/sessions/${s.id}/swings`).then((ws) => [s, ws]).catch(() => [s, []]))).then((rows) => {
+      if (!box.isConnected) return;
+      const vids = rows.filter(([, ws]) => ws.length);
+      if (!vids.length) return;
+      const empty = $("[data-day-empty]", box);
+      if (empty) empty.remove();
+      const views = (ws) => [...new Set(ws.map((w) => (w.view === "fo" ? "正面から" : "後ろから")))].join("と");
+      box.insertAdjacentHTML("beforeend", `<ul class="navlist" style="margin-top:var(--s2)">${vids.map(([s, ws]) => App.navItem(`#/session/${s.id}/check`,
+        `動画 ${views(ws)} ${lab("count", ws.length + "本")}`, "チェック（ガイドの基準で動きを見る）", `data-day-video="${s.id}"`)).join("")}</ul>`);
+    });
     const pw = $("[data-primary-wrap]", el);
     const a = active;
     if (a && a.fromPractice) pw.innerHTML = `<a class="btn primary block" data-primary href="#/practice/result">練習の結果へ戻る</a>`;

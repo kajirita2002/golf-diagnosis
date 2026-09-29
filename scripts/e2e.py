@@ -545,8 +545,56 @@ def run_home(base: str) -> None:
     print("OK（ホーム）")
 
 
+def run_video(base: str) -> None:
+    """動画のチェックポイント（docs/DESIGN_v2.md §6・段2a）を、合成の棒人間の姿勢で API から通す。
+
+    後ろから3本（P2 のクラブの先が内側）→ 多数で範囲の外 → まずここが P2 のクラブの先。
+    正面から1本（P3 の {lead} 腕が曲がる）→ 1本だけの見立てなので課題にしない。左打ちでも同じ判定。
+    長辺 360px を超えるサムネイルは断られ、DB に入らない。"""
+    sys.path.insert(0, os.path.join(ROOT, "analysis", "tests"))
+    import synthetic_swing as syn
+
+    def put(pid_hand: str, view: str, faults, n: int) -> int:
+        me = call("POST", f"{base}/players", {"name": f"video-{pid_hand}", "handedness": pid_hand})
+        se = call("POST", f"{base}/sessions", {"player_id": me["id"], "date": "2026-09-29"})
+        for _ in range(n):
+            sw = syn.swing(view, faults=faults, hand=pid_hand)
+            s = call("POST", f"{base}/sessions/{se['id']}/swings", {"view": view, "club": "7 Iron", "club_class": "iron", "fps": 240, "fps_source": "container",
+                                                                    "width": syn.W, "height": syn.H, "ball": sw["ball"]})
+            frames = [{"checkpoint": p, "t": f["t"], "frame": int(f["t"] * 240), "landmarks": f["landmarks"], "taps": f["taps"]} for p, f in sw["frames"].items()]
+            out = call("PUT", f"{base}/swings/{s['id']}/frames", {"frames": frames, "missing": []})
+            assert out["measure"]["camera"]["ok"] is True, out["measure"]["camera"]
+        return se["id"]
+
+    for hand in ("R", "L"):
+        sid = put(hand, "dtl", ("p2_inside",), 3)
+        c = call("GET", f"{base}/sessions/{sid}/checks")["checks"]
+        assert c["focus"] == "iron.p2.dtl.head_vs_hands", c["focus"]
+        f = next(x for x in c["items"] if x["id"] == c["focus"])
+        assert f["n_out"] == 3 and f["fault"] == "inside" and f["basis"] == "measured_tap", f
+        assert "左" not in f["title"] and "右" not in f["title"]
+        assert c["counts"]["judged"] == c["counts"]["in_range"] + c["counts"]["out_range"]
+        assert all(x["state"] != "out_range" or x["id"] != "err.steep.p6" for x in c["items"])  # 束ねた項目は一覧に出ない
+    sid = put("R", "fo", ("p3_bent",), 1)
+    c = call("GET", f"{base}/sessions/{sid}/checks")["checks"]
+    arm = next(x for x in c["items"] if x["id"] == "iron.p3.fo.lead_arm")
+    assert arm["state"] == "out_range" and arm["single"] and c["focus"] is None, (arm["state"], arm["single"], c["focus"])
+    assert "左腕" in arm["title"]
+    # 全解像度のコマは受けない（Go が長辺 360px を超える JPEG を断る）
+    sw = call("GET", f"{base}/sessions/{sid}/swings")[0]
+    big_jpeg = bytes.fromhex("ffd8ffe000104a46494600010100000100010000ffc00011080400050003012200021101031101ffd9")  # 1280×1024 と名乗る JPEG の見出し
+    import base64
+    try:
+        call("PUT", f"{base}/swings/{sw['id']}/frames", {"frames": [{"checkpoint": "P1", "thumb": base64.b64encode(big_jpeg).decode()}]})
+        raise AssertionError("長辺 360px を超える画像を受けてしまった")
+    except urllib.error.HTTPError as e:
+        assert e.code == 400, e.code
+    print("OK（動画のチェックポイント）")
+
+
 def main() -> None:
     with Services() as sv:
+        run_video(sv.base)
         run_home(sv.base)
         run(sv.base)
         run_real(sv.base)
