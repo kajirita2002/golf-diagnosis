@@ -10,8 +10,11 @@
    自動では外さない ―― 外すかどうかは人が決める。ばらつきの要因分析だけは候補を除いて計算する
    （4番ユーティリティのキャリー 12m・スピン軸 -100° の1球で回帰が壊れた。2026-09-17 の実データ）。
    極端なヒール・トゥの当たりは候補にしない。それ自体が直すべきミスだから（トップは除く）。
+   平均と SD（variability）と profile の l1 も候補を除く（R6。外した数を必ず出す）。
 6. 同じ種類のクラブが2本以上あればまとめても見る（groups）。1本ずつだと球が足りないことが多い。
    番手で飛距離が違うので、まとめたときの左右は「キャリーに対する割合」で見る。
+7. 範囲ごとに profile（傾向・L1 の偏りとばらつき・打点・欠け・帯…）を、セッションに
+   cross_club と帯の係数 k を足す（docs/DESIGN_coaching.md §5.1・§5.2）。/analysis の形は足すだけ。
 """
 
 from __future__ import annotations
@@ -21,7 +24,9 @@ from statistics import median
 
 import numpy as np
 
+from . import band as band_mod
 from . import config, stats
+from . import profile as profile_mod
 
 
 def _m(shot: dict, key: str):
@@ -87,7 +92,8 @@ def _drivers(shots: list[dict], outcome: str = "side", skip: set | None = None) 
     y = np.array([y_of(s) for s in rows], dtype=float)
     X = np.array([[_m(s, p) for p in predictors] for s in rows], dtype=float)
     res = stats.ols_contributions(y, X, predictors)
-    return {"status": "ok", "n": len(rows), **base, **res}
+    r2_single = {p: stats.simple_r2(y, X[:, j]) for j, p in enumerate(predictors)}
+    return {"status": "ok", "n": len(rows), **base, **res, "r2_single": {k: v for k, v in r2_single.items() if v is not None}}
 
 
 def _dec(s: dict) -> dict:
@@ -172,7 +178,13 @@ def _findings(club: str, shots: list[dict], drivers: dict, scope: str = "club") 
                     "of": len(shots),
                     "mean_abs_side": mean_abs_side(ext),
                     "mean_abs_side_others": mean_abs_side(rest),
-                    "no_club_data": sum(1 for s in ext if "no_club_data" in (_dec(s).get("flags") or []) or _m(s, "face_angle") is None),
+                    # フェースが無い球と、パスも無い球を分けて数える（フラグの no_club_data は
+                    # 4項目すべてが欠けたときだけ立つので使わない。実データの極端なヒールは
+                    # フェースが無い4球のすべてでパスが取れていた）。
+                    "no_face": sum(1 for s in ext if _m(s, "face_angle") is None),
+                    "no_face_and_path": sum(1 for s in ext if _m(s, "face_angle") is None and _m(s, "club_path") is None),
+                    # 旧名（analysis/0.2 まで）。中身は no_face と同じ。画面を直したら消す
+                    "no_club_data": sum(1 for s in ext if _m(s, "face_angle") is None),
                 },
                 "strength": "strong" if len(ext) >= 3 else "moderate",
                 "shot_ids": [s["id"] for s in ext],
@@ -180,18 +192,30 @@ def _findings(club: str, shots: list[dict], drivers: dict, scope: str = "club") 
         )
 
     if drivers.get("status") == "ok" and drivers["contributions"]:
-        top = drivers["contributions"][0]
-        if top["share"] >= 0.5 and drivers["r2"] >= 0.5:
+        # 説明の割合は単回帰の R² だけで言う（R4）。share は R² の落ち幅を配ったもので、
+        # 分散の割合ではない（「ばらつきの98%はフェース」は読み違いだった）。
+        singles = drivers.get("r2_single") or {}
+        best = max(singles, key=lambda k: singles[k], default=None)
+        if best is not None and singles[best] >= 0.5:
+            share = next((c["share"] for c in drivers["contributions"] if c["metric"] == best), None)
             add(
                 {
                     "kind": "dispersion_driver",
-                    "metric": top["metric"],
+                    "metric": best,
                     "outcome": drivers["outcome"],
-                    "evidence": {"share": top["share"], "r2": drivers["r2"], "n": drivers["n"]},
-                    "strength": "strong" if top["share"] >= 0.7 else "moderate",
+                    "evidence": {"r2_single": singles[best], "r2": drivers["r2"], "n": drivers["n"], "share": share},
+                    "strength": "strong" if singles[best] >= 0.7 else "moderate",
                 }
             )
+    for f in out:
+        f["id"] = _finding_id(f)
     return out
+
+
+def _finding_id(f: dict) -> str:
+    """"{scope}:{club}:{kind}[:{detail}]"。定型文が根拠を指すための名前。"""
+    detail = f.get("cause") or f.get("contact") or f.get("metric") or f.get("field") or f.get("what")
+    return ":".join(str(x) for x in (f["scope"], f["club"], f["kind"], detail) if x)
 
 
 def _flight_groups(shots: list[dict]) -> list[dict]:
@@ -205,12 +229,17 @@ def _flight_groups(shots: list[dict]) -> list[dict]:
     ]
 
 
-def _variability(shots: list[dict]) -> dict:
+def _variability(shots: list[dict], skip: set | None = None) -> dict:
+    """L1 の平均と SD。ミスヒットの候補を除き、除いた数を添える（R6）。"""
+    skip = skip or set()
+    use = [s for s in shots if s["id"] not in skip]
     out = {}
     for key in config.L1_METRICS:
-        vals = [_m(s, key) for s in shots if _m(s, key) is not None]
+        vals = [_m(s, key) for s in use if _m(s, key) is not None]
         if vals:
-            out[key] = stats.describe(vals)
+            d = stats.describe(vals)
+            d["mishit_excluded"] = sum(1 for s in shots if s["id"] in skip and _m(s, key) is not None)
+            out[key] = d
     return out
 
 
@@ -252,7 +281,7 @@ def analyze_session(shots: list[dict]) -> dict:
                 "good": {"n_good": n_good, "targets": config.GOOD_TARGETS.get(category, config.DEFAULT_TARGET), "shots": judged},
                 "mishit_candidates": candidates,
                 "flight_groups": _flight_groups(cs),
-                "variability": _variability(cs),
+                "variability": _variability(cs, skip),
                 "dispersion_drivers": drivers,
             }
         )
@@ -260,6 +289,7 @@ def analyze_session(shots: list[dict]) -> dict:
         if candidates:
             findings.append(
                 {
+                    "id": f"club:{club}:mishit_candidates",
                     "club": club,
                     "scope": "club",
                     "kind": "mishit_candidates",
@@ -283,11 +313,47 @@ def analyze_session(shots: list[dict]) -> dict:
                 "clubs": names,
                 "n": len(gs),
                 "flight_groups": _flight_groups(gs),
-                "variability": _variability(gs),
+                "variability": _variability(gs, all_candidates),
                 "dispersion_drivers": drivers,
             }
         )
         findings.extend(_findings(label, gs, drivers, scope="group"))
+
+    # ---- 帯の係数（種類ごと → 使える種類でまとめる）と、範囲ごとの profile ----
+    carry_medians = {c["club"]: c["carry_median"] for c in clubs}
+    bands = band_mod.fit_bands(by_club, all_candidates, carry_medians)
+    good_by_id = {j["id"]: j for c in clubs for j in c["good"]["shots"]}
+    for g in groups:
+        gs = [s for n in g["clubs"] for s in by_club[n]]
+        g["scope_id"] = f"group:{g['club_category']}"
+        g["profile"] = profile_mod.build_profile(
+            gs, scope="group", scope_id=g["scope_id"], category=g["club_category"], skip=all_candidates,
+            good_by_id=good_by_id, bands=bands, carry_medians=carry_medians, drivers=g["dispersion_drivers"],
+        )
+    for c in clubs:
+        cs = by_club[c["club"]]
+        c["scope_id"] = f"club:{c['club']}"
+        c["profile"] = profile_mod.build_profile(
+            cs, scope="club", scope_id=c["scope_id"], category=c["club_category"],
+            skip={x["id"] for x in c["mishit_candidates"]}, good_by_id=good_by_id, bands=bands,
+            carry_medians=carry_medians, drivers=c["dispersion_drivers"],
+        )
+    # 「フェースの値は計測器の計算かも」（R8）は、まとめ（または1本だけの種類）で1回だけ出す
+    for unit in profile_mod.cross_units(clubs, groups):
+        lr = unit["profile"].get("launch_residual_sd")
+        if lr and lr["n"] >= config.MIN_SCOPE_N and lr["value"] < config.LAUNCH_RESID_INFO_DEG:
+            name = unit.get("name") or unit.get("club")
+            scope = "group" if "name" in unit else "club"
+            findings.append(
+                {
+                    "id": f"{scope}:{name}:face_maybe_computed",
+                    "club": name,
+                    "scope": scope,
+                    "kind": "face_maybe_computed",
+                    "evidence": {"launch_residual_sd": lr["value"], "n": lr["n"]},
+                    "strength": "info",
+                }
+            )
 
     return {
         "engine_version": config.ENGINE_VERSION,
@@ -296,4 +362,6 @@ def analyze_session(shots: list[dict]) -> dict:
         "clubs": clubs,
         "groups": groups,
         "findings": findings,
+        "bands": bands,
+        "cross_club": profile_mod.cross_club(clubs, groups),
     }

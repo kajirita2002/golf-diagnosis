@@ -10,6 +10,9 @@
   - 26〜30 のうち4球以上が「打点が原因」
   - 分析の findings に打点の話が出る
   - 前日と比べて、スピン軸の変化の説明にフェース・トゥ・パスが入る
+  - 解説（/report）の「次にやること」のステップ1が打点に**ならない**
+    （26〜30球目のヒールは 14〜19mm で、極端なヒール（30mm 超）ではない。docs/DESIGN_coaching.md §11）
+実データ（run_real）では、解説の範囲が2つ以上あり、アイアンの窓が −1.9°〜+2.1° になることも見る。
 
 使い方: python3 scripts/e2e.py（リポジトリの直下で）
 """
@@ -166,7 +169,19 @@ def run(base: str) -> None:
     ev = call("GET", f"{base}/experiments/{ex['id']}/evaluation")
     print("実験の評価:", json.dumps({k: ev[k] for k in ("intervention_vs_baseline", "retention_vs_baseline")}, ensure_ascii=False))
 
+    rep = call("GET", f"{base}/sessions/{sid}/report")
+    mains = [x for x in (rep.get("report") or {}).get("scopes", []) if x["kind"] == "main"]
+    steps1 = {x["scope_id"]: x["candidates"].get("now") for x in mains}
+    print("解説のステップ1:", steps1)
+
     errors = []
+    if not rep.get("available"):
+        errors.append(f"解説が出ない: {rep.get('reason')}")
+    elif not mains:
+        errors.append("解説に本体の範囲が無い")
+    for scope_id, now in steps1.items():
+        if now and now.startswith("strike_"):
+            errors.append(f"{scope_id} のステップ1が打点（{now}）になった。26〜30球目は極端なヒールではない")
     if ev["intervention_vs_baseline"]["grade"] not in ("strong", "moderate"):
         errors.append(f"介入の判定が {ev['intervention_vs_baseline']['grade']}")
     if heel.count("strike") < 4:
@@ -221,6 +236,23 @@ def run_real(base: str) -> None:
     print("ミスヒットの候補:", cands)
     if "4 Hybrid #4" not in cands:
         errors.append("4番ユーティリティの4球目（キャリー12m）が候補に出ない")
+
+    # 解説（/report）: 範囲が2つ以上・アイアンの帯の形（Go）が付いている・ステップ1が打点
+    rep = call("GET", f"{base}/sessions/{s['id']}/report")
+    scopes = (rep.get("report") or {}).get("scopes", [])
+    print("解説の範囲:", [(x["scope_id"], x["kind"]) for x in scopes])
+    if not rep.get("available"):
+        errors.append(f"実データで解説が出ない: {rep.get('reason')}")
+    if len(scopes) < 2 or len([x for x in scopes if x["kind"] == "main"]) < 2:
+        errors.append(f"実データの解説の範囲が2つ以上ない: {len(scopes)}")
+    iron = next((x for x in scopes if x["scope_id"] == "group:iron"), None)
+    win = ((iron or {}).get("band_shape") or {}).get("window") or {}
+    if not win.get("ok") or abs(win.get("face_min", 99) + 1.9) > 0.2 or abs(win.get("face_max", 99) - 2.1) > 0.2:
+        errors.append(f"アイアンの窓が −1.9°〜+2.1° にならない: {win}")
+    if iron and iron["candidates"].get("now") != "strike_heel":
+        errors.append(f"アイアンのステップ1が打点（strike_heel）にならない: {iron['candidates'].get('now')}")
+    if len(rep.get("shots") or []) != 57:
+        errors.append(f"解説の応答の分解が57球でない: {len(rep.get('shots') or [])}")
     if errors:
         sys.exit("失敗（実データ）: " + " / ".join(errors))
     print("OK（実データ）")

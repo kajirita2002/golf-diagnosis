@@ -89,3 +89,49 @@ def describe(values: list[float]) -> dict:
     if arr.size >= 2:
         out["sd"] = float(arr.std(ddof=1))
     return out
+
+
+def bootstrap_mean_ci(values, n: int = config.BOOTSTRAP_N) -> tuple[float, float] | None:
+    """平均の 95% 区間（復元抽出を1回の2次元の添字でまとめて引く）。
+
+    5000回のループを指標×範囲の数だけ回すと、CPU 0.1 の環境では十数秒になりうるので
+    ベクトル化した（docs/DESIGN_coaching.md §5.1）。乱数の引き方は analysis/0.2 と違う。
+    区間は「今日の球では〜に偏っていた」とだけ言う（球どうしが独立でないと狭く出る）。
+    """
+    v = np.asarray(values, dtype=float)
+    if v.size < 2:
+        return None
+    rng = np.random.default_rng(config.SEED)
+    means = v[rng.integers(0, v.size, size=(n, v.size))].mean(axis=1)
+    lo, hi = np.percentile(means, [2.5, 97.5])
+    return float(lo), float(hi)
+
+
+def pearson(x, y) -> float | None:
+    x, y = np.asarray(x, dtype=float), np.asarray(y, dtype=float)
+    if x.size < 3 or x.std() == 0 or y.std() == 0:
+        return None
+    return float(np.corrcoef(x, y)[0, 1])
+
+
+def fisher_ci(r: float, n: int) -> tuple[float, float] | None:
+    """相関係数の 95% 区間（Fisher の z 変換）。"""
+    if n < 4 or r is None or abs(r) >= 1:
+        return None
+    z = np.arctanh(r)
+    se = 1 / np.sqrt(n - 3)
+    return float(np.tanh(z - 1.96 * se)), float(np.tanh(z + 1.96 * se))
+
+
+def simple_r2(y, x) -> float | None:
+    """単回帰の決定係数（＝相関の2乗）。説明の割合はこれだけを使う（R4）。"""
+    r = pearson(x, y)
+    return None if r is None else r * r
+
+
+def ols_coef(y, X) -> list[float]:
+    """切片つきの重回帰の生の係数（切片は返さない）。"""
+    X = np.asarray(X, dtype=float)
+    A = np.column_stack([X, np.ones(len(y))])
+    coef, *_ = np.linalg.lstsq(A, np.asarray(y, dtype=float), rcond=None)
+    return [float(c) for c in coef[:-1]]

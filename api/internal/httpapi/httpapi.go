@@ -28,6 +28,7 @@ const MaxUploadBytes = 10 << 20
 // Analyzer は分析サービス。テストでは偽物に差し替える。
 type Analyzer interface {
 	Session(ctx context.Context, shots []analysis.ShotPayload) (json.RawMessage, error)
+	Report(ctx context.Context, in analysis.ReportInput) (json.RawMessage, error)
 	Experiment(ctx context.Context, e *model.Experiment, blocks []analysis.BlockPayload) (json.RawMessage, error)
 	Compare(ctx context.Context, a, b []analysis.ShotPayload) (json.RawMessage, error)
 	Screenshot(ctx context.Context, mediaType string, image []byte) (json.RawMessage, error)
@@ -124,6 +125,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/sessions/{id}/import", s.importCSV)
 	mux.HandleFunc("GET /v1/sessions/{id}/shots", s.listShots)
 	mux.HandleFunc("GET /v1/sessions/{id}/analysis", s.sessionAnalysis)
+	mux.HandleFunc("GET /v1/sessions/{id}/report", s.sessionReport)
 	mux.HandleFunc("GET /v1/sessions/{id}/compare", s.compareSessions)
 	mux.HandleFunc("POST /v1/sessions/{id}/experiments", s.createExperiment)
 	mux.HandleFunc("GET /v1/sessions/{id}/experiments", s.listExperiments)

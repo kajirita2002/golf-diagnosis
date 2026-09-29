@@ -72,6 +72,27 @@ func (c *Client) Session(ctx context.Context, shots []ShotPayload) (json.RawMess
 	return c.post(ctx, "/v1/session", map[string]any{"shots": shots})
 }
 
+// ReportInput は解説レポート（POST /v1/report）への入力。shots は Session と同じ形。
+// handedness は定型文の向きの語（右／左）を入れるため、experiments はプランの材料
+// （docs/DESIGN_coaching.md §10.1）。
+type ReportInput struct {
+	Shots       []ShotPayload      `json:"shots"`
+	Handedness  model.Handedness   `json:"handedness"`
+	Experiments []model.Experiment `json:"experiments"`
+}
+
+// Report は解説レポートを頼む。返り値は分析サービスの JSON をそのまま返す
+// （帯の形は呼び出し側が physics.Band で足す）。
+func (c *Client) Report(ctx context.Context, in ReportInput) (json.RawMessage, error) {
+	if in.Shots == nil {
+		in.Shots = []ShotPayload{}
+	}
+	if in.Experiments == nil {
+		in.Experiments = []model.Experiment{}
+	}
+	return c.post(ctx, "/v1/report", in)
+}
+
 // Compare は2つのセッションの比較を頼む。a が比べる元（昨日）、b が今回。
 func (c *Client) Compare(ctx context.Context, a, b []ShotPayload) (json.RawMessage, error) {
 	return c.post(ctx, "/v1/compare", map[string]any{"a": a, "b": b})

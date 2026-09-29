@@ -1,8 +1,11 @@
 """画面を本物のブラウザで操作して確かめる（Playwright）。
 
   - 4つのタブ（診断・1球ずつ・前回と比べる・実験）が、実際に押して中身を出すか
-  - スマホ幅（390px）でページが横に溢れないか（表は枠の中だけで横に動く）
+  - スマホ幅（360px）でページが横に溢れないか（表は枠の中だけで横に動く）
   - JavaScript のエラーが1つも出ないか
+  - 診断の「解説」（docs/DESIGN_coaching.md §11 の画面の確認）: 360px で横に溢れない・図の data-shot の数が
+    描いた球数と一致・F3 の「この図にない球」が coverage と一致・F5 でヒール（負）の点が右半分（左打ちは左半分）・
+    fill="# が無い・点をタップして1球の面が出る・窓の文が帯の形で埋まる・「この仮説で実験を始める」で実験タブに入る
 スクリーンショットは SHOTS_DIR（既定は一時ディレクトリ）に置く。
 
 使い方: python3 scripts/ui_check.py（playwright が要る。PLAYWRIGHT_CHROMIUM で実行ファイルを指定できる）
@@ -12,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import struct
 import sys
 import tempfile
@@ -20,7 +24,7 @@ import zlib
 from playwright.sync_api import sync_playwright
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from e2e import Services, seed, seed_real  # noqa: E402
+from e2e import Services, call, seed, seed_real  # noqa: E402
 
 
 def no_overflow(page, tag: str, where: str, errors: list[str]) -> None:
@@ -35,6 +39,8 @@ def check(page, root: str, shots_dir: str, tag: str, errors: list[str]) -> None:
     page.wait_for_selector("#work:not([hidden])")
     # 新しい順なので、先頭は今日のセッション
     page.click("#analyzeBtn")
+    page.wait_for_selector("#repOut .rcard")
+    page.click("#diagTabs button[data-sub=num]")
     page.wait_for_selector("#anOut .finding")
     text = page.inner_text("#anOut")
     for want in ("打点", "フェース・トゥ・パス", "Good"):
@@ -80,19 +86,158 @@ def check(page, root: str, shots_dir: str, tag: str, errors: list[str]) -> None:
     page.screenshot(path=os.path.join(shots_dir, f"{tag}-4-exp.png"), full_page=True)
 
 
-def check_real(page, root: str, session_id: int, shots_dir: str, tag: str, errors: list[str]) -> None:
-    """実データのセッションで、極端なヒール・ミスヒットの候補・アイアンのまとめが画面に出るか。"""
+def open_report(page, root: str, session_id: int, player_id: int | None = None) -> None:
+    """セッションを選んで「分析する」を押し、解説の節を全部開く。"""
     page.goto(root + "/")
     page.wait_for_selector("#work:not([hidden])")
+    if player_id is not None:
+        page.select_option("#player", str(player_id))
+        page.wait_for_function(f"[...document.querySelector('#session').options].some(o => o.value === '{session_id}')")
     page.select_option("#session", str(session_id))
     page.wait_for_function("document.querySelectorAll('#shotTable tr[data-id]').length === 57")
     page.click("button[data-tab=diag]")
     page.click("#analyzeBtn")
+    page.wait_for_selector("#repOut .rcard")
+    page.evaluate("() => document.querySelectorAll('#repOut details').forEach((d) => { d.open = true; })")
+
+
+# 図の点を数える JS。範囲のカードの直下の節にある図だけを見る（畳んだ1本の短い版の中は数えない）
+COUNT_JS = """(scope) => {
+  const card = [...document.querySelectorAll('#repOut article.rcard')].find((a) => a.dataset.scope === scope);
+  if (!card) return null;
+  const out = {};
+  for (const f of card.querySelectorAll(':scope > .sec figure.fig')) {
+    const id = f.dataset.fig;
+    if (!(id in out)) out[id] = f.querySelectorAll('[data-shot]').length;
+  }
+  return out;
+}"""
+
+# F5 の点が図の左右どちらにあるか（負＝ヒール）。図の真ん中より右なら right
+HEEL_JS = """(scope) => {
+  const card = [...document.querySelectorAll('#repOut article.rcard')].find((a) => a.dataset.scope === scope);
+  const f = card && card.querySelector(':scope > .sec figure.fig[data-fig=F5]');
+  if (!f) return null;
+  const svg = f.querySelector('svg'), r = svg.getBoundingClientRect(), mid = r.left + r.width / 2;
+  return [...f.querySelectorAll('g[data-shot]')].map((g) => {
+    const b = g.querySelector('.g-hit').getBoundingClientRect();
+    return [Number(g.dataset.offset), b.left + b.width / 2 > mid ? 'right' : 'left'];
+  });
+}"""
+
+
+def check_report(page, base: str, session_id: int, shots_dir: str, tag: str, errors: list[str], hand: str = "R") -> None:
+    """解説（§11 の画面の確認）。答えは同じ API の /report から取って突き合わせる（手で写した数と比べない）。"""
+    rep = call("GET", f"{base}/sessions/{session_id}/report")["report"]
+    mains = [x for x in rep["scopes"] if x["kind"] == "main"]
+    no_overflow(page, tag, f"解説（{hand}）", errors)
+    text = page.inner_text("#repOut")
+    if "{band:" in text:
+        errors.append(f"[{tag}] 窓の文の {{band:…}} が埋まっていない")
+    if "−1.9°〜+2.1°" not in text:
+        errors.append(f"[{tag}] アイアンの窓の文に −1.9°〜+2.1° が無い（{hand}）")
+    if 'fill="#' in page.content():
+        errors.append(f"[{tag}] fill=\"#…\" が直書きされている")
+    for sc in mains:
+        got = page.evaluate(COUNT_JS, sc["scope_id"])
+        if got is None:
+            errors.append(f"[{tag}] {sc['scope_id']} のカードが無い")
+            continue
+        for fid in ("F1", "F3", "F5"):
+            want = len(sc["figures"][fid]["points"])
+            if got.get(fid) != want:
+                errors.append(f"[{tag}] {sc['scope_id']} の {fid} の data-shot が {got.get(fid)}（描いた球 {want}）")
+        # 一番多い枠が同数の範囲（5番ウッド）は典型の1球を決めないので、F4 が無い
+        rep4 = 1 if (sc["figures"].get("F4") or {}).get("representative") else 0
+        if (got.get("F4") or 0) != rep4:
+            errors.append(f"[{tag}] {sc['scope_id']} の F4 の data-shot が {got.get('F4')}（{rep4}）")
+        # 左打ちでも打点のトゥ／ヒールは反転しない。ヒールを描く側だけが入れ替わる
+        heel_side = "right" if hand == "R" else "left"
+        for off, side in page.evaluate(HEEL_JS, sc["scope_id"]) or []:
+            if off < 0 and side != heel_side:
+                errors.append(f"[{tag}] {sc['scope_id']} の F5 でヒール {off}mm の点が {side} にある（{hand}）")
+                break
+    # 畳んだ範囲（1本の短い版）には図を出さない
+    folded_figs = page.evaluate("() => document.querySelectorAll('#repOut .folded figure.fig').length")
+    if folded_figs:
+        errors.append(f"[{tag}] 1本の短い版に図が {folded_figs} 枚出ている")
+    iron = next(x for x in rep["scopes"] if x["scope_id"] == "group:iron")
+    card = page.locator("#repOut article.rcard[data-scope='group:iron']")
+    missing = iron["facts"]["group:iron/coverage.face.missing"]["value"]
+    note = card.locator(":scope > .sec figure.fig[data-fig=F3] .fig-note[data-not-shown]").first
+    if note.get_attribute("data-not-shown") != str(missing) or f"この図にない球: {missing}" not in note.inner_text():
+        errors.append(f"[{tag}] F3 の「この図にない球」が coverage（{missing}）と合わない: {note.inner_text()!r}")
+    # ⑦のステップ: 1ブロックは12球まで（§8.3）・「動かさないもの」は窓の数字で埋まっている
+    chips = page.evaluate("() => [...document.querySelectorAll('#repOut .cand .blocks .chip')].map((c) => Number((c.textContent.match(/\\d+/) || [0])[0]))")
+    if chips and max(chips) > 12:
+        errors.append(f"[{tag}] ⑦の組み方に12球を超えるブロックがある: {max(chips)}")
+    gtext = card.locator(".cand[data-step='2'] .kv").evaluate_all(
+        "(xs) => (xs.find((x) => x.firstElementChild && x.firstElementChild.textContent === '動かさないもの') || {}).textContent || ''")
+    edge = "−1.9°"  # 左打ちは右打ちのデータを左右反転して入れているので、表示（実際の向き）は右打ちと同じになる
+    if "{band:" in gtext or edge not in gtext:
+        errors.append(f"[{tag}] ⑦のステップ2に「動かさないもの」（窓の端 {edge}）が無い: {gtext!r}")
+    # まとめの F1 の横軸（左右 ÷ キャリー）は % の目盛り（0.25 を「0.3」と丸めて書かない）
+    f1ticks = card.locator(":scope > .sec figure.fig[data-fig=F1]").first.locator("text.t11").all_text_contents()
+    if not any(t.endswith("%") for t in f1ticks):
+        errors.append(f"[{tag}] まとめの F1 の横軸が % の目盛りになっていない: {f1ticks}")
+    # 帯を使わない種類（5番ウッド）は帯を描かず、理由を書く
+    wood = page.locator("#repOut article.rcard[data-scope='club:5 Wood'] > .sec figure.fig[data-fig=F3]").first
+    if wood.locator(".g-band").count() or "帯を描いていません" not in wood.inner_text():
+        errors.append(f"[{tag}] 5番ウッドの F3 に帯が描かれている／理由が無い")
+    if hand != "R":
+        return
+    page.screenshot(path=os.path.join(shots_dir, f"{tag}-5a-real-report.png"), full_page=True)
+
+    # 点をタップすると「1球ずつ」と同じ面が下から出る
+    pt = card.locator(":scope > .sec figure.fig[data-fig=F1] g[data-shot]").first
+    pt.scroll_into_view_if_needed()
+    pt.locator(".g-hit").click(force=True)
+    sheet = page.locator("#shotSheet")
+    try:
+        sheet.wait_for(state="visible", timeout=3000)
+        sid = int(sheet.get_attribute("data-id"))
+        seq = next(p["seq"] for p in iron["figures"]["F1"]["points"] if p["shot_id"] == sid)
+        if f"#{seq}" not in sheet.inner_text():
+            errors.append(f"[{tag}] 1球の面に #{seq} が無い")
+        no_overflow(page, tag, "1球の面", errors)
+        page.screenshot(path=os.path.join(shots_dir, f"{tag}-5b-sheet.png"))
+        sheet.locator("button[data-act=goto]").click()
+        if page.locator("[data-pane=shots]").is_hidden() or page.locator(f"#shotTable tr.sel[data-id='{sid}']").count() != 1:
+            errors.append(f"[{tag}] 1球の面から「1球ずつ」の該当の球へ飛べない")
+    except Exception as e:  # noqa: BLE001
+        errors.append(f"[{tag}] 図の点をタップしても1球の面が出ない: {e}")
+    page.click("button[data-tab=diag]")
+
+    # ⑧ の「打点が - の球」から1球ずつへ
+    card.locator(":scope > .sec[data-sec=s8] button.jump").first.click()
+    if page.locator("#shotTable tr.sel").count() != 1:
+        errors.append(f"[{tag}] ⑧の打点が「-」の球から1球ずつへ飛べない")
+    page.click("button[data-tab=diag]")
+
+    # ⑦「この仮説で実験を始める」→ 実験タブに仮説・指標・目標・クラブが入る
+    card.locator("button[data-act=startexp][data-which=now]").click()
+    got = {k: page.input_value(k) for k in ("#exHyp", "#exMetric", "#exGoal", "#exClub")}
+    if not (got["#exHyp"].startswith("9 Iron") and got["#exMetric"] == "impact_offset" and got["#exGoal"] == "reduce_abs" and got["#exClub"] == "9 Iron"):
+        errors.append(f"[{tag}] 「この仮説で実験を始める」で実験タブに値が入らない: {got}")
+    if page.locator("[data-pane=exp]").is_hidden():
+        errors.append(f"[{tag}] 「この仮説で実験を始める」で実験タブが開かない")
+    no_overflow(page, tag, "実験（解説から）", errors)
+    page.screenshot(path=os.path.join(shots_dir, f"{tag}-5c-exp-from-report.png"))
+    page.click("button[data-tab=diag]")
+
+
+def check_real(page, root: str, base: str, session_id: int, shots_dir: str, tag: str, errors: list[str]) -> None:
+    """実データのセッションで、解説と、数字の段（極端なヒール・ミスヒットの候補・アイアンのまとめ）が画面に出るか。"""
+    open_report(page, root, session_id)
+    check_report(page, base, session_id, shots_dir, tag, errors)
+    page.click("#diagTabs button[data-sub=num]")
     page.wait_for_selector("#anOut .finding")
     text = page.inner_text("#anOut")
-    for want in ("アイアン（まとめ）", "ネック寄り", "ミスヒット"):
+    for want in ("アイアン（まとめ）", "ネック寄り", "ミスヒット", "単回帰"):
         if want not in text:
             errors.append(f"[{tag}] 実データの診断に「{want}」が無い")
+    if re.search(r"\d+%は", text):
+        errors.append(f"[{tag}] 数字の段に share の読み違いの文（◯%はフェース）が残っている")
     no_overflow(page, tag, "実データの診断", errors)
     page.screenshot(path=os.path.join(shots_dir, f"{tag}-5-real-diag.png"), full_page=True)
     page.click("button[data-tab=shots]")
@@ -280,14 +425,20 @@ def main() -> None:
     with Services(fake_screenshot=fake) as sv, sync_playwright() as pw:
         seeded = seed(sv.base)
         real_id = seed_real(sv.base, seeded["player"]["id"])
+        lefty = call("POST", f"{sv.base}/players", {"name": "Lefty", "handedness": "L"})
+        lefty_id = seed_real(sv.base, lefty["id"])
         exe = os.environ.get("PLAYWRIGHT_CHROMIUM")
         browser = pw.chromium.launch(executable_path=exe) if exe else pw.chromium.launch()
-        for tag, w, h in (("pc", 1280, 900), ("phone", 390, 844)):
+        for tag, w, h in (("pc", 1280, 900), ("phone", 360, 780)):
             page = browser.new_page(viewport={"width": w, "height": h})
             page.on("pageerror", lambda e, tag=tag: errors.append(f"[{tag}] JS エラー: {e}"))
             page.on("console", lambda m, tag=tag: m.type == "error" and errors.append(f"[{tag}] console: {m.text}"))
             check(page, sv.root, shots_dir, tag, errors)
-            check_real(page, sv.root, real_id, shots_dir, tag, errors)
+            check_real(page, sv.root, sv.base, real_id, shots_dir, tag, errors)
+            if tag == "phone":
+                open_report(page, sv.root, lefty_id, lefty["id"])
+                check_report(page, sv.base, lefty_id, shots_dir, tag + "-L", errors, hand="L")
+                page.screenshot(path=os.path.join(shots_dir, f"{tag}-5d-lefty-report.png"), full_page=True)
             check_screenshot(page, sv.root, shots_dir, tag, errors)
             check_continuation(page, sv.root, shots_dir, tag, errors)
             page.close()

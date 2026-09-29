@@ -30,6 +30,9 @@ type fakeAnalyzer struct {
 	sessionShots   []analysis.ShotPayload
 	blocks         []analysis.BlockPayload
 	down           bool
+	reportIn       *analysis.ReportInput
+	reportOut      string // 空なら {"fake":"report"}
+	reportErr      error
 }
 
 func (f *fakeAnalyzer) Session(_ context.Context, shots []analysis.ShotPayload) (json.RawMessage, error) {

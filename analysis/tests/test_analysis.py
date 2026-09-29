@@ -95,7 +95,8 @@ def test_球が少なければデータ不足と言う():
     shots = [shot(i, decomposition={"curve": "fade", "curve_cause": "strike"}) for i in range(1, 3)]
     res = analyze_session(shots)
     assert res["findings"] == [
-        {"club": "7 Iron", "scope": "club", "kind": "insufficient", "what": "curve_cause", "n": 2, "needed": config.MIN_BLOCK_N}
+        {"club": "7 Iron", "scope": "club", "kind": "insufficient", "what": "curve_cause", "n": 2, "needed": config.MIN_BLOCK_N,
+         "id": "club:7 Iron:insufficient:curve_cause"}
     ]
 
 

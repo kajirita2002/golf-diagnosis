@@ -20,7 +20,7 @@ import (
 )
 
 // EngineVersion は分解の式と閾値の版。保存する診断には必ず付ける。
-const EngineVersion = "physics/0.2"
+const EngineVersion = "physics/0.3"
 
 // 閾値（初期値・要較正）。
 const (
@@ -38,8 +38,8 @@ const (
 	// 実データ（2026-09-17 の5番ウッド）で予測 -62° のような外れ値が出た。
 	MinReliableSpinLoftDeg = 8.0
 	// CenterStrikeM より内側は「芯」、ExtremeStrikeM より外は「極端」（ネック・先端寄り）。
-	// 実データでは、ヒール 33〜37mm の球で TrackMan がクラブのデータを取れず、
-	// ボールは右へ 38〜42m 飛び出した（アイアンで一番悪かった4球）。
+	// 実データ（2026-09-17）では、ヒール 33〜37mm の4球で TrackMan がフェースを取れなかった
+	// （左右は右 17〜42m。パスは取れていた）。
 	CenterStrikeM  = 0.010
 	ExtremeStrikeM = 0.030
 )
@@ -63,6 +63,16 @@ type Decomposition struct {
 	CurveCause       string   `json:"curve_cause"`                  // face_to_path / strike / mixed / none / unknown
 	StrikeConsistent *bool    `json:"strike_consistent,omitempty"`  // 残りの向きが打点のギア効果と合うか
 	MissType         string   `json:"miss_type"`                    // 例: push-fade
+
+	// 帯（docs/DESIGN_coaching.md §5.2）の判定の材料。係数 k と帯の幅は分析サービスが持つので、
+	// ここでは k を掛ける前の2つの項だけを出す（物理の式を Python に書き写さないため）:
+	//   インパクトの数字だけから計算した左右 = PredictedSideLaunch + k × PredictedSideCurveUnit
+	PredictedSideLaunch    *float64 `json:"predicted_side_launch,omitempty"`     // m。キャリー × sin(予測の打ち出し)
+	PredictedSideCurveUnit *float64 `json:"predicted_side_curve_unit,omitempty"` // m。キャリー × sin(予測のスピン軸)
+	// BandEligible は帯の判定に数える球か。数えないときの理由が BandSkip
+	// （thin / no_face / extreme_strike / no_prediction / no_carry。この順に見る）。
+	BandEligible bool   `json:"band_eligible"`
+	BandSkip     string `json:"band_skip,omitempty"`
 
 	// 当たり方
 	Contact string   `json:"contact"`         // center / heel / toe / heel_extreme / toe_extreme / unknown
@@ -193,10 +203,11 @@ func Decompose(m model.Metrics, category string) Decomposition {
 			d.Notes = append(d.Notes, "スピンロフトが小さすぎてスピン軸を予測できません")
 		}
 	case d.Contact == "heel_extreme" || d.Contact == "toe_extreme":
-		// フェースとパスが取れていなくても、打点が極端なら原因は打点と言える。
-		// 極端なヒール（ネック寄り）はボールが右へ飛び出し、TrackMan もクラブを見失いやすい。
+		// フェース・トゥ・パスが取れていなくても、打点が極端なら原因は打点と言える。
+		// 極端なヒール（ネック寄り）はボールが右へ飛び出し、TrackMan もフェースを見失いやすい。
+		// パスは取れていることが多いので、何が欠けたかは実際の値で書き分ける。
 		d.CurveCause = "strike"
-		d.Notes = append(d.Notes, "打点が極端（ネック・先端寄り）で、フェースとパスが取れていません。原因は打点です")
+		d.Notes = append(d.Notes, "打点が極端（ネック・先端寄り）で、"+missingClubData(m)+"が取れていません。原因は打点です")
 	}
 	if d.Contact == "heel_extreme" {
 		d.Notes = append(d.Notes, fmt.Sprintf("ヒール %.0fmm（ネック寄り）の当たりです", -*m.ImpactOffset*1000))
@@ -207,7 +218,21 @@ func Decompose(m model.Metrics, category string) Decomposition {
 		d.Notes = append(d.Notes, "打点のデータがありません。インパクトテープの結果を入れると打点が原因かを確かめられます")
 	}
 	d.MissType = missType(d.StartLine, d.Curve)
+	bandTerms(&d, m, thin)
 	return d
+}
+
+// missingClubData は、フェース・トゥ・パスから曲がりを予測できなかった理由（欠けた値）の名前。
+func missingClubData(m model.Metrics) string {
+	switch {
+	case m.FaceToPath != nil: // フェース・トゥ・パスはあるのにスピンロフトが無い
+		return "スピンロフト"
+	case m.FaceAngle == nil && m.ClubPath == nil:
+		return "フェースとパス"
+	case m.FaceAngle == nil:
+		return "フェース"
+	}
+	return "パス"
 }
 
 func classifyContact(offset *float64) string {

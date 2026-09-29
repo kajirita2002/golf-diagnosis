@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from . import config
 from .compare import compare_sessions
 from .experiment import VALID_GOALS, evaluate
+from .report import build_report
 from .screenshot import ExtractError, read_screenshot, verify_tsv
 from .session import analyze_session
 
@@ -25,6 +26,14 @@ app = FastAPI(title="golf-analysis", version=config.ENGINE_VERSION, docs_url=Non
 
 class SessionIn(BaseModel):
     shots: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ReportIn(BaseModel):
+    """/v1/session と同じ球の並び ＋ 利き手（R / L）。experiments は 1b で使う（いまは読まない）。"""
+
+    shots: list[dict[str, Any]] = Field(default_factory=list)
+    handedness: str = "R"
+    experiments: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ExperimentIn(BaseModel):
@@ -82,6 +91,15 @@ def healthz() -> dict:
 @app.post("/v1/session")
 def session(body: SessionIn) -> dict:
     return analyze_session(body.shots)
+
+
+@app.post("/v1/report")
+def report(body: ReportIn) -> dict:
+    """解説レポート（定型文・図の中身・理想・候補）。docs/DESIGN_coaching.md §6・§10.1。
+    帯の形と窓の数字は Go が各範囲の band_request を見て band_shape を足す。"""
+    if body.handedness not in ("R", "L"):
+        raise HTTPException(400, "handedness は R か L です")
+    return build_report(body.shots, body.handedness, body.experiments)
 
 
 @app.post("/v1/experiment")
