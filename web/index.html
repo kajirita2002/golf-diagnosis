@@ -63,6 +63,11 @@ tr.sel td{background:var(--accent-weak)}
 .tabs button{background:transparent;color:var(--sub);border-radius:8px 8px 0 0;border:1px solid transparent}
 .tabs button.on{color:var(--ink);border-color:var(--line);border-bottom-color:var(--card);margin-bottom:-1px;background:var(--card)}
 [hidden]{display:none!important}
+.steps{margin:0;padding-left:1.4em;display:grid;gap:10px}
+.drop{display:flex;align-items:center;justify-content:center;min-height:72px;border:2px dashed var(--line);border-radius:10px;color:var(--sub);cursor:pointer;margin-top:6px;text-align:center;padding:8px}
+.drop.over,.drop:focus{border-color:var(--accent);color:var(--accent);outline:none}
+.shotcard{border:1px solid var(--line);border-radius:10px;padding:12px;margin-top:10px}
+.shotcard textarea{width:100%;font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre;overflow-x:auto}
 </style>
 </head>
 <body>
@@ -97,6 +102,32 @@ tr.sel td{background:var(--accent-weak)}
       <label class="muted">単位の書いていない列 <select id="csvUnits"><option value="imperial">mph・yd・in</option><option value="metric">m/s・m・cm</option></select></label>
       <button id="importBtn">CSV を取り込む</button>
     </div>
+    <div class="shotflow" style="margin-top:14px">
+      <h3 style="margin-top:0">TrackMan のスクショから取り込む</h3>
+      <ol class="steps">
+        <li>
+          <div>TrackMan のレポートの URL を貼って、10項目の表で開く</div>
+          <div class="row">
+            <input id="tmUrl" placeholder="https://web-dynamic-reports.trackmangolf.com/?a=..." style="flex:1;min-width:0;width:100%">
+            <button class="ghost" id="tmOpen">表で開く</button>
+          </div>
+          <div class="err" id="tmErr"></div>
+        </li>
+        <li>
+          <div>クラブごとの表を、<b>Average の行まで入れて</b>スクショする</div>
+        </li>
+        <li>
+          <div>ここに貼り付ける（Ctrl+V）・ドロップ・選ぶ</div>
+          <label class="drop" id="shotDrop" tabindex="0">
+            <input type="file" id="shotFile" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>
+            <span>画像をここへ（何枚でも）</span>
+          </label>
+        </li>
+      </ol>
+      <div class="muted" id="shotMsg"></div>
+      <div id="shotOut"></div>
+    </div>
+
     <details style="margin-top:10px">
       <summary class="muted">CSV が無いとき：TrackMan の画面の表をコピーして貼り付ける</summary>
       <p class="muted">表の見出し（Club Speed など）から最後の行までを選んでコピーし、下に貼り付けます。表にクラブの列が無いので、クラブ名を入れてください。</p>
@@ -568,6 +599,100 @@ document.querySelector(".tabs").addEventListener("click", (ev) => {
   if (!b) return;
   document.querySelectorAll(".tabs button").forEach((x) => x.classList.toggle("on", x === b));
   document.querySelectorAll("[data-pane]").forEach((p) => { p.hidden = p.dataset.pane !== b.dataset.tab; });
+});
+
+
+// ---- スクショから取り込む ----
+$("tmOpen").addEventListener("click", async () => {
+  $("tmErr").textContent = "";
+  try {
+    const r = await api("GET", `/v1/trackman/report-link?url=${encodeURIComponent($("tmUrl").value)}`);
+    window.open(r.url, "_blank", "noopener");
+  } catch (e) { $("tmErr").textContent = e.message; }
+});
+
+// TrackMan の表示名（"6Iron"）を、このアプリのクラブ名（"6 Iron"）にそろえる
+const clubName = (c) => (c || "").replace(/^(\d+)\s*(Iron|Wood|Hybrid)$/i, "$1 $2");
+
+function checkHtml(c) {
+  if (!c) return "";
+  const cols = (c.columns || []).map((x) => x.status === "ok" ? `<span class="chip c-good">✓ ${esc(x.column)}</span>`
+    : x.status === "mismatch" ? `<span class="chip c-bad" title="読み取り ${esc(x.computed)} / 画面 ${esc(x.shown)}">★ ${esc(x.column)}</span>`
+    : `<span class="chip c-none">${esc(x.column)}</span>`).join(" ");
+  const head = c.ok ? `<span class="chip c-good">検算OK（${c.n_rows}球・Average と一致）</span>` : `<span class="chip c-bad">要確認</span>`;
+  return `<div>${head}</div><div style="margin-top:4px">${cols}</div>${(c.problems || []).map((p) => `<div class="err">・${esc(p)}</div>`).join("")}`;
+}
+
+function shotCard(t) {
+  const box = document.createElement("div");
+  box.className = "shotcard";
+  box.innerHTML = `
+    <div class="row"><b>表</b><input data-f="club" placeholder="クラブ（例: 6 Iron）"><span class="muted">読み取ったクラブ: ${esc(t.club || "—")}</span></div>
+    <div data-f="check" style="margin-top:6px">${checkHtml(t.check)}</div>
+    <details ${t.check && t.check.ok ? "" : "open"} style="margin-top:6px"><summary class="muted">読み取った表（直せます）</summary>
+      <textarea data-f="tsv" rows="8"></textarea>
+      <button class="ghost small" data-act="recheck">もう一度検算</button>
+    </details>
+    <div class="row" style="margin-top:8px"><button data-act="import">この表を取り込む</button><span class="err" data-f="err"></span></div>`;
+  box.querySelector("[data-f=club]").value = clubName(t.club);
+  box.querySelector("[data-f=tsv]").value = t.tsv;
+  const q = (f) => box.querySelector(`[data-f=${f}]`);
+  box.addEventListener("click", async (ev) => {
+    const b = ev.target.closest("button[data-act]");
+    if (!b) return;
+    q("err").textContent = "";
+    try {
+      if (b.dataset.act === "recheck") {
+        const c = await api("POST", "/v1/screenshot/verify", { tsv: q("tsv").value });
+        q("check").innerHTML = checkHtml(c);
+        return;
+      }
+      if (!S.session) throw new Error("先にセッションを選ぶか作ってください");
+      if (!q("club").value.trim()) throw new Error("クラブを入れてください");
+      const c = await api("POST", "/v1/screenshot/verify", { tsv: q("tsv").value });
+      q("check").innerHTML = checkHtml(c);
+      if (!c.ok && !confirm("検算が合っていません。このまま取り込みますか？（読み違いがあると診断がずれます）")) return;
+      const params = new URLSearchParams({ units: "metric", club: q("club").value.trim() });
+      const r = await fetch(`/v1/sessions/${S.session.id}/import?${params}`, { method: "POST", headers: { "Content-Type": "text/plain; charset=utf-8" }, body: q("tsv").value });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || r.statusText);
+      showImport(j);
+      b.disabled = true; b.textContent = `取り込みました（#${j.seq_from}〜${j.seq_to}）`;
+      await loadShots();
+    } catch (e) { q("err").textContent = e.message; }
+  });
+  return box;
+}
+
+async function readShots(files) {
+  const imgs = [...files].filter((f) => f.type.startsWith("image/"));
+  if (!imgs.length) return;
+  let cost = 0;
+  for (const [i, f] of imgs.entries()) {
+    $("shotMsg").textContent = `読み取り中… ${i + 1} / ${imgs.length}（1枚に数十秒かかります）`;
+    const fd = new FormData();
+    fd.append("image", f, f.name || "screenshot.png");
+    try {
+      const r = await api("POST", "/v1/screenshot", fd);
+      cost += (r.usage && r.usage.cost_usd) || 0;
+      if (!r.tables.length) $("shotOut").insertAdjacentHTML("beforeend", `<p class="err">${esc(f.name || "画像")}: 表が見つかりませんでした</p>`);
+      for (const t of r.tables) $("shotOut").appendChild(shotCard(t));
+    } catch (e) {
+      $("shotOut").insertAdjacentHTML("beforeend", `<p class="err">${esc(f.name || "画像")}: ${esc(e.message)}</p>`);
+    }
+  }
+  $("shotMsg").textContent = `${imgs.length}枚を読み取りました（Claude の利用料 約 $${cost.toFixed(3)}）。確かめてから取り込んでください。`;
+}
+
+$("shotFile").addEventListener("change", (ev) => { readShots(ev.target.files); ev.target.value = ""; });
+const drop = $("shotDrop");
+drop.addEventListener("dragover", (ev) => { ev.preventDefault(); drop.classList.add("over"); });
+drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+drop.addEventListener("drop", (ev) => { ev.preventDefault(); drop.classList.remove("over"); readShots(ev.dataTransfer.files); });
+document.addEventListener("paste", (ev) => {
+  // 文字の貼り付け（表のテキスト・URL）は邪魔しない。画像のときだけ受ける
+  const files = [...(ev.clipboardData ? ev.clipboardData.files : [])].filter((f) => f.type.startsWith("image/"));
+  if (files.length && !ev.target.closest("textarea,input")) { ev.preventDefault(); readShots(files); }
 });
 
 loadPlayers().catch((e) => { $("sessErr").textContent = "API に接続できません: " + e.message; });

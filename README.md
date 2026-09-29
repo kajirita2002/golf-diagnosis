@@ -27,6 +27,23 @@ cd api && go run ./cmd/server
 ```
 
 ブラウザで http://localhost:8080/ を開くと画面が出ます（CSV の取り込み・診断・1球ずつ・前回と比べる・実験）。
+
+### スクショから取り込む（Claude の API を使う）
+
+分析サービスを立てる前に、Claude の API キーを入れておきます。
+
+```sh
+export ANTHROPIC_API_KEY=sk-ant-...   # 分析サービスを立てる端末で
+```
+
+1. TrackMan のレポートの URL を貼って「表で開く」→ 10項目・Club data の表で開く
+2. クラブごとの表を **Average の行まで入れて**スクショする
+3. 画面に貼る（Ctrl+V）・ドロップ・選ぶ → 読み取り → 検算 → 確かめて「この表を取り込む」
+
+- 読み取りは `claude-opus-5-5`。1枚 数円〜十数円（画面に実際の利用料を出す）。
+- **検算**: 読み取った各球の平均を、画面の Average の行と列ごとに比べる。合わない列は ★ で出る。
+  1桁の読み違いや R/L の読み違いはここで見つかる。直して「もう一度検算」できる。
+- 取り込みは自動ではしない（人が確かめてから）。
 API だけ使うなら:
 
 ```sh
@@ -64,6 +81,9 @@ curl -s localhost:8080/v1/experiments/1/evaluation
 | POST | `/v1/sessions/{id}/experiments` | 実験（`goal`: reduce_abs / reduce_sd / increase / decrease） |
 | POST | `/v1/experiments/{id}/blocks` | ブロック（baseline / intervention / retention、打った順の範囲） |
 | GET | `/v1/experiments/{id}/evaluation` | 実験の評価 |
+| GET | `/v1/trackman/report-link?url=` | TrackMan のレポートを10項目・Club data で開くリンク |
+| POST | `/v1/screenshot` | スクショ（multipart の `image`）の表を読んで検算する（取り込みはしない） |
+| POST | `/v1/screenshot/verify` | 直した表（TSV）をもう一度検算する |
 
 ## テスト
 

@@ -202,3 +202,17 @@ func Test画面の省略した列名を読む(t *testing.T) {
 	near(t, "landing_angle", m.LandingAngle, 45.0, 1e-9)
 	near(t, "hang_time", m.HangTime, 6.1, 1e-9)
 }
+
+// タブ区切りで先頭のセルが空の行（単位の行・アイコンの列）が1列ずれない。
+// Go の csv は TrimLeadingSpace だと区切りのタブまで空白として食う。
+func Testタブ区切りで先頭が空のセルでも列がずれない(t *testing.T) {
+	tsv := "#\tClub Speed\tAttack Ang.\tSide\n\tm/s\tDeg\tm\n1.\t36.7\t-0.4\t40.7R\n\t36.5\t0.0\t28.3R\n"
+	res := parse(t, tsv, Options{Units: units.Imperial})
+	if len(res.Shots) != 2 {
+		t.Fatalf("%d 球", len(res.Shots))
+	}
+	// 単位の行を読めていれば m/s のまま（ずれると Club Speed に deg が当たってエラー）
+	near(t, "club_speed", res.Shots[0].Metrics.ClubSpeed, 36.7, 1e-9)
+	near(t, "attack_angle", res.Shots[1].Metrics.AttackAngle, 0.0, 1e-9)
+	near(t, "side", res.Shots[1].Metrics.Side, 28.3, 1e-9)
+}

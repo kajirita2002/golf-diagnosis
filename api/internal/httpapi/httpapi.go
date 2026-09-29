@@ -29,6 +29,8 @@ type Analyzer interface {
 	Session(ctx context.Context, shots []analysis.ShotPayload) (json.RawMessage, error)
 	Experiment(ctx context.Context, e *model.Experiment, blocks []analysis.BlockPayload) (json.RawMessage, error)
 	Compare(ctx context.Context, a, b []analysis.ShotPayload) (json.RawMessage, error)
+	Screenshot(ctx context.Context, mediaType string, image []byte) (json.RawMessage, error)
+	VerifyTSV(ctx context.Context, tsv string) (json.RawMessage, error)
 }
 
 // Server は API のハンドラをまとめる。
@@ -69,6 +71,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/sessions/{id}/experiments", s.createExperiment)
 	mux.HandleFunc("GET /v1/sessions/{id}/experiments", s.listExperiments)
 	mux.HandleFunc("PATCH /v1/shots/{id}", s.patchShot)
+	mux.HandleFunc("GET /v1/trackman/report-link", s.reportLink)
+	mux.HandleFunc("POST /v1/screenshot", s.readScreenshot)
+	mux.HandleFunc("POST /v1/screenshot/verify", s.verifyScreenshot)
 	mux.HandleFunc("GET /v1/experiments/{id}", s.getExperiment)
 	mux.HandleFunc("POST /v1/experiments/{id}/blocks", s.addBlock)
 	mux.HandleFunc("GET /v1/experiments/{id}/evaluation", s.evaluateExperiment)
@@ -102,6 +107,14 @@ func (s *Server) fail(w http.ResponseWriter, err error) {
 		writeJSON(w, http.StatusNotFound, apiError{"見つかりません"})
 	case errors.Is(err, analysis.ErrUnavailable):
 		writeJSON(w, http.StatusServiceUnavailable, apiError{err.Error()})
+	case errors.As(err, new(*analysis.ServiceError)):
+		var se *analysis.ServiceError
+		errors.As(err, &se)
+		code := se.Status
+		if code < 400 || code > 599 {
+			code = http.StatusBadGateway
+		}
+		writeJSON(w, code, apiError{se.Message})
 	default:
 		var be badRequest
 		if errors.As(err, &be) {
@@ -728,6 +741,71 @@ func (s *Server) evaluateExperiment(w http.ResponseWriter, r *http.Request) {
 		blocks = append(blocks, bp)
 	}
 	out, err := s.Analyzer.Experiment(r.Context(), e, blocks)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeRaw(w, http.StatusOK, out)
+}
+
+// ---- スクリーンショット ----
+
+// MaxScreenshotBytes は画像1枚の上限（Claude の API の上限に合わせる）。
+const MaxScreenshotBytes = 5 << 20
+
+var screenshotTypes = map[string]bool{"image/png": true, "image/jpeg": true, "image/webp": true, "image/gif": true}
+
+// reportLink は TrackMan のレポートを10項目・Club data で開くリンクを返す。?url= に URL か ID。
+func (s *Server) reportLink(w http.ResponseWriter, r *http.Request) {
+	id, err := ingest.ReportID(r.URL.Query().Get("url"))
+	if err != nil {
+		s.fail(w, bad("%v", err))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"id": id, "url": ingest.ReportLink(id)})
+}
+
+// readScreenshot は画像（multipart の image）の表を読んで返す。取り込みはしない。
+func (s *Server) readScreenshot(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, MaxScreenshotBytes+1<<20)
+	f, _, err := r.FormFile("image")
+	if err != nil {
+		s.fail(w, bad("image が要ります（5MB まで）: %v", err))
+		return
+	}
+	defer f.Close()
+	img, err := io.ReadAll(io.LimitReader(f, MaxScreenshotBytes+1))
+	if err != nil {
+		s.fail(w, bad("画像を読めません: %v", err))
+		return
+	}
+	if len(img) > MaxScreenshotBytes {
+		s.fail(w, bad("画像が大きすぎます（5MB まで）。表の部分だけを切り取ってください"))
+		return
+	}
+	// 申告された形式は信用せず、中身から決める
+	mt := http.DetectContentType(img)
+	if !screenshotTypes[mt] {
+		s.fail(w, bad("画像の形式（%s）には対応していません。PNG / JPEG / WebP / GIF にしてください", mt))
+		return
+	}
+	out, err := s.Analyzer.Screenshot(r.Context(), mt, img)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeRaw(w, http.StatusOK, out)
+}
+
+func (s *Server) verifyScreenshot(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		TSV string `json:"tsv"`
+	}
+	if err := decode(r, &in); err != nil {
+		s.fail(w, err)
+		return
+	}
+	out, err := s.Analyzer.VerifyTSV(r.Context(), in.TSV)
 	if err != nil {
 		s.fail(w, err)
 		return

@@ -109,7 +109,10 @@ func (t TrackMan) Parse(r io.Reader, opt Options) (*Result, error) {
 	cr.Comma = delim
 	cr.FieldsPerRecord = -1
 	cr.LazyQuotes = true
-	cr.TrimLeadingSpace = true
+	// タブ区切りでは TrimLeadingSpace を使わない。区切りのタブまで「先頭の空白」として
+	// 食われ、先頭が空のセルの行が1列ずつ左にずれる（スクショ読み取りの表の単位の行で起きた）。
+	// セルの前後の空白は、読むときに個別に TrimSpace している。
+	cr.TrimLeadingSpace = delim != '\t'
 	rows, err := cr.ReadAll()
 	if err != nil {
 		return nil, fmt.Errorf("CSV を読めません: %w", err)

@@ -8,6 +8,7 @@ package analysis
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -45,6 +46,15 @@ type BlockPayload struct {
 	Shots   []ShotPayload   `json:"shots"`
 }
 
+// ServiceError は分析サービスが理由つきで断ったとき（画像の形式が違う・API キーが無いなど）。
+// 理由は利用者に見せてよい文なので、そのまま返す。
+type ServiceError struct {
+	Status  int
+	Message string
+}
+
+func (e *ServiceError) Error() string { return e.Message }
+
 // Client は分析サービスのクライアント。
 type Client struct {
 	BaseURL string
@@ -53,7 +63,8 @@ type Client struct {
 
 // New はクライアントを作る。
 func New(baseURL string) *Client {
-	return &Client{BaseURL: baseURL, HTTP: &http.Client{Timeout: 30 * time.Second}}
+	// スクリーンショットの読み取りは Claude の応答を待つので長めにとる
+	return &Client{BaseURL: baseURL, HTTP: &http.Client{Timeout: 3 * time.Minute}}
 }
 
 // Session はセッション全体の分析を頼む。返り値は分析サービスの JSON をそのまま返す。
@@ -64,6 +75,20 @@ func (c *Client) Session(ctx context.Context, shots []ShotPayload) (json.RawMess
 // Compare は2つのセッションの比較を頼む。a が比べる元（昨日）、b が今回。
 func (c *Client) Compare(ctx context.Context, a, b []ShotPayload) (json.RawMessage, error) {
 	return c.post(ctx, "/v1/compare", map[string]any{"a": a, "b": b})
+}
+
+// Screenshot はスクリーンショットの表を読ませる（取り込みはしない）。
+// Claude の API を呼ぶので時間がかかる。
+func (c *Client) Screenshot(ctx context.Context, mediaType string, image []byte) (json.RawMessage, error) {
+	return c.post(ctx, "/v1/screenshot", map[string]any{
+		"media_type": mediaType,
+		"data":       base64.StdEncoding.EncodeToString(image),
+	})
+}
+
+// VerifyTSV は人が直した表をもう一度検算させる。
+func (c *Client) VerifyTSV(ctx context.Context, tsv string) (json.RawMessage, error) {
+	return c.post(ctx, "/v1/screenshot/verify", map[string]any{"tsv": tsv})
 }
 
 // Experiment は実験の評価を頼む。
@@ -95,6 +120,14 @@ func (c *Client) post(ctx context.Context, path string, body any) (json.RawMessa
 		return nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
+		var d struct {
+			Detail any `json:"detail"`
+		}
+		if json.Unmarshal(out, &d) == nil {
+			if msg, ok := d.Detail.(string); ok && msg != "" {
+				return nil, &ServiceError{Status: resp.StatusCode, Message: msg}
+			}
+		}
 		return nil, fmt.Errorf("分析サービスが %d を返しました: %s", resp.StatusCode, truncate(string(out), 500))
 	}
 	if !json.Valid(out) {

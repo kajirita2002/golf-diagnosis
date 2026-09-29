@@ -9,6 +9,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -20,11 +21,15 @@ import (
 
 // fakeAnalyzer は渡された中身を覚えて、決まった JSON を返す。
 type fakeAnalyzer struct {
-	compareA     []analysis.ShotPayload
-	compareB     []analysis.ShotPayload
-	sessionShots []analysis.ShotPayload
-	blocks       []analysis.BlockPayload
-	down         bool
+	screenshotType string
+	screenshotLen  int
+	screenshotErr  error
+	verified       string
+	compareA       []analysis.ShotPayload
+	compareB       []analysis.ShotPayload
+	sessionShots   []analysis.ShotPayload
+	blocks         []analysis.BlockPayload
+	down           bool
 }
 
 func (f *fakeAnalyzer) Session(_ context.Context, shots []analysis.ShotPayload) (json.RawMessage, error) {
@@ -38,6 +43,19 @@ func (f *fakeAnalyzer) Session(_ context.Context, shots []analysis.ShotPayload) 
 func (f *fakeAnalyzer) Compare(_ context.Context, a, b []analysis.ShotPayload) (json.RawMessage, error) {
 	f.compareA, f.compareB = a, b
 	return json.RawMessage(`{"fake":"compare"}`), nil
+}
+
+func (f *fakeAnalyzer) Screenshot(_ context.Context, mt string, img []byte) (json.RawMessage, error) {
+	f.screenshotType, f.screenshotLen = mt, len(img)
+	if f.screenshotErr != nil {
+		return nil, f.screenshotErr
+	}
+	return json.RawMessage(`{"fake":"screenshot"}`), nil
+}
+
+func (f *fakeAnalyzer) VerifyTSV(_ context.Context, tsv string) (json.RawMessage, error) {
+	f.verified = tsv
+	return json.RawMessage(`{"ok":true}`), nil
 }
 
 func (f *fakeAnalyzer) Experiment(_ context.Context, _ *model.Experiment, blocks []analysis.BlockPayload) (json.RawMessage, error) {
@@ -351,4 +369,58 @@ func Test画面の表を貼り付けて取り込む(t *testing.T) {
 	if shots[0]["club"] != "6 Iron" || shots[0]["club_category"] != "iron" {
 		t.Fatalf("%v / %v", shots[0]["club"], shots[0]["club_category"])
 	}
+}
+
+func (e *env) upload(path, field, name string, data []byte, want int) map[string]any {
+	e.t.Helper()
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, _ := mw.CreateFormFile(field, name)
+	_, _ = fw.Write(data)
+	mw.Close()
+	req, _ := http.NewRequest("POST", e.ts.URL+path, &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	return e.send(req, want)
+}
+
+func Testスクショは中身で形式を決めて分析サービスへ渡す(t *testing.T) {
+	e := newEnv(t)
+	png := append([]byte("\x89PNG\r\n\x1a\n"), make([]byte, 64)...)
+	// 名前が .jpg でも中身が PNG なら PNG として渡す
+	out := e.upload("/v1/screenshot", "image", "shot.jpg", png, 200)
+	if out["fake"] != "screenshot" || e.an.screenshotType != "image/png" || e.an.screenshotLen != len(png) {
+		t.Fatalf("%v %s %d", out, e.an.screenshotType, e.an.screenshotLen)
+	}
+	e.upload("/v1/screenshot", "image", "a.txt", []byte("hello, not an image"), 400)
+	e.upload("/v1/screenshot", "file", "shot.png", png, 400)
+	big := append([]byte("\x89PNG\r\n\x1a\n"), make([]byte, MaxScreenshotBytes)...)
+	e.upload("/v1/screenshot", "image", "big.png", big, 400)
+}
+
+func Testスクショの理由つきの失敗はそのまま見せる(t *testing.T) {
+	e := newEnv(t)
+	e.an.screenshotErr = &analysis.ServiceError{Status: 503, Message: "Claude の API の認証情報がありません"}
+	png := append([]byte("\x89PNG\r\n\x1a\n"), make([]byte, 64)...)
+	out := e.upload("/v1/screenshot", "image", "shot.png", png, 503)
+	if !strings.Contains(fmt.Sprint(out["error"]), "認証情報") {
+		t.Fatalf("%v", out)
+	}
+}
+
+func Test直した表の再検算(t *testing.T) {
+	e := newEnv(t)
+	e.do("POST", "/v1/screenshot/verify", map[string]any{"tsv": "a\tb\n"}, 200)
+	if e.an.verified != "a\tb\n" {
+		t.Fatalf("%q", e.an.verified)
+	}
+}
+
+func TestTrackManのレポートを開くリンク(t *testing.T) {
+	e := newEnv(t)
+	u := url.QueryEscape("https://web-dynamic-reports.trackmangolf.com/?a=26828541-c2b0-f111-8234-f42679e923bf")
+	out := e.do("GET", "/v1/trackman/report-link?url="+u, nil, 200)
+	if out["id"] != "26828541-c2b0-f111-8234-f42679e923bf" || !strings.Contains(fmt.Sprint(out["url"]), "v=clubData") {
+		t.Fatalf("%v", out)
+	}
+	e.do("GET", "/v1/trackman/report-link?url="+url.QueryEscape("https://evil.example/?a=x"), nil, 400)
 }

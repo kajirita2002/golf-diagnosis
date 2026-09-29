@@ -68,7 +68,13 @@ def multipart(path: str) -> tuple[bytes, str]:
 
 
 class Services:
-    """分析サービスと API（画面つき）を立てて、止める。with で使う。"""
+    """分析サービスと API（画面つき）を立てて、止める。with で使う。
+
+    fake_screenshot に JSON のファイルを渡すと、スクショの読み取りは Claude を呼ばずにその中身を返す。
+    """
+
+    def __init__(self, fake_screenshot: str | None = None):
+        self.fake_screenshot = fake_screenshot
 
     def __enter__(self):
         ap, gp = free_port(), free_port()
@@ -76,9 +82,13 @@ class Services:
         # go run だと止めたときに子のバイナリが残るので、先にビルドして直に動かす
         binary = os.path.join(tmp, "server")
         subprocess.run(["go", "build", "-o", binary, "./cmd/server"], cwd=os.path.join(ROOT, "api"), check=True)
+        py_env = {**os.environ}
+        if self.fake_screenshot:
+            py_env["SCREENSHOT_FAKE_RESPONSE"] = self.fake_screenshot
         self.py = subprocess.Popen(
             ["uv", "run", "uvicorn", "golf_analysis.app:app", "--port", str(ap), "--log-level", "warning"],
             cwd=os.path.join(ROOT, "analysis"),
+            env=py_env,
         )
         self.go = subprocess.Popen(
             [binary],

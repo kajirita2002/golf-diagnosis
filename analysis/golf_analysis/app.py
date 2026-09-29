@@ -5,6 +5,10 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
+import os
+from types import SimpleNamespace
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
@@ -13,6 +17,7 @@ from pydantic import BaseModel, Field
 from . import config
 from .compare import compare_sessions
 from .experiment import VALID_GOALS, evaluate
+from .screenshot import ExtractError, read_screenshot, verify_tsv
 from .session import analyze_session
 
 app = FastAPI(title="golf-analysis", version=config.ENGINE_VERSION, docs_url=None, redoc_url=None, openapi_url=None)
@@ -31,6 +36,41 @@ class ExperimentIn(BaseModel):
 class CompareIn(BaseModel):
     a: list[dict[str, Any]] = Field(default_factory=list)
     b: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ScreenshotIn(BaseModel):
+    media_type: str
+    data: str  # base64
+
+
+class VerifyIn(BaseModel):
+    tsv: str
+
+
+class _FakeClient:
+    """テストと画面の確認用。SCREENSHOT_FAKE_RESPONSE のファイルの中身を Claude の答えとして返す。
+    本物の API は呼ばない（本番では設定しないこと）。"""
+
+    def __init__(self, path: str):
+        text = open(path, encoding="utf-8").read()
+        msg = SimpleNamespace(
+            stop_reason="end_turn",
+            content=[SimpleNamespace(type="text", text=text)],
+            usage=SimpleNamespace(input_tokens=0, output_tokens=0),
+        )
+        self.beta = SimpleNamespace(messages=SimpleNamespace(create=lambda **_: msg))
+
+
+def _client():
+    fake = os.environ.get("SCREENSHOT_FAKE_RESPONSE")
+    if fake:
+        return _FakeClient(fake)
+    import anthropic
+
+    try:
+        return anthropic.Anthropic()
+    except anthropic.AnthropicError as e:
+        raise HTTPException(503, f"Claude の API の認証情報がありません（ANTHROPIC_API_KEY を設定してください）: {e}") from e
 
 
 @app.get("/healthz")
@@ -53,3 +93,32 @@ def experiment(body: ExperimentIn) -> dict:
 @app.post("/v1/compare")
 def compare(body: CompareIn) -> dict:
     return compare_sessions(body.a, body.b)
+
+
+@app.post("/v1/screenshot")
+def screenshot(body: ScreenshotIn) -> dict:
+    """スクリーンショットの表を読む。取り込みはしない（人が確認してから取り込む）。"""
+    try:
+        image = base64.b64decode(body.data, validate=True)
+    except (binascii.Error, ValueError) as e:
+        raise HTTPException(400, "画像のデータが壊れています") from e
+    import anthropic
+
+    try:
+        return read_screenshot(_client(), image, body.media_type)
+    except ExtractError as e:
+        raise HTTPException(422, str(e)) from e
+    except anthropic.AuthenticationError as e:
+        raise HTTPException(503, "Claude の API キーが無効です") from e
+    except anthropic.RateLimitError as e:
+        raise HTTPException(503, "Claude の API が混んでいます。少し待ってからもう一度") from e
+    except anthropic.APIStatusError as e:
+        raise HTTPException(502, f"Claude の API が {e.status_code} を返しました") from e
+    except anthropic.APIConnectionError as e:
+        raise HTTPException(502, "Claude の API に接続できません") from e
+
+
+@app.post("/v1/screenshot/verify")
+def screenshot_verify(body: VerifyIn) -> dict:
+    """人が直した TSV をもう一度検算する。"""
+    return verify_tsv(body.tsv)
