@@ -109,6 +109,18 @@ def tiny_png() -> bytes:
     return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(b"\x00\xff\xff\xff")) + chunk(b"IEND", b"")
 
 
+def big_photo_png(path: str, w: int = 3000, h: int = 2400) -> int:
+    """スマホの写真くらいの大きさ（5MB 超）の本物の PNG。雑音なので圧縮で小さくならない。"""
+    raw = b"".join(b"\x00" + os.urandom(w * 3) for _ in range(h))
+
+    def chunk(t, d):
+        return struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xFFFFFFFF)
+    data = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(raw, 1)) + chunk(b"IEND", b"")
+    with open(path, "wb") as f:
+        f.write(data)
+    return len(data)
+
+
 def fake_screenshot_answer(path: str) -> None:
     """偽の Claude の答え: 実データの6番（正しく読めた）と、9番の1か所を読み違えたもの。"""
     real = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "testdata", "real", "2026-09-17")
@@ -169,6 +181,20 @@ def check_screenshot(page, root: str, shots_dir: str, tag: str, errors: list[str
     ta.fill(ta.input_value().replace("37.6L", "37.6R"))
     cards.nth(1).locator("button[data-act=recheck]").click()
     page.wait_for_function("document.querySelectorAll('.shotcard')[1].innerText.includes('検算OK')")
+
+    # スマホの大きい写真を「CSV」のボタンから選んでも、縮めてスクショとして読む
+    photo = os.path.join(shots_dir, "photo.png")
+    size = big_photo_png(photo)
+    if size <= 5 * 1024 * 1024:
+        errors.append(f"[{tag}] 試験用の写真が小さすぎる（{size}）")
+    page.set_input_files("#csv", photo)
+    try:
+        page.wait_for_function("document.querySelectorAll('.shotcard').length === 4", timeout=60000)
+    except Exception:
+        errors.append(f"[{tag}] 大きい写真を CSV のボタンから選んでも読めない: {page.inner_text('#shotOut')[-300:]!r}")
+    if page.input_value("#csv") != "":
+        errors.append(f"[{tag}] 写真が CSV の欄に残っている")
+    cards = page.locator(".shotcard")
 
     cards.nth(0).locator("button[data-act=import]").click()
     try:

@@ -98,12 +98,7 @@ tr.sel td{background:var(--accent-weak)}
       <input id="nsLoc" placeholder="場所（任意）">
       <button class="ghost" id="nsSave">新しいセッション</button>
     </div>
-    <div class="row" style="margin-top:10px">
-      <input type="file" id="csv" accept=".csv,text/csv">
-      <label class="muted">単位の書いていない列 <select id="csvUnits"><option value="imperial">mph・yd・in</option><option value="metric">m/s・m・cm</option></select></label>
-      <button id="importBtn">CSV を取り込む</button>
-    </div>
-    <div class="shotflow" style="margin-top:14px">
+    <div class="shotflow" id="shotFlow" style="margin-top:14px">
       <h3 style="margin-top:0">TrackMan のスクショから取り込む</h3>
       <ol class="steps">
         <li>
@@ -118,15 +113,24 @@ tr.sel td{background:var(--accent-weak)}
           <div>クラブごとの表を、<b>Average の行まで入れて</b>スクショする</div>
         </li>
         <li>
-          <div>ここに貼り付ける（Ctrl+V）・ドロップ・選ぶ</div>
+          <div>写真・スクショを選ぶ（パソコンなら貼り付け Ctrl+V・ドロップも）</div>
+          <!-- accept は image/* にする。形式を並べると Android は写真アプリではなくファイルアプリを開く -->
           <label class="drop" id="shotDrop" tabindex="0">
-            <input type="file" id="shotFile" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>
-            <span>画像をここへ（何枚でも）</span>
+            <input type="file" id="shotFile" accept="image/*" multiple hidden>
+            <span>📷 写真・スクショを選ぶ（何枚でも）</span>
           </label>
         </li>
       </ol>
       <div class="muted" id="shotMsg"></div>
       <div id="shotOut"></div>
+    </div>
+
+    <h3>CSV があるとき</h3>
+    <div class="row">
+      <!-- 画像を選んだらスクショとして読む（押し間違えても迷わないように） -->
+      <input type="file" id="csv" accept=".csv,text/csv,text/plain,text/tab-separated-values,image/*">
+      <label class="muted">単位の書いていない列 <select id="csvUnits"><option value="imperial">mph・yd・in</option><option value="metric">m/s・m・cm</option></select></label>
+      <button id="importBtn">CSV を取り込む</button>
     </div>
 
     <details style="margin-top:10px">
@@ -581,6 +585,15 @@ $("pasteBtn").addEventListener("click", async () => {
   } catch (e) { $("sessErr").textContent = e.message; }
 });
 
+$("csv").addEventListener("change", (ev) => {
+  const files = [...ev.target.files];
+  if (files.length && files.every(isImage)) {
+    ev.target.value = "";
+    $("shotFlow").scrollIntoView({ behavior: "smooth", block: "start" });
+    readShots(files);
+  }
+});
+
 $("importBtn").addEventListener("click", async () => {
   $("sessErr").textContent = ""; $("importMsg").textContent = "";
   const f = $("csv").files[0];
@@ -665,15 +678,53 @@ function shotCard(t) {
   return box;
 }
 
+// そのまま送れる形式。ほか（HEIC など）と、大きすぎる写真は縮めて JPEG にする。
+// サーバーの上限は 5MB。読み取りは長い辺 2000px あれば足りる（それ以上は Claude の側でも縮められる）。
+const SEND_AS_IS = ["image/png", "image/jpeg", "image/webp", "image/gif"];
+const MAX_SEND_BYTES = 4.5 * 1024 * 1024, MAX_EDGE = 2000;
+
+const isImage = (f) => f.type.startsWith("image/") || /\.(png|jpe?g|webp|gif|heic|heif)$/i.test(f.name || "");
+
+async function decodeImage(f) {
+  if (window.createImageBitmap) {
+    try { return await createImageBitmap(f); } catch { /* 下の img で試す */ }
+  }
+  const url = URL.createObjectURL(f);
+  try {
+    const img = new Image();
+    await new Promise((ok, ng) => { img.onload = ok; img.onerror = ng; img.src = url; });
+    return img;
+  } finally { URL.revokeObjectURL(url); }
+}
+
+async function prepareImage(f) {
+  if (SEND_AS_IS.includes(f.type) && f.size <= MAX_SEND_BYTES) {
+    const bmp = await decodeImage(f).catch(() => null);
+    if (!bmp || Math.max(bmp.width, bmp.height) <= MAX_EDGE * 1.5) return f;
+  }
+  let src;
+  try { src = await decodeImage(f); } catch {
+    throw new Error("この形式の画像はこのブラウザで読めません。スクショ（PNG・JPEG）で撮り直してください");
+  }
+  const scale = Math.min(1, MAX_EDGE / Math.max(src.width, src.height));
+  const c = document.createElement("canvas");
+  c.width = Math.round(src.width * scale); c.height = Math.round(src.height * scale);
+  c.getContext("2d").drawImage(src, 0, 0, c.width, c.height);
+  const blob = await new Promise((ok) => c.toBlob(ok, "image/jpeg", 0.9));
+  if (!blob) throw new Error("画像を変換できませんでした");
+  return new File([blob], (f.name || "photo").replace(/\.[^.]+$/, "") + ".jpg", { type: "image/jpeg" });
+}
+
 async function readShots(files) {
-  const imgs = [...files].filter((f) => f.type.startsWith("image/"));
+  const imgs = [...files].filter(isImage);
   if (!imgs.length) return;
   let cost = 0;
   for (const [i, f] of imgs.entries()) {
     $("shotMsg").textContent = `読み取り中… ${i + 1} / ${imgs.length}（1枚に数十秒かかります）`;
-    const fd = new FormData();
-    fd.append("image", f, f.name || "screenshot.png");
     try {
+      const img = await prepareImage(f);
+      const fd = new FormData();
+      fd.append("image", img, img.name || "screenshot.png");
       const r = await api("POST", "/v1/screenshot", fd);
       cost += (r.usage && r.usage.cost_usd) || 0;
       if (!r.tables.length) $("shotOut").insertAdjacentHTML("beforeend", `<p class="err">${esc(f.name || "画像")}: 表が見つかりませんでした</p>`);
