@@ -11,8 +11,8 @@ TrackMan × 動画 × 個人履歴から「なぜその球になったか」を�
 api/        Go の API（取り込み・保存・1球ごとの物理分解）
 analysis/   Python の分析サービス（Good 判定・原因の群・ばらつき・前回との比較・実験の評価）
 web/        画面（素の HTML/JS 1ファイル。API が / で配る）
-testdata/   ダミーの TrackMan 風 CSV（実物が届いたら差し替える）
-scripts/    e2e.py（2つのサービスを立てて通しで確かめる）
+testdata/   ダミーの CSV と、実データ（real/。本人の練習・数値だけ）
+scripts/    e2e.py（2つのサービスを立てて通しで確かめる）・ui_check.py（画面をブラウザで操作）
 docs/       設計
 ```
 

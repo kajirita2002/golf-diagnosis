@@ -6,6 +6,12 @@
    フェースが原因の球と打点が原因の球は別の話（docs/DESIGN.md ❾）。
 3. インパクト（L1）の指標のばらつきと、着地の左右のばらつきを何が説明するか。
 4. 言えることだけを findings に出す。球が足りなければ「データ不足」と言う。
+5. ミスヒット（トップ・薄い当たり・極端に短い球）を除外の候補として出す。
+   自動では外さない ―― 外すかどうかは人が決める。ばらつきの要因分析だけは候補を除いて計算する
+   （4番ユーティリティのキャリー 12m・スピン軸 -100° の1球で回帰が壊れた。2026-09-17 の実データ）。
+   極端なヒール・トゥの当たりは候補にしない。それ自体が直すべきミスだから（トップは除く）。
+6. 同じ種類のクラブが2本以上あればまとめても見る（groups）。1本ずつだと球が足りないことが多い。
+   番手で飛距離が違うので、まとめたときの左右は「キャリーに対する割合」で見る。
 """
 
 from __future__ import annotations
@@ -55,35 +61,78 @@ def judge_good(shot: dict, carry_median: float | None, category: str) -> dict:
     return {"good": not failed, "by": "auto", "failed": failed}
 
 
-def _drivers(shots: list[dict]) -> dict:
-    """着地の左右（side）のばらつきを、フェース・パス・打点のどれが説明するか。"""
+def _drivers(shots: list[dict], outcome: str = "side", skip: set | None = None) -> dict:
+    """左右のばらつきを、フェース・パス・打点のどれが説明するか。
+
+    outcome="side_pct" は着地の左右をキャリーで割ったもの（番手をまとめて見るとき）。
+    skip にある id（ミスヒットの候補）は使わない。
+    """
+    skip = skip or set()
+
+    def y_of(s):
+        if outcome == "side_pct":
+            side, carry = _m(s, "side"), _m(s, "carry")
+            return None if side is None or not carry else side / carry
+        return _m(s, "side")
+
+    use = [s for s in shots if s["id"] not in skip]
     predictors = ["face_angle", "club_path"]
-    with_offset = [s for s in shots if _m(s, "impact_offset") is not None]
-    if shots and len(with_offset) >= 0.8 * len(shots):
+    with_offset = [s for s in use if _m(s, "impact_offset") is not None]
+    if use and len(with_offset) >= 0.8 * len(use):
         predictors.append("impact_offset")
-    rows = [s for s in shots if _m(s, "side") is not None and all(_m(s, p) is not None for p in predictors)]
+    rows = [s for s in use if y_of(s) is not None and all(_m(s, p) is not None for p in predictors)]
+    base = {"outcome": outcome, "predictors": predictors, "skipped": len(shots) - len(use)}
     if len(rows) < config.MIN_DRIVER_N:
-        return {
-            "status": "insufficient",
-            "n": len(rows),
-            "needed": config.MIN_DRIVER_N,
-            "outcome": "side",
-            "predictors": predictors,
-        }
-    y = np.array([_m(s, "side") for s in rows], dtype=float)
+        return {"status": "insufficient", "n": len(rows), "needed": config.MIN_DRIVER_N, **base}
+    y = np.array([y_of(s) for s in rows], dtype=float)
     X = np.array([[_m(s, p) for p in predictors] for s in rows], dtype=float)
     res = stats.ols_contributions(y, X, predictors)
-    return {"status": "ok", "n": len(rows), "outcome": "side", "predictors": predictors, **res}
+    return {"status": "ok", "n": len(rows), **base, **res}
 
 
-def _findings(club: str, shots: list[dict], groups: list[dict], drivers: dict) -> list[dict]:
+def _dec(s: dict) -> dict:
+    return s.get("decomposition") or {}
+
+
+def mishit_candidates(shots: list[dict], carry_median: float | None) -> list[dict]:
+    """除外の候補（人が決める）。
+
+    極端な打点の球は候補にしない（それ自体が直すべきミス）。ただしトップ・薄い当たりは
+    打点に関係なく候補にする（4番ユーティリティの4球目はヒール 34mm かつダイナミックロフト 0.6°
+    のトップで、極端な打点として残すと回帰を壊した）。
+    """
+    out = []
+    for s in shots:
+        d = _dec(s)
+        thin = "thin" in (d.get("flags") or [])
+        if d.get("contact") in ("heel_extreme", "toe_extreme") and not thin:
+            continue
+        reasons = []
+        if thin:
+            reasons.append("thin")
+        carry = _m(s, "carry")
+        if carry is not None and carry_median and carry < config.MISHIT_CARRY_RATIO * carry_median:
+            reasons.append("short_carry")
+        axis = _m(s, "spin_axis")
+        if axis is not None and abs(axis) > config.MISHIT_AXIS_DEG:
+            reasons.append("extreme_axis")
+        if reasons:
+            out.append({"id": s["id"], "seq": s["seq"], "reasons": reasons})
+    return out
+
+
+def _findings(club: str, shots: list[dict], drivers: dict, scope: str = "club") -> list[dict]:
     """言えることだけを並べる。強さは件数と割合で示し、確率のふりをしない（DESIGN ❹）。"""
     out: list[dict] = []
-    curved = [s for s in shots if (s.get("decomposition") or {}).get("curve") not in (None, "unknown", "straight")]
-    causes = Counter((s.get("decomposition") or {}).get("curve_cause", "unknown") for s in curved)
+
+    def add(f: dict) -> None:
+        out.append({"club": club, "scope": scope, **f})
+
+    curved = [s for s in shots if _dec(s).get("curve") not in (None, "unknown", "straight")]
+    causes = Counter(_dec(s).get("curve_cause", "unknown") for s in curved)
     if len(curved) >= config.MIN_BLOCK_N:
         for cause in ("strike", "face_to_path"):
-            ids = [s["id"] for s in curved if (s.get("decomposition") or {}).get("curve_cause") == cause]
+            ids = [s["id"] for s in curved if _dec(s).get("curve_cause") == cause]
             k = len(ids)
             share = k / len(curved)
             # 多数派の原因だけを出すと、少数でもまとまった群（例: 途中からヒールに
@@ -96,41 +145,72 @@ def _findings(club: str, shots: list[dict], groups: list[dict], drivers: dict) -
                 strength = "subset"
             else:
                 continue
-            out.append(
-                {
-                    "club": club,
-                    "kind": "curve_cause",
-                    "cause": cause,
-                    "evidence": {"count": k, "of": len(curved)},
-                    "strength": strength,
-                    "shot_ids": ids,
-                }
-            )
+            add({"kind": "curve_cause", "cause": cause, "evidence": {"count": k, "of": len(curved)}, "strength": strength, "shot_ids": ids})
         no_strike = sum(1 for s in curved if _m(s, "impact_offset") is None)
         if causes.get("strike", 0) + causes.get("mixed", 0) >= 3 and no_strike:
-            out.append(
-                {
-                    "club": club,
-                    "kind": "need_data",
-                    "field": "impact_offset",
-                    "evidence": {"missing": no_strike, "of": len(curved)},
-                    "strength": "info",
-                }
-            )
-    elif curved:
-        out.append({"club": club, "kind": "insufficient", "what": "curve_cause", "n": len(curved), "needed": config.MIN_BLOCK_N})
+            add({"kind": "need_data", "field": "impact_offset", "evidence": {"missing": no_strike, "of": len(curved)}, "strength": "info"})
+    elif curved and scope == "club":
+        add({"kind": "insufficient", "what": "curve_cause", "n": len(curved), "needed": config.MIN_BLOCK_N})
+
+    # 極端な打点（ネック・先端寄り）。一番ひどいミスがここから来ていることが多い
+    for contact in ("heel_extreme", "toe_extreme"):
+        ext = [s for s in shots if _dec(s).get("contact") == contact]
+        if len(ext) < config.MIN_EXTREME_STRIKE_N:
+            continue
+        rest = [s for s in shots if _dec(s).get("contact") != contact and _m(s, "side") is not None]
+
+        def mean_abs_side(xs):
+            v = [abs(_m(x, "side")) for x in xs if _m(x, "side") is not None]
+            return sum(v) / len(v) if v else None
+
+        add(
+            {
+                "kind": "extreme_strike",
+                "contact": contact,
+                "evidence": {
+                    "count": len(ext),
+                    "of": len(shots),
+                    "mean_abs_side": mean_abs_side(ext),
+                    "mean_abs_side_others": mean_abs_side(rest),
+                    "no_club_data": sum(1 for s in ext if "no_club_data" in (_dec(s).get("flags") or []) or _m(s, "face_angle") is None),
+                },
+                "strength": "strong" if len(ext) >= 3 else "moderate",
+                "shot_ids": [s["id"] for s in ext],
+            }
+        )
+
     if drivers.get("status") == "ok" and drivers["contributions"]:
         top = drivers["contributions"][0]
         if top["share"] >= 0.5 and drivers["r2"] >= 0.5:
-            out.append(
+            add(
                 {
-                    "club": club,
                     "kind": "dispersion_driver",
                     "metric": top["metric"],
+                    "outcome": drivers["outcome"],
                     "evidence": {"share": top["share"], "r2": drivers["r2"], "n": drivers["n"]},
                     "strength": "strong" if top["share"] >= 0.7 else "moderate",
                 }
             )
+    return out
+
+
+def _flight_groups(shots: list[dict]) -> list[dict]:
+    groups_map: dict[tuple[str, str], list[int]] = defaultdict(list)
+    for s in shots:
+        d = _dec(s)
+        groups_map[(d.get("miss_type", "unknown"), d.get("curve_cause", "unknown"))].append(s["id"])
+    return [
+        {"miss_type": k[0], "curve_cause": k[1], "n": len(v), "shot_ids": v}
+        for k, v in sorted(groups_map.items(), key=lambda kv: -len(kv[1]))
+    ]
+
+
+def _variability(shots: list[dict]) -> dict:
+    out = {}
+    for key in config.L1_METRICS:
+        vals = [_m(s, key) for s in shots if _m(s, key) is not None]
+        if vals:
+            out[key] = stats.describe(vals)
     return out
 
 
@@ -145,8 +225,11 @@ def analyze_session(shots: list[dict]) -> dict:
 
     clubs = []
     findings: list[dict] = []
+    all_candidates: set = set()
+    by_category: dict[str, list[str]] = defaultdict(list)
     for club, cs in sorted(by_club.items(), key=lambda kv: -len(kv[1])):
         category = cs[0].get("club_category") or "unknown"
+        by_category[category].append(club)
         carries = [_m(s, "carry") for s in cs if _m(s, "carry") is not None]
         carry_median = median(carries) if len(carries) >= 3 else None
 
@@ -156,22 +239,10 @@ def analyze_session(shots: list[dict]) -> dict:
             judged.append({"id": s["id"], "seq": s["seq"], **j})
         n_good = sum(1 for j in judged if j["good"])
 
-        groups_map: dict[tuple[str, str], list[int]] = defaultdict(list)
-        for s in cs:
-            d = s.get("decomposition") or {}
-            groups_map[(d.get("miss_type", "unknown"), d.get("curve_cause", "unknown"))].append(s["id"])
-        groups = [
-            {"miss_type": k[0], "curve_cause": k[1], "n": len(v), "shot_ids": v}
-            for k, v in sorted(groups_map.items(), key=lambda kv: -len(kv[1]))
-        ]
-
-        variability = {}
-        for key in config.L1_METRICS:
-            vals = [_m(s, key) for s in cs if _m(s, key) is not None]
-            if vals:
-                variability[key] = stats.describe(vals)
-
-        drivers = _drivers(cs)
+        candidates = mishit_candidates(cs, carry_median)
+        skip = {c["id"] for c in candidates}
+        all_candidates |= skip
+        drivers = _drivers(cs, skip=skip)
         clubs.append(
             {
                 "club": club,
@@ -179,17 +250,50 @@ def analyze_session(shots: list[dict]) -> dict:
                 "n": len(cs),
                 "carry_median": carry_median,
                 "good": {"n_good": n_good, "targets": config.GOOD_TARGETS.get(category, config.DEFAULT_TARGET), "shots": judged},
-                "flight_groups": groups,
-                "variability": variability,
+                "mishit_candidates": candidates,
+                "flight_groups": _flight_groups(cs),
+                "variability": _variability(cs),
                 "dispersion_drivers": drivers,
             }
         )
-        findings.extend(_findings(club, cs, groups, drivers))
+        findings.extend(_findings(club, cs, drivers))
+        if candidates:
+            findings.append(
+                {
+                    "club": club,
+                    "scope": "club",
+                    "kind": "mishit_candidates",
+                    "evidence": {"count": len(candidates), "of": len(cs)},
+                    "strength": "info",
+                    "shot_ids": [c["id"] for c in candidates],
+                }
+            )
+
+    groups = []
+    for category, names in by_category.items():
+        if len(names) < 2 or category in ("unknown", "putter"):
+            continue
+        gs = [s for n in names for s in by_club[n]]
+        label = f"{config.CATEGORY_LABEL.get(category, category)}（まとめ）"
+        drivers = _drivers(gs, outcome="side_pct", skip=all_candidates)
+        groups.append(
+            {
+                "name": label,
+                "club_category": category,
+                "clubs": names,
+                "n": len(gs),
+                "flight_groups": _flight_groups(gs),
+                "variability": _variability(gs),
+                "dispersion_drivers": drivers,
+            }
+        )
+        findings.extend(_findings(label, gs, drivers, scope="group"))
 
     return {
         "engine_version": config.ENGINE_VERSION,
         "n_shots": len(shots),
         "n_excluded": excluded,
         "clubs": clubs,
+        "groups": groups,
         "findings": findings,
     }

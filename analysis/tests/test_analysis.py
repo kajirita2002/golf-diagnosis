@@ -95,7 +95,7 @@ def test_球が少なければデータ不足と言う():
     shots = [shot(i, decomposition={"curve": "fade", "curve_cause": "strike"}) for i in range(1, 3)]
     res = analyze_session(shots)
     assert res["findings"] == [
-        {"club": "7 Iron", "kind": "insufficient", "what": "curve_cause", "n": 2, "needed": config.MIN_BLOCK_N}
+        {"club": "7 Iron", "scope": "club", "kind": "insufficient", "what": "curve_cause", "n": 2, "needed": config.MIN_BLOCK_N}
     ]
 
 
@@ -273,3 +273,65 @@ def test_比較も球が足りなければ言わない():
 def test_片方にしか無いクラブは分ける():
     r = compare_sessions([shot(1)], [shot(2, club="Driver", cat="driver")])
     assert r["clubs"] == {} and r["only_in_a"] == ["7 Iron"] and r["only_in_b"] == ["Driver"]
+
+
+# ---- ミスヒットの候補・極端な打点・番手をまとめる（2026-09-17 の実データで足した） ----
+
+from golf_analysis.session import mishit_candidates  # noqa: E402
+
+
+def test_ミスヒットは候補に出すが自動では外さない():
+    shots = [shot(i, carry=150.0 + i, side=2.0) for i in range(1, 8)]
+    # 極端なヒールで短く右へ（ネック寄り）。直すべきミスなので候補にしない
+    shots.append(shot(8, carry=51.7, side=17.4, spin_axis=47.9, decomposition={"contact": "heel_extreme"}))
+    # トップ（極端なヒールでもトップなら候補）
+    shots.append(shot(9, carry=12.4, side=-1.7, spin_axis=-100.1, decomposition={"flags": ["thin"], "contact": "heel_extreme"}))
+    shots.append(shot(10, carry=60.0, side=3.0, decomposition={"flags": ["thin"], "contact": "heel"}))
+    c = mishit_candidates(shots, 153.0)
+    assert [x["id"] for x in c] == [9, 10]
+    assert set(c[0]["reasons"]) == {"thin", "short_carry", "extreme_axis"}
+    res = analyze_session(shots)
+    assert res["clubs"][0]["n"] == 10  # 外していない
+    assert any(f["kind"] == "mishit_candidates" and f["shot_ids"] == [9, 10] for f in res["findings"])
+
+
+def test_要因分析はミスヒットの候補を除いて計算する():
+    rng = random.Random(11)
+    shots = []
+    for i in range(1, 16):
+        face = rng.gauss(2, 2.0)
+        shots.append(shot(i, face_angle=face, club_path=rng.gauss(0, 0.3), side=3 * face + rng.gauss(0, 0.5), carry=150.0))
+    # トップの1球（外れ値）
+    shots.append(shot(99, face_angle=-7.8, club_path=-1.0, side=-1.7, carry=12.4, spin_axis=-100.1, decomposition={"flags": ["thin"]}))
+    d = analyze_session(shots)["clubs"][0]["dispersion_drivers"]
+    assert d["skipped"] == 1
+    assert d["contributions"][0]["metric"] == "face_angle" and d["r2"] > 0.9
+
+
+def test_極端なヒールの群を出す():
+    shots = [shot(i, side=5.0, decomposition={"contact": "heel"}) for i in range(1, 6)]
+    shots += [shot(i, side=40.0, decomposition={"contact": "heel_extreme", "flags": ["no_club_data"]}) for i in (6, 7)]
+    f = next(x for x in analyze_session(shots)["findings"] if x["kind"] == "extreme_strike")
+    assert f["contact"] == "heel_extreme" and f["shot_ids"] == [6, 7]
+    assert f["evidence"]["mean_abs_side"] == 40.0 and f["evidence"]["mean_abs_side_others"] == 5.0
+    assert f["evidence"]["no_club_data"] == 2
+
+
+def test_同じ種類のクラブが2本以上ならまとめても見る():
+    rng = random.Random(12)
+    shots = []
+    for i, club in enumerate(["6 Iron"] * 6 + ["9 Iron"] * 6, start=1):
+        face = rng.gauss(3, 3.0)
+        carry = 140.0 if club == "6 Iron" else 105.0
+        shots.append(shot(i, club=club, face_angle=face, club_path=rng.gauss(0, 0.5), carry=carry,
+                          side=carry * 0.02 * face + rng.gauss(0, 0.3)))
+    shots.append(shot(50, club="5 Wood", cat="wood", carry=180.0))
+    res = analyze_session(shots)
+    assert [g["name"] for g in res["groups"]] == ["アイアン（まとめ）"]
+    g = res["groups"][0]
+    assert g["n"] == 12 and set(g["clubs"]) == {"6 Iron", "9 Iron"}
+    # 1本ずつ（6球）では足りない要因分析が、まとめると出る
+    assert all(c["dispersion_drivers"]["status"] == "insufficient" for c in res["clubs"] if c["club"] != "5 Wood")
+    assert g["dispersion_drivers"]["status"] == "ok" and g["dispersion_drivers"]["outcome"] == "side_pct"
+    assert g["dispersion_drivers"]["contributions"][0]["metric"] == "face_angle"
+    assert any(f["scope"] == "group" and f["kind"] == "dispersion_driver" for f in res["findings"])

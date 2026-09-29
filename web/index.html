@@ -210,6 +210,8 @@ function fmt(metric, v, signed = false) {
 const CURVE = { hook: "フック", draw: "ドロー", straight: "まっすぐ", fade: "フェード", slice: "スライス", unknown: "—" };
 const START = { push: "プッシュ", pull: "プル", straight: "まっすぐ", unknown: "—" };
 const CAUSE = { face_to_path: "フェース・トゥ・パス", strike: "打点", mixed: "両方", none: "—", unknown: "—" };
+const CONTACT = { center: "芯", heel: "ヒール", toe: "トゥ", heel_extreme: "ヒール（ネック寄り）", toe_extreme: "トゥ（先端寄り）", unknown: "—" };
+const REASON = { thin: "トップ・薄い当たり", short_carry: "キャリーが極端に短い", extreme_axis: "スピン軸が極端" };
 const causeChip = (c) => `<span class="chip ${c === "strike" ? "c-warn" : c === "face_to_path" ? "c-info" : "c-none"}">${esc(CAUSE[c] || c)}</span>`;
 const GRADE = {
   strong: ["はっきり効いた", "c-good"], moderate: ["効いた", "c-good"], weak: ["効いたか分からない", "c-none"],
@@ -277,9 +279,18 @@ function goodOf(shot) {
   return null;
 }
 
+function candidateOf(shot) {
+  if (!S.analysis) return null;
+  for (const c of S.analysis.clubs) {
+    const x = (c.mishit_candidates || []).find((m) => m.id === shot.id);
+    if (x) return x;
+  }
+  return null;
+}
+
 function renderShots() {
   const cols = ["carry", "side", "launch_direction", "spin_axis", "face_angle", "club_path", "face_to_path", "attack_angle", "impact_offset"];
-  const head = `<tr><th>#</th><th class="l">クラブ</th>${cols.map((c) => `<th>${esc(LABEL[c])}</th>`).join("")}<th class="l">球筋</th><th class="l">曲がりの原因</th><th class="l">Good</th><th class="l">打点mm</th><th></th></tr>`;
+  const head = `<tr><th>#</th><th class="l">クラブ</th>${cols.map((c) => `<th>${esc(LABEL[c])}</th>`).join("")}<th class="l">球筋</th><th class="l">曲がりの原因</th><th class="l">当たり</th><th class="l">Good</th><th class="l">打点mm</th><th></th></tr>`;
   const rows = S.shots.map((s) => {
     const m = s.metrics, d = s.decomposition, g = goodOf(s);
     const gChip = !g || g.good === null ? `<span class="chip c-none">—</span>`
@@ -290,6 +301,7 @@ function renderShots() {
       ${cols.map((c) => `<td>${fmt(c, m[c], ["side", "launch_direction", "spin_axis", "face_angle", "club_path", "face_to_path", "impact_offset"].includes(c))}${c === "impact_offset" && manual ? "✎" : ""}</td>`).join("")}
       <td class="l">${esc(START[d.start_line])}・${esc(CURVE[d.curve])}</td>
       <td class="l">${causeChip(d.curve_cause)}${(d.notes || []).length ? ` <span title="${esc(d.notes.join("\n"))}">⚠︎</span>` : ""}</td>
+      <td class="l"><span class="chip ${/extreme/.test(d.contact) ? "c-bad" : d.contact === "center" ? "c-good" : "c-none"}">${esc(CONTACT[d.contact] || "—")}</span>${(d.flags || []).includes("thin") ? ` <span class="chip c-warn">薄い</span>` : ""}${candidateOf(s) ? ` <span class="chip c-warn" title="${esc(candidateOf(s).reasons.map((r) => REASON[r] || r).join("・"))}">除外候補</span>` : ""}</td>
       <td class="l">${gChip} <button class="ghost small" data-act="good">切替</button></td>
       <td class="l"><input type="number" step="1" min="-60" max="60" style="width:64px" data-act="offset" value="${m.impact_offset != null && manual ? Math.round(m.impact_offset * 1000) : ""}"></td>
       <td><button class="ghost small" data-act="excl">${s.excluded ? "戻す" : "除外"}</button></td></tr>`;
@@ -339,7 +351,13 @@ function findingText(f) {
         ? `曲がった${f.evidence.of}球のうち<b>${f.evidence.count}球${ids}はフェース・トゥ・パス</b>が原因です。`
         : `曲がった${f.evidence.of}球のうち<b>${f.evidence.count}球はフェース・トゥ・パス</b>（フェースとクラブの進む向きの差）が原因です。`;
     case "dispersion_driver":
-      return `左右のばらつきの<b>${Math.round(f.evidence.share * 100)}%は${esc(LABEL[f.metric] || f.metric)}</b>で説明できます（${f.evidence.n}球・R² ${f.evidence.r2.toFixed(2)}）。ばらつきを減らすならここから。`;
+      return `左右のばらつき${f.outcome === "side_pct" ? "（キャリーに対する割合）" : ""}の<b>${Math.round(f.evidence.share * 100)}%は${esc(LABEL[f.metric] || f.metric)}</b>で説明できます（${f.evidence.n}球・R² ${f.evidence.r2.toFixed(2)}）。ばらつきを減らすならここから。`;
+    case "extreme_strike": {
+      const e = f.evidence, where = f.contact === "heel_extreme" ? "ヒール（ネック寄り）" : "トゥ（先端寄り）";
+      return `<b>${e.count}球${ids}が極端な${where}</b>の当たりです。左右のずれは平均 <b>${fmt("side", e.mean_abs_side)}</b>（ほかの球は ${fmt("side", e.mean_abs_side_others)}）で、一番大きなミスはここから来ています${e.no_club_data ? `（うち${e.no_club_data}球は TrackMan がクラブの値を取れていません）` : ""}。フェースとは別の問題です。`;
+    }
+    case "mishit_candidates":
+      return `<b>${f.evidence.count}球${ids}</b>はトップ・薄い当たりなどのミスヒットに見えます。ばらつきの分析からは外して計算しました。全体からも外すなら「1球ずつ」で除外してください。`;
     case "need_data":
       return `打点のデータが<b>${f.evidence.missing}球ぶん</b>ありません。インパクトテープの結果を「1球ずつ」で入れると、打点が原因かを確かめられます。`;
     case "insufficient":
@@ -351,6 +369,20 @@ function findingText(f) {
 function renderAnalysis() {
   const a = S.analysis;
   let h = "";
+  // まとめ（同じ種類の複数クラブ）が一番言えることが多いので先に出す
+  for (const g of a.groups || []) {
+    const fs = a.findings.filter((f) => f.club === g.name);
+    const v = g.variability;
+    h += `<h3>${esc(g.name)}（${g.clubs.map(esc).join("・")}／${g.n}球）</h3>
+      <div class="kpi">
+        ${["face_angle", "club_path", "face_to_path", "impact_offset"].filter((k) => v[k]).map((k) =>
+          `<div><div class="muted">${esc(LABEL[k])}</div><div class="v">${fmt(k, v[k].mean, true)}</div><div class="muted">ばらつき ±${v[k].sd != null ? fmt(k, v[k].sd) : "—"}</div></div>`).join("")}
+      </div>`;
+    h += fs.map((f) => {
+      const [t, cl] = STRENGTH[f.strength] || ["", "c-none"];
+      return `<div class="finding">${t ? `<span class="chip ${cl}">${t}</span> ` : ""}${findingText(f)}</div>`;
+    }).join("") || `<p class="muted">まとめて言えることはまだありません。</p>`;
+  }
   for (const c of a.clubs) {
     const fs = a.findings.filter((f) => f.club === c.club);
     const v = c.variability;

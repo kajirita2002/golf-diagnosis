@@ -12,6 +12,7 @@
 package physics
 
 import (
+	"fmt"
 	"math"
 	"strings"
 
@@ -19,7 +20,7 @@ import (
 )
 
 // EngineVersion は分解の式と閾値の版。保存する診断には必ず付ける。
-const EngineVersion = "physics/0.1"
+const EngineVersion = "physics/0.2"
 
 // 閾値（初期値・要較正）。
 const (
@@ -32,6 +33,15 @@ const (
 	StrikeShareMax = 0.35
 	// StrikeHitM は打点のずれをギア効果の確認に使う最小の大きさ（約5mm）。
 	StrikeHitM = 0.005
+	// MinReliableSpinLoftDeg より小さいスピンロフトでは D-plane の予測を使わない。
+	// トップ・薄い当たりでは sin F / tan SL の分母が 0 に近づいて発散し、
+	// 実データ（2026-09-17 の5番ウッド）で予測 -62° のような外れ値が出た。
+	MinReliableSpinLoftDeg = 8.0
+	// CenterStrikeM より内側は「芯」、ExtremeStrikeM より外は「極端」（ネック・先端寄り）。
+	// 実データでは、ヒール 33〜37mm の球で TrackMan がクラブのデータを取れず、
+	// ボールは右へ 38〜42m 飛び出した（アイアンで一番悪かった4球）。
+	CenterStrikeM  = 0.010
+	ExtremeStrikeM = 0.030
 )
 
 // Decomposition は1球ぶんの分解の結果。
@@ -53,7 +63,11 @@ type Decomposition struct {
 	CurveCause       string   `json:"curve_cause"`                  // face_to_path / strike / mixed / none / unknown
 	StrikeConsistent *bool    `json:"strike_consistent,omitempty"`  // 残りの向きが打点のギア効果と合うか
 	MissType         string   `json:"miss_type"`                    // 例: push-fade
-	Notes            []string `json:"notes,omitempty"`
+
+	// 当たり方
+	Contact string   `json:"contact"`         // center / heel / toe / heel_extreme / toe_extreme / unknown
+	Flags   []string `json:"flags,omitempty"` // thin（薄い当たり・トップ） / no_club_data（クラブの値が取れていない）
+	Notes   []string `json:"notes,omitempty"`
 }
 
 // FaceWeight は打ち出し方向に効くフェースの割合（初期値・要較正）。
@@ -121,6 +135,14 @@ func Decompose(m model.Metrics, category string) Decomposition {
 		Curve:         "unknown",
 		CurveCause:    "unknown",
 		FaceWeight:    FaceWeight(category),
+		Contact:       classifyContact(m.ImpactOffset),
+	}
+	if m.FaceAngle == nil && m.ClubPath == nil && m.DynamicLoft == nil && m.ClubSpeed == nil {
+		d.Flags = append(d.Flags, "no_club_data")
+	}
+	thin := m.SpinLoft != nil && *m.SpinLoft < MinReliableSpinLoftDeg
+	if thin {
+		d.Flags = append(d.Flags, "thin")
 	}
 
 	// ---- 打ち出し ----
@@ -152,7 +174,10 @@ func Decompose(m model.Metrics, category string) Decomposition {
 	if m.SpinAxis != nil {
 		d.Curve = classifyCurve(*m.SpinAxis)
 	}
-	if m.FaceToPath != nil && m.SpinLoft != nil {
+	switch {
+	case thin:
+		d.Notes = append(d.Notes, "スピンロフトが小さい（薄い当たり・トップ）ので、曲がりの原因は判定しません")
+	case m.FaceToPath != nil && m.SpinLoft != nil:
 		if pred, ok := PredictAxis(*m.FaceToPath, *m.SpinLoft); ok {
 			d.PredictedAxisFTP = ptr(pred)
 			if m.SpinAxis != nil {
@@ -167,12 +192,40 @@ func Decompose(m model.Metrics, category string) Decomposition {
 		} else {
 			d.Notes = append(d.Notes, "スピンロフトが小さすぎてスピン軸を予測できません")
 		}
+	case d.Contact == "heel_extreme" || d.Contact == "toe_extreme":
+		// フェースとパスが取れていなくても、打点が極端なら原因は打点と言える。
+		// 極端なヒール（ネック寄り）はボールが右へ飛び出し、TrackMan もクラブを見失いやすい。
+		d.CurveCause = "strike"
+		d.Notes = append(d.Notes, "打点が極端（ネック・先端寄り）で、フェースとパスが取れていません。原因は打点です")
+	}
+	if d.Contact == "heel_extreme" {
+		d.Notes = append(d.Notes, fmt.Sprintf("ヒール %.0fmm（ネック寄り）の当たりです", -*m.ImpactOffset*1000))
+	} else if d.Contact == "toe_extreme" {
+		d.Notes = append(d.Notes, fmt.Sprintf("トゥ %.0fmm（先端寄り）の当たりです", *m.ImpactOffset*1000))
 	}
 	if m.ImpactOffset == nil && (d.CurveCause == "strike" || d.CurveCause == "mixed") {
 		d.Notes = append(d.Notes, "打点のデータがありません。インパクトテープの結果を入れると打点が原因かを確かめられます")
 	}
 	d.MissType = missType(d.StartLine, d.Curve)
 	return d
+}
+
+func classifyContact(offset *float64) string {
+	if offset == nil {
+		return "unknown"
+	}
+	a := math.Abs(*offset)
+	switch {
+	case a < CenterStrikeM:
+		return "center"
+	case *offset < 0 && a >= ExtremeStrikeM:
+		return "heel_extreme"
+	case *offset < 0:
+		return "heel"
+	case a >= ExtremeStrikeM:
+		return "toe_extreme"
+	}
+	return "toe"
 }
 
 func classifyStart(dir float64) string {

@@ -171,9 +171,55 @@ def run(base: str) -> None:
     print("OK")
 
 
+REAL = [("6i", "6 Iron"), ("7i", "7 Iron"), ("8i", "8 Iron"), ("9i", "9 Iron"), ("4h", "4 Hybrid"), ("5w", "5 Wood")]
+
+
+def seed_real(base: str, player_id: int) -> int:
+    """実データ（testdata/real/2026-09-17）を画面の表の貼り付けと同じ形で取り込む。セッションの id を返す。"""
+    s = call("POST", f"{base}/sessions", {"player_id": player_id, "date": "2026-09-17", "location": "実データ"})
+    for f, club in REAL:
+        with open(os.path.join(ROOT, "testdata", "real", "2026-09-17", f + ".tsv"), "rb") as fh:
+            q = "units=metric&club=" + club.replace(" ", "%20")
+            call("POST", f"{base}/sessions/{s['id']}/import?{q}", raw=fh.read(), ctype="text/plain")
+    return s["id"]
+
+
+def run_real(base: str) -> None:
+    """実データを取り込み、診断を確かめる。"""
+    p = call("POST", f"{base}/players", {"name": "Real", "handedness": "R"})
+    s = {"id": seed_real(base, p["id"])}
+    shots = {x["id"]: x for x in call("GET", f"{base}/sessions/{s['id']}/shots")}
+    an = call("GET", f"{base}/sessions/{s['id']}/analysis")
+    print("実データの findings:")
+    for f in an["findings"]:
+        print("  ", json.dumps({k: v for k, v in f.items() if k != "shot_ids"}, ensure_ascii=False))
+
+    def label(i):
+        return f"{shots[i]['club']} #{[x for x in shots.values() if x['club'] == shots[i]['club']].index(shots[i]) + 1}"
+
+    errors = []
+    iron = [f for f in an["findings"] if f["club"] == "アイアン（まとめ）"]
+    if not any(f["kind"] == "curve_cause" and f["cause"] == "face_to_path" and f["strength"] == "strong" for f in iron):
+        errors.append("アイアンの曲がりの主因がフェース・トゥ・パスと出ない")
+    ext = next((f for f in iron if f["kind"] == "extreme_strike"), None)
+    # ヒール 30mm 超は5球（6番#5・8番#3・9番#2・#4・#6）。うち4球は TrackMan がクラブを見失った
+    if not ext or ext["evidence"]["count"] != 5 or ext["evidence"]["no_club_data"] != 4:
+        errors.append(f"アイアンの極端なヒール打ちが5球（うちクラブの値なし4球）と出ない: {ext}")
+    else:
+        print("極端なヒール:", [label(i) for i in ext["shot_ids"]])
+    cands = [label(c["id"]) for c in (c for club in an["clubs"] for c in club["mishit_candidates"])]
+    print("ミスヒットの候補:", cands)
+    if "4 Hybrid #4" not in cands:
+        errors.append("4番ユーティリティの4球目（キャリー12m）が候補に出ない")
+    if errors:
+        sys.exit("失敗（実データ）: " + " / ".join(errors))
+    print("OK（実データ）")
+
+
 def main() -> None:
     with Services() as sv:
         run(sv.base)
+        run_real(sv.base)
 
 
 if __name__ == "__main__":

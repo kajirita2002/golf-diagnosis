@@ -3,13 +3,22 @@
 実データで較正したら ENGINE_VERSION を上げる（診断には必ず版を付けて返す）。
 """
 
-ENGINE_VERSION = "analysis/0.1"
+ENGINE_VERSION = "analysis/0.2"
 
 # 比べる群に最低これだけの球が無ければ「データ不足」と言う。
 # 何も言わないことも正しい出力の1つ（docs/DESIGN.md ❹）。
 MIN_BLOCK_N = 5
 # ばらつきの要因分析（回帰）に要る球数。
 MIN_DRIVER_N = 10
+
+# ミスヒットの除外候補。キャリーがそのクラブの中央値のこの割合に届かない球と、
+# スピン軸がこの角度を超える球（トップ・大きな引っかけなど）。
+MISHIT_CARRY_RATIO = 0.6
+MISHIT_AXIS_DEG = 45.0
+# 極端な打点（ネック・先端寄り）の群として出す最小の球数。
+MIN_EXTREME_STRIKE_N = 2
+
+CATEGORY_LABEL = {"driver": "ドライバー", "wood": "ウッド", "hybrid": "ユーティリティ", "iron": "アイアン", "wedge": "ウェッジ"}
 
 # Good 判定の目標の範囲（クラブの種類ごと）。
 #   side_pct   … 着地の左右のずれがキャリーの何%以内か

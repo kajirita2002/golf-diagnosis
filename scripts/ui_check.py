@@ -17,7 +17,7 @@ import tempfile
 from playwright.sync_api import sync_playwright
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from e2e import Services, seed  # noqa: E402
+from e2e import Services, seed, seed_real  # noqa: E402
 
 
 def no_overflow(page, tag: str, where: str, errors: list[str]) -> None:
@@ -77,12 +77,35 @@ def check(page, root: str, shots_dir: str, tag: str, errors: list[str]) -> None:
     page.screenshot(path=os.path.join(shots_dir, f"{tag}-4-exp.png"), full_page=True)
 
 
+def check_real(page, root: str, session_id: int, shots_dir: str, tag: str, errors: list[str]) -> None:
+    """実データのセッションで、極端なヒール・ミスヒットの候補・アイアンのまとめが画面に出るか。"""
+    page.goto(root + "/")
+    page.wait_for_selector("#work:not([hidden])")
+    page.select_option("#session", str(session_id))
+    page.wait_for_function("document.querySelectorAll('#shotTable tr[data-id]').length === 57")
+    page.click("button[data-tab=diag]")
+    page.click("#analyzeBtn")
+    page.wait_for_selector("#anOut .finding")
+    text = page.inner_text("#anOut")
+    for want in ("アイアン（まとめ）", "ネック寄り", "ミスヒット"):
+        if want not in text:
+            errors.append(f"[{tag}] 実データの診断に「{want}」が無い")
+    no_overflow(page, tag, "実データの診断", errors)
+    page.screenshot(path=os.path.join(shots_dir, f"{tag}-5-real-diag.png"), full_page=True)
+    page.click("button[data-tab=shots]")
+    if page.locator("#shotTable .chip", has_text="除外候補").count() != 5:
+        errors.append(f"[{tag}] 1球ずつの「除外候補」が5つでない")
+    no_overflow(page, tag, "実データの1球ずつ", errors)
+    page.screenshot(path=os.path.join(shots_dir, f"{tag}-6-real-shots.png"), full_page=True)
+
+
 def main() -> None:
     shots_dir = os.environ.get("SHOTS_DIR") or tempfile.mkdtemp(prefix="ui-")
     os.makedirs(shots_dir, exist_ok=True)
     errors: list[str] = []
     with Services() as sv, sync_playwright() as pw:
-        seed(sv.base)
+        seeded = seed(sv.base)
+        real_id = seed_real(sv.base, seeded["player"]["id"])
         exe = os.environ.get("PLAYWRIGHT_CHROMIUM")
         browser = pw.chromium.launch(executable_path=exe) if exe else pw.chromium.launch()
         for tag, w, h in (("pc", 1280, 900), ("phone", 390, 844)):
@@ -90,6 +113,7 @@ def main() -> None:
             page.on("pageerror", lambda e, tag=tag: errors.append(f"[{tag}] JS エラー: {e}"))
             page.on("console", lambda m, tag=tag: m.type == "error" and errors.append(f"[{tag}] console: {m.text}"))
             check(page, sv.root, shots_dir, tag, errors)
+            check_real(page, sv.root, real_id, shots_dir, tag, errors)
             page.close()
         browser.close()
     print("スクリーンショット:", shots_dir)
