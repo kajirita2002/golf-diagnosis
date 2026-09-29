@@ -3,7 +3,7 @@
   - 図の中身（点・帯・注記）はサーバーが JSON で返す。ここは描くだけで、数字を作らない。
   - 座標は右打ちのまま届く。左打ちは描くときに左右を反転する（打点のトゥ／ヒールは反転しない。
     向きは heel_on で決まる）。
-  - 色は index.html の CSS 変数で塗る。要素には class（g-good・g-miss・g-ext・g-mishit・g-band・g-axis …）
+  - 色は tokens.css の CSS 変数で塗る。要素には class（g-good・g-miss・g-ext・g-mishit・g-band・g-axis …）
     だけを付け、fill や stroke の色を属性に直書きしない（暗い表示にそのまま追従させるため）。
     形でも区別する（帯の中 ●・外 ○・極端な打点 ▲・候補 ×）。
   - 文字は全部 textContent で入れる（クラブ名は利用者の CSV から来る文字列）。

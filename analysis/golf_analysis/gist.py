@@ -48,6 +48,14 @@ def check_plain(text: str) -> list[str]:
     return bad
 
 
+def check_plain_label(text: str, kinds: tuple[str, ...] = ("p", "count", "date", "cost", "duration")) -> bool:
+    """構造のラベル（P の番号・回数・日付・料金・時間…）が、決めた形のどれかか（docs/DESIGN_v2.md §3 R1）。"""
+    import re
+
+    t = (text or "").strip()
+    return any(re.fullmatch(config.PLAIN_LABEL_PATTERNS[k], t) for k in kinds if k in config.PLAIN_LABEL_PATTERNS)
+
+
 def freq(k: int | None, n: int | None) -> str | None:
     """件数 → 量の言葉（固定の閾値）。全体が少なすぎれば言わない（None）。"""
     if k is None or not n or n < MIN_N:

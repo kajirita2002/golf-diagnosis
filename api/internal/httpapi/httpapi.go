@@ -131,6 +131,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/players", s.listPlayers)
 	mux.HandleFunc("POST /v1/players", s.createPlayer)
 	mux.HandleFunc("GET /v1/players/{id}", s.getPlayer)
+	// 新しい導線（docs/DESIGN_v2.md §15 段1。home.go）
+	mux.HandleFunc("POST /v1/me", s.me)
+	mux.HandleFunc("PATCH /v1/players/{id}", s.patchPlayer)
+	mux.HandleFunc("GET /v1/players/{id}/home", s.home)
 	mux.HandleFunc("GET /v1/players/{id}/sessions", s.listSessions)
 	mux.HandleFunc("POST /v1/sessions", s.createSession)
 	mux.HandleFunc("GET /v1/sessions/{id}", s.getSession)
@@ -305,6 +309,9 @@ func (s *Server) listSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ss, err := s.Store.ListSessions(r.Context(), id)
+	if err == nil {
+		err = s.Store.CountShots(r.Context(), id, ss)
+	}
 	if err != nil {
 		s.fail(w, err)
 		return

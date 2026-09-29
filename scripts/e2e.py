@@ -511,8 +511,39 @@ def run_narrative_on(base: str) -> None:
     print("OK（つなぎの文・on）")
 
 
+def run_home(base: str) -> None:
+    """新しい導線の口（docs/DESIGN_v2.md §15 段1）: 使う人・設定・ホームの材料を本物の分析サービスで通す。"""
+    errors = []
+    me = call("POST", f"{base}/me", {"handedness": "R"})
+    again = call("POST", f"{base}/me")
+    if again["player"]["id"] != me["player"]["id"] or again["created"]:
+        errors.append(f"使う人が2人になった: {me} / {again}")
+    pid = me["player"]["id"]
+    p = call("PATCH", f"{base}/players/{pid}", {"prefs": {"dist_unit": "m"}})
+    if p["prefs"].get("dist_unit") != "m":
+        errors.append(f"設定が残らない: {p}")
+    call("PATCH", f"{base}/players/{pid}", {"prefs": {"dist_unit": "yd"}})
+    sid = seed_real(base, pid)
+    h = call("GET", f"{base}/players/{pid}/home")
+    f = h.get("focus") or {}
+    print("ホーム:", h.get("focus_state"), f.get("scope_id"), f.get("title"), "／", f.get("cue"), "／次:", f.get("next_title"))
+    if h.get("focus_state") != "found" or f.get("session_id") != sid or f.get("title") != "ネック寄りの当たりを減らす" or not f.get("cue") or not f.get("figure"):
+        errors.append(f"ホームの課題が実データの要点と合わない: {json.dumps(h, ensure_ascii=False)[:400]}")
+    texts = [f.get("title"), f.get("cue"), f.get("next_title")]
+    if any(t and (re.search(r"[0-9０-９A-Za-z°%]", t) or any(w in t for w in ("パス", "フェース", "打点", "ヒール", "キャリー"))) for t in texts):
+        errors.append(f"ホームの言葉に数字・専門用語: {texts}")
+    plan = create_plan_from_report(base, pid, sid)
+    h = call("GET", f"{base}/players/{pid}/home")
+    if not h.get("plan") or h["plan"]["id"] != plan["id"] or h["plan"]["title"] != "ネック寄りの当たりを減らす" or (h.get("focus") or {}).get("scope_id") != "group:iron":
+        errors.append(f"プラン中のホームが違う: {json.dumps(h, ensure_ascii=False)[:400]}")
+    if errors:
+        sys.exit("失敗（ホーム）: " + " / ".join(errors))
+    print("OK（ホーム）")
+
+
 def main() -> None:
     with Services() as sv:
+        run_home(sv.base)
         run(sv.base)
         run_real(sv.base)
         run_plan(sv.base)

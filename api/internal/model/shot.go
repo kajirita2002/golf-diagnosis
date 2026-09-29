@@ -60,7 +60,9 @@ type Player struct {
 	ID         int64      `json:"id"`
 	Name       string     `json:"name"`
 	Handedness Handedness `json:"handedness"`
-	CreatedAt  time.Time  `json:"created_at"`
+	// Prefs は画面の設定（距離の単位・比べる相手の既定など）。形は httpapi が検査する
+	Prefs     json.RawMessage `json:"prefs"`
+	CreatedAt time.Time       `json:"created_at"`
 }
 
 // Session は1回の練習。
@@ -71,6 +73,15 @@ type Session struct {
 	Location  string    `json:"location,omitempty"`
 	Source    string    `json:"source,omitempty"` // 計測器（trackman など）
 	CreatedAt time.Time `json:"created_at"`
+	// NShots・Clubs は一覧のときだけ入る（記録の画面の「この日に入っているもの」）。クラブは多い順
+	NShots int         `json:"n_shots"`
+	Clubs  []ClubCount `json:"clubs,omitempty"`
+}
+
+// ClubCount はセッションの中のクラブごとの球数。
+type ClubCount struct {
+	Club string `json:"club"`
+	N    int    `json:"n"`
 }
 
 // Shot は1球。診断の基本単位。

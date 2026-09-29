@@ -1,7 +1,7 @@
 # golf-diagnosis
 
 TrackMan × 動画 × 個人履歴から「なぜその球になったか」を特定し、**実験で確かめる**ゴルフ診断エンジン。
-設計は [`docs/DESIGN.md`](docs/DESIGN.md)。
+設計は [`docs/DESIGN.md`](docs/DESIGN.md)・[`docs/DESIGN_coaching.md`](docs/DESIGN_coaching.md)・[`docs/DESIGN_v2.md`](docs/DESIGN_v2.md)（いまの導線とデザインシステム）。
 
 いまは **Phase 0**（TrackMan の CSV だけ）。動画の解析はまだ入っていない。
 
@@ -10,7 +10,7 @@ TrackMan × 動画 × 個人履歴から「なぜその球になったか」を�
 ```
 api/        Go の API（取り込み・保存・1球ごとの物理分解）
 analysis/   Python の分析サービス（Good 判定・原因の群・ばらつき・前回との比較・実験の評価）
-web/        画面（素の HTML/JS 1ファイル。API が / で配る）
+web/        画面（素の HTML/CSS/JS。殻 index.html・tokens.css・app.js と画面ごとの JS。API が / で配る。docs/DESIGN_v2.md §14）
 testdata/   ダミーの CSV と、実データ（real/。本人の練習・数値だけ）
 scripts/    e2e.py（2つのサービスを立てて通しで確かめる）・ui_check.py（画面をブラウザで操作）
 docs/       設計
@@ -26,7 +26,7 @@ cd analysis && uv sync && uv run uvicorn golf_analysis.app:app --port 8001
 cd api && go run ./cmd/server
 ```
 
-ブラウザで http://localhost:8080/ を開くと画面が出ます（CSV の取り込み・診断・1球ずつ・前回と比べる・実験）。
+ブラウザで http://localhost:8080/ を開くと画面が出ます。下のタブは ホーム／記録（取り込み）／練習／経過。前の画面の機能との対応は [`docs/v2_stage1_mapping.md`](docs/v2_stage1_mapping.md)。
 
 ### スクショから取り込む（Claude の API を使う）
 
@@ -113,7 +113,7 @@ cd api && go vet ./... && go test ./...
 TEST_DATABASE_URL=postgres://... go test ./internal/httpapi/   # PostgreSQL でも同じテストを通す（golf スキーマを作り直す）
 cd analysis && uv run pytest -q
 python3 scripts/e2e.py        # 2つのサービスを本当に立てて通しで確かめる
-python3 scripts/ui_check.py   # 画面をブラウザで操作（Playwright。PC幅とスマホ幅・横溢れ・JSエラー）
+python3 scripts/ui_check.py   # 画面をブラウザで操作（Playwright。320/360/390px と PC・横溢れ・44px・コントラスト・JSエラー）
 ```
 
 ## 約束

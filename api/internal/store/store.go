@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -248,7 +249,12 @@ func Open(dsn string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("テーブルを作れません: %w", err)
 	}
-	return &Store{db: &conn{DB: db}}, nil
+	c := &conn{DB: db}
+	if err := ensureColumns(context.Background(), c, addedColumns); err != nil {
+		db.Close()
+		return nil, err
+	}
+	return &Store{db: c}, nil
 }
 
 // PGSchema は PostgreSQL で使うスキーマ。english-tts のテーブルと混ぜない。
@@ -271,7 +277,12 @@ func openPostgres(dsn string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("テーブルを作れません: %w", err)
 	}
-	return &Store{db: &conn{DB: db, pg: true}}, nil
+	c := &conn{DB: db, pg: true}
+	if err := ensureColumns(ctx, c, addedColumns); err != nil {
+		db.Close()
+		return nil, err
+	}
+	return &Store{db: c}, nil
 }
 
 // Close は閉じる。
@@ -292,9 +303,14 @@ func (s *Store) CreatePlayer(ctx context.Context, p *model.Player) error {
 		return fmt.Errorf("handedness は R か L")
 	}
 	ts := now()
-	if err := s.db.QueryRowContext(ctx, `INSERT INTO {s}players(name, handedness, created_at) VALUES(?,?,?) RETURNING id`, p.Name, p.Handedness, ts).Scan(&p.ID); err != nil {
+	prefs := p.Prefs
+	if len(prefs) == 0 {
+		prefs = json.RawMessage("{}")
+	}
+	if err := s.db.QueryRowContext(ctx, `INSERT INTO {s}players(name, handedness, created_at, prefs_json) VALUES(?,?,?,?) RETURNING id`, p.Name, p.Handedness, ts, string(prefs)).Scan(&p.ID); err != nil {
 		return err
 	}
+	p.Prefs = prefs
 	p.CreatedAt = parseTS(ts)
 	return nil
 }
@@ -302,9 +318,9 @@ func (s *Store) CreatePlayer(ctx context.Context, p *model.Player) error {
 // GetPlayer は選手を読む。
 func (s *Store) GetPlayer(ctx context.Context, id int64) (*model.Player, error) {
 	var p model.Player
-	var ts string
-	err := s.db.QueryRowContext(ctx, `SELECT id, name, handedness, created_at FROM {s}players WHERE id=?`, id).
-		Scan(&p.ID, &p.Name, &p.Handedness, &ts)
+	var ts, prefs string
+	err := s.db.QueryRowContext(ctx, `SELECT id, name, handedness, created_at, prefs_json FROM {s}players WHERE id=?`, id).
+		Scan(&p.ID, &p.Name, &p.Handedness, &ts, &prefs)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -312,12 +328,13 @@ func (s *Store) GetPlayer(ctx context.Context, id int64) (*model.Player, error) 
 		return nil, err
 	}
 	p.CreatedAt = parseTS(ts)
+	p.Prefs = json.RawMessage(prefs)
 	return &p, nil
 }
 
 // ListPlayers は選手を作った順に返す。
 func (s *Store) ListPlayers(ctx context.Context) ([]model.Player, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name, handedness, created_at FROM {s}players ORDER BY id`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, handedness, created_at, prefs_json FROM {s}players ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -325,14 +342,67 @@ func (s *Store) ListPlayers(ctx context.Context) ([]model.Player, error) {
 	out := []model.Player{}
 	for rows.Next() {
 		var p model.Player
-		var ts string
-		if err := rows.Scan(&p.ID, &p.Name, &p.Handedness, &ts); err != nil {
+		var ts, prefs string
+		if err := rows.Scan(&p.ID, &p.Name, &p.Handedness, &ts, &prefs); err != nil {
 			return nil, err
 		}
 		p.CreatedAt = parseTS(ts)
+		p.Prefs = json.RawMessage(prefs)
 		out = append(out, p)
 	}
 	return out, rows.Err()
+}
+
+// UpdatePlayer は利き手と設定を書き換える（nil の項目は変えない）。
+func (s *Store) UpdatePlayer(ctx context.Context, id int64, hand *model.Handedness, prefs json.RawMessage) (*model.Player, error) {
+	if hand != nil && *hand != model.RightHanded && *hand != model.LeftHanded {
+		return nil, fmt.Errorf("handedness は R か L")
+	}
+	if _, err := s.GetPlayer(ctx, id); err != nil {
+		return nil, err
+	}
+	if hand != nil {
+		if _, err := s.db.ExecContext(ctx, `UPDATE {s}players SET handedness=? WHERE id=?`, *hand, id); err != nil {
+			return nil, err
+		}
+	}
+	if prefs != nil {
+		if _, err := s.db.ExecContext(ctx, `UPDATE {s}players SET prefs_json=? WHERE id=?`, string(prefs), id); err != nil {
+			return nil, err
+		}
+	}
+	return s.GetPlayer(ctx, id)
+}
+
+// EnsurePlayer は画面の「使う人」を返す（docs/DESIGN_v2.md §2.2「画面から選手を外す」）。
+// 一番古い選手がいればその人、いなければ name・hand で1人作る。作ったら created=true。
+// 2つの端末が同時に初回を開いても、あとから作ったほうではなく一番古い人を返し直す。
+func (s *Store) EnsurePlayer(ctx context.Context, name string, hand model.Handedness) (*model.Player, bool, error) {
+	first := func() (*model.Player, error) {
+		var id int64
+		err := s.db.QueryRowContext(ctx, `SELECT id FROM {s}players ORDER BY id LIMIT 1`).Scan(&id)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		if err != nil {
+			return nil, err
+		}
+		return s.GetPlayer(ctx, id)
+	}
+	if p, err := first(); err == nil {
+		return p, false, nil
+	} else if !errors.Is(err, ErrNotFound) {
+		return nil, false, err
+	}
+	p := &model.Player{Name: name, Handedness: hand}
+	if err := s.CreatePlayer(ctx, p); err != nil {
+		return nil, false, err
+	}
+	again, err := first()
+	if err != nil {
+		return nil, false, err
+	}
+	return again, again.ID == p.ID, nil
 }
 
 // ---- sessions ----
@@ -385,6 +455,43 @@ func (s *Store) ListSessions(ctx context.Context, playerID int64) ([]model.Sessi
 		out = append(out, se)
 	}
 	return out, rows.Err()
+}
+
+// CountShots は選手のセッションごと・クラブごとの球数を ss に入れる（除外した球も数える）。
+func (s *Store) CountShots(ctx context.Context, playerID int64, ss []model.Session) error {
+	rows, err := s.db.QueryContext(ctx, `SELECT sh.session_id, sh.club, COUNT(*) FROM {s}shots sh JOIN {s}sessions se ON se.id = sh.session_id
+		WHERE se.player_id=? GROUP BY sh.session_id, sh.club`, playerID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	by := map[int64][]model.ClubCount{}
+	for rows.Next() {
+		var sid int64
+		var c model.ClubCount
+		if err := rows.Scan(&sid, &c.Club, &c.N); err != nil {
+			return err
+		}
+		by[sid] = append(by[sid], c)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for i := range ss {
+		cs := by[ss[i].ID]
+		sort.Slice(cs, func(a, b int) bool {
+			if cs[a].N != cs[b].N {
+				return cs[a].N > cs[b].N
+			}
+			return cs[a].Club < cs[b].Club
+		})
+		n := 0
+		for _, c := range cs {
+			n += c.N
+		}
+		ss[i].NShots, ss[i].Clubs = n, cs
+	}
+	return nil
 }
 
 // ---- shots ----

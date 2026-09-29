@@ -199,3 +199,16 @@ def test_プランの型にも最初に出す言葉が入る(shots):
     plain = r.json()["plan"]["trigger"]["plain"]
     assert plain["title"] == "ネック寄りの当たりを減らす" and "読めない" in plain["why"]
     assert all(gist.check_plain(t) == [] for t in plain.values())
+
+
+def test_構造のラベルは決めた形だけ():
+    ok = [("P2", "p"), ("P5.5", "p"), ("10回中8回", "count"), ("26球中9球", "count"), ("2回目", "count"), ("8/10", "count"),
+          ("9月29日", "date"), ("9月29日（今日）", "date"), ("9月17日（木）", "date"), ("約$0.2", "cost"), ("約40分", "duration"),
+          ("9番アイアン", "club"), ("ドライバー", "club"), ("Swing Lab", "brand")]
+    for text, kind in ok:
+        assert gist.check_plain_label(text, (kind,)), (text, kind)
+    # 所見の文や、ほかの数字は通さない（角度・割合・英字）
+    for text in ["右へ3度", "8/10で合格", "P2 クラブが内側", "30%", "7 Iron", "Swing", "９月", "約40ヤード"]:
+        assert not gist.check_plain_label(text, ("p", "count", "date", "cost", "duration", "club", "brand")), text
+    # 種類を絞ると、その形だけ
+    assert not gist.check_plain_label("9月29日", ("count",))
