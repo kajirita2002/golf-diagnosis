@@ -39,6 +39,7 @@ type Server struct {
 	Analyzer Analyzer
 	Adapters map[string]ingest.Adapter
 	Static   http.Handler // 画面（nil なら配らない）
+	Password string       // 空でなければ全部に Basic 認証を掛ける（auth.go）
 	Log      *slog.Logger
 }
 
@@ -80,7 +81,7 @@ func (s *Server) Handler() http.Handler {
 	if s.Static != nil {
 		mux.Handle("GET /", s.Static)
 	}
-	return mux
+	return securityHeaders(s.requireAuth(mux))
 }
 
 // ---- 応答 ----

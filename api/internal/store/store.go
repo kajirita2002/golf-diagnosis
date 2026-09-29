@@ -1,7 +1,11 @@
 // Package store は選手・セッション・ショット・実験を保存する。
 //
-// Phase 0 は SQLite（純 Go の modernc.org/sqlite）。本番で Cloud SQL（PostgreSQL）に
-// 移すときも、SQL はこのファイルの中だけに置く。
+// 保存先は2つ: SQLite（手元・テスト。純 Go の modernc.org/sqlite）と PostgreSQL（公開先）。
+// **SQL は1か所にだけ書く。** 違いはプレースホルダ（? と $1）と ID の型だけなので、
+// ? で書いて PostgreSQL のときに $n へ置き換える（rebind）。両方に手で書くと片方だけ直す事故になる。
+//
+// PostgreSQL では **golf スキーマ** に作る。english-tts と同じデータベースを使うので、
+// 同じ名前のテーブル（sessions）とぶつけない。
 //
 // 計測値は JSON の列（metrics_json）に持つ。項目は計測器の対応で増えるので、
 // 列を足すたびに移行を書くより、値の形を model.Metrics で1か所に固定するほうが安全。
@@ -13,8 +17,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
+	"strconv"
+	"strings"
 	"time"
 
+	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "modernc.org/sqlite"
 
 	"github.com/kajirita2002/golf-diagnosis/api/internal/model"
@@ -25,18 +33,72 @@ var ErrNotFound = errors.New("not found")
 
 // Store は保存先。
 type Store struct {
-	db *sql.DB
+	db *conn
+}
+
+// conn は *sql.DB に、PostgreSQL のときだけプレースホルダを置き換える層をかぶせたもの。
+type conn struct {
+	*sql.DB
+	pg bool
+}
+
+func (c *conn) ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error) {
+	return c.DB.ExecContext(ctx, rebind(c.pg, q), args...)
+}
+
+func (c *conn) QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error) {
+	return c.DB.QueryContext(ctx, rebind(c.pg, q), args...)
+}
+
+func (c *conn) QueryRowContext(ctx context.Context, q string, args ...any) *sql.Row {
+	return c.DB.QueryRowContext(ctx, rebind(c.pg, q), args...)
+}
+
+func (c *conn) BeginTx(ctx context.Context, opts *sql.TxOptions) (*txn, error) {
+	t, err := c.DB.BeginTx(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	return &txn{t, c.pg}, nil
+}
+
+type txn struct {
+	*sql.Tx
+	pg bool
+}
+
+func (t *txn) QueryRowContext(ctx context.Context, q string, args ...any) *sql.Row {
+	return t.Tx.QueryRowContext(ctx, rebind(t.pg, q), args...)
+}
+
+// rebind は ? を $1, $2, ... に置き換える（PostgreSQL のときだけ）。
+// SQL の中に文字としての ? は書かない約束（書くと置き換わる）。
+func rebind(pg bool, q string) string {
+	if !pg {
+		return q
+	}
+	var b strings.Builder
+	n := 0
+	for _, r := range q {
+		if r == '?' {
+			n++
+			b.WriteString("$" + strconv.Itoa(n))
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 const schema = `
 CREATE TABLE IF NOT EXISTS players (
-	id          INTEGER PRIMARY KEY AUTOINCREMENT,
+	id          {{ID}},
 	name        TEXT NOT NULL,
 	handedness  TEXT NOT NULL CHECK (handedness IN ('R','L')),
 	created_at  TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS sessions (
-	id          INTEGER PRIMARY KEY AUTOINCREMENT,
+	id          {{ID}},
 	player_id   INTEGER NOT NULL REFERENCES players(id),
 	date        TEXT NOT NULL,
 	location    TEXT NOT NULL DEFAULT '',
@@ -44,7 +106,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 	created_at  TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS shots (
-	id              INTEGER PRIMARY KEY AUTOINCREMENT,
+	id              {{ID}},
 	session_id      INTEGER NOT NULL REFERENCES sessions(id),
 	seq             INTEGER NOT NULL,
 	club            TEXT NOT NULL DEFAULT '',
@@ -61,7 +123,7 @@ CREATE TABLE IF NOT EXISTS shots (
 	UNIQUE (session_id, seq)
 );
 CREATE TABLE IF NOT EXISTS experiments (
-	id             INTEGER PRIMARY KEY AUTOINCREMENT,
+	id             {{ID}},
 	session_id     INTEGER NOT NULL REFERENCES sessions(id),
 	hypothesis     TEXT NOT NULL,
 	intervention   TEXT NOT NULL DEFAULT '',
@@ -71,7 +133,7 @@ CREATE TABLE IF NOT EXISTS experiments (
 	created_at     TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS blocks (
-	id             INTEGER PRIMARY KEY AUTOINCREMENT,
+	id             {{ID}},
 	experiment_id  INTEGER NOT NULL REFERENCES experiments(id),
 	kind           TEXT NOT NULL,
 	seq_from       INTEGER NOT NULL,
@@ -79,9 +141,15 @@ CREATE TABLE IF NOT EXISTS blocks (
 );
 `
 
-// Open はデータベースを開いてテーブルを用意する。":memory:" でテスト用。
-func Open(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", path)
+// Open はデータベースを開いてテーブルを用意する。
+//
+//	postgres://... / postgresql://...  → PostgreSQL（golf スキーマ）
+//	それ以外                          → SQLite のファイル（":memory:" でテスト用）
+func Open(dsn string) (*Store, error) {
+	if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
+		return openPostgres(dsn)
+	}
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
 	}
@@ -92,11 +160,42 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	if _, err := db.Exec(schema); err != nil {
+	if _, err := db.Exec(strings.ReplaceAll(schema, "{{ID}}", "INTEGER PRIMARY KEY AUTOINCREMENT")); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("テーブルを作れません: %w", err)
 	}
-	return &Store{db: db}, nil
+	return &Store{db: &conn{DB: db}}, nil
+}
+
+// PGSchema は PostgreSQL で使うスキーマ。english-tts のテーブルと混ぜない。
+const PGSchema = "golf"
+
+func openPostgres(dsn string) (*Store, error) {
+	u, err := url.Parse(dsn)
+	if err != nil {
+		return nil, fmt.Errorf("DATABASE_URL を読めません")
+	}
+	// 接続ごとに golf スキーマを見るようにする（pgx は知らないパラメータを接続時の設定として送る）
+	q := u.Query()
+	q.Set("search_path", PGSchema)
+	u.RawQuery = q.Encode()
+	db, err := sql.Open("pgx", u.String())
+	if err != nil {
+		return nil, err
+	}
+	db.SetMaxOpenConns(5) // 無料の PostgreSQL は同時接続が少ない。english-tts と分け合う
+	db.SetConnMaxIdleTime(5 * time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if _, err := db.ExecContext(ctx, "CREATE SCHEMA IF NOT EXISTS "+PGSchema); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("スキーマを作れません: %w", err)
+	}
+	if _, err := db.ExecContext(ctx, strings.ReplaceAll(schema, "{{ID}}", "BIGSERIAL PRIMARY KEY")); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("テーブルを作れません: %w", err)
+	}
+	return &Store{db: &conn{DB: db, pg: true}}, nil
 }
 
 // Close は閉じる。
@@ -117,11 +216,9 @@ func (s *Store) CreatePlayer(ctx context.Context, p *model.Player) error {
 		return fmt.Errorf("handedness は R か L")
 	}
 	ts := now()
-	res, err := s.db.ExecContext(ctx, `INSERT INTO players(name, handedness, created_at) VALUES(?,?,?)`, p.Name, p.Handedness, ts)
-	if err != nil {
+	if err := s.db.QueryRowContext(ctx, `INSERT INTO players(name, handedness, created_at) VALUES(?,?,?) RETURNING id`, p.Name, p.Handedness, ts).Scan(&p.ID); err != nil {
 		return err
 	}
-	p.ID, _ = res.LastInsertId()
 	p.CreatedAt = parseTS(ts)
 	return nil
 }
@@ -170,12 +267,10 @@ func (s *Store) CreateSession(ctx context.Context, se *model.Session) error {
 		return err
 	}
 	ts := now()
-	res, err := s.db.ExecContext(ctx, `INSERT INTO sessions(player_id, date, location, source, created_at) VALUES(?,?,?,?,?)`,
-		se.PlayerID, se.Date, se.Location, se.Source, ts)
-	if err != nil {
+	if err := s.db.QueryRowContext(ctx, `INSERT INTO sessions(player_id, date, location, source, created_at) VALUES(?,?,?,?,?) RETURNING id`,
+		se.PlayerID, se.Date, se.Location, se.Source, ts).Scan(&se.ID); err != nil {
 		return err
 	}
-	se.ID, _ = res.LastInsertId()
 	se.CreatedAt = parseTS(ts)
 	return nil
 }
@@ -246,13 +341,12 @@ func (s *Store) AppendShots(ctx context.Context, sessionID int64, shots []model.
 		if sh.HitAt != nil {
 			hit = sh.HitAt.UTC().Format(time.RFC3339)
 		}
-		res, err := tx.ExecContext(ctx, `INSERT INTO shots(session_id, seq, club, club_category, hit_at, metrics_json, estimated_json, derived_json, manual_json, excluded, good_override, raw_json, adapter_version)
-			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-			sh.SessionID, sh.Seq, sh.Club, sh.ClubCategory, hit, string(mj), string(ej), string(dj), string(manj), boolInt(sh.Excluded), nullBool(sh.GoodOverride), string(raw), sh.AdapterVersion)
+		err := tx.QueryRowContext(ctx, `INSERT INTO shots(session_id, seq, club, club_category, hit_at, metrics_json, estimated_json, derived_json, manual_json, excluded, good_override, raw_json, adapter_version)
+			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id`,
+			sh.SessionID, sh.Seq, sh.Club, sh.ClubCategory, hit, string(mj), string(ej), string(dj), string(manj), boolInt(sh.Excluded), nullBool(sh.GoodOverride), string(raw), sh.AdapterVersion).Scan(&sh.ID)
 		if err != nil {
 			return nil, err
 		}
-		sh.ID, _ = res.LastInsertId()
 		out = append(out, sh)
 	}
 	if err := tx.Commit(); err != nil {
@@ -348,12 +442,10 @@ func (s *Store) CreateExperiment(ctx context.Context, e *model.Experiment) error
 		return fmt.Errorf("goal %q は使えません", e.Goal)
 	}
 	ts := now()
-	res, err := s.db.ExecContext(ctx, `INSERT INTO experiments(session_id, hypothesis, intervention, target_metric, goal, club, created_at) VALUES(?,?,?,?,?,?,?)`,
-		e.SessionID, e.Hypothesis, e.Intervention, e.TargetMetric, e.Goal, e.Club, ts)
-	if err != nil {
+	if err := s.db.QueryRowContext(ctx, `INSERT INTO experiments(session_id, hypothesis, intervention, target_metric, goal, club, created_at) VALUES(?,?,?,?,?,?,?) RETURNING id`,
+		e.SessionID, e.Hypothesis, e.Intervention, e.TargetMetric, e.Goal, e.Club, ts).Scan(&e.ID); err != nil {
 		return err
 	}
-	e.ID, _ = res.LastInsertId()
 	e.CreatedAt = parseTS(ts)
 	e.Blocks = []model.Block{}
 	return nil
@@ -367,11 +459,9 @@ func (s *Store) AddBlock(ctx context.Context, b *model.Block) error {
 	if b.SeqFrom < 1 || b.SeqTo < b.SeqFrom {
 		return fmt.Errorf("seq の範囲が不正です（%d〜%d）", b.SeqFrom, b.SeqTo)
 	}
-	res, err := s.db.ExecContext(ctx, `INSERT INTO blocks(experiment_id, kind, seq_from, seq_to) VALUES(?,?,?,?)`, b.ExperimentID, b.Kind, b.SeqFrom, b.SeqTo)
-	if err != nil {
+	if err := s.db.QueryRowContext(ctx, `INSERT INTO blocks(experiment_id, kind, seq_from, seq_to) VALUES(?,?,?,?) RETURNING id`, b.ExperimentID, b.Kind, b.SeqFrom, b.SeqTo).Scan(&b.ID); err != nil {
 		return err
 	}
-	b.ID, _ = res.LastInsertId()
 	return nil
 }
 
@@ -450,4 +540,18 @@ func nullBool(b *bool) any {
 		return nil
 	}
 	return boolInt(*b)
+}
+
+// DropForTest は PostgreSQL の golf スキーマを消す。**テスト専用**（TEST_DATABASE_URL にだけ使う）。
+func DropForTest(dsn string) error {
+	if !strings.HasPrefix(dsn, "postgres://") && !strings.HasPrefix(dsn, "postgresql://") {
+		return fmt.Errorf("PostgreSQL の URL ではありません")
+	}
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	_, err = db.Exec("DROP SCHEMA IF EXISTS " + PGSchema + " CASCADE")
+	return err
 }

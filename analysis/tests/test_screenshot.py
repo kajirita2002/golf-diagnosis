@@ -144,14 +144,9 @@ def test_HTTP_の入口(tmp_path, monkeypatch):
 
 
 def test_キーが無ければ503(monkeypatch):
+    # 本物の SDK を通す（SDK 1.x は作るときではなく送るときに落ちるので、偽物で試すと見逃す）
     monkeypatch.delenv("SCREENSHOT_FAKE_RESPONSE", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
-    import anthropic
-
-    def boom(*a, **k):
-        raise anthropic.AnthropicError("no credentials")
-
-    monkeypatch.setattr(anthropic, "Anthropic", boom)
     r = TestClient(app).post("/v1/screenshot", json={"media_type": "image/png", "data": base64.b64encode(PNG).decode()})
     assert r.status_code == 503 and "ANTHROPIC_API_KEY" in r.json()["detail"]

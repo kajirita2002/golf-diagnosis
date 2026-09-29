@@ -69,8 +69,30 @@ type env struct {
 	an *fakeAnalyzer
 }
 
+// openStore は TEST_DATABASE_URL があれば PostgreSQL（毎回 golf スキーマを作り直す）、
+// 無ければ SQLite のメモリで開く。公開先は PostgreSQL なので、両方で同じテストを通す。
+func openStore(t *testing.T) *store.Store {
+	t.Helper()
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		st, err := store.Open(":memory:")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return st
+	}
+	if err := store.DropForTest(dsn); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return st
+}
+
 func newEnv(t *testing.T) *env {
-	st, err := store.Open(":memory:")
+	st, err := openStore(t), error(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -423,4 +445,42 @@ func TestTrackManのレポートを開くリンク(t *testing.T) {
 		t.Fatalf("%v", out)
 	}
 	e.do("GET", "/v1/trackman/report-link?url="+url.QueryEscape("https://evil.example/?a=x"), nil, 400)
+}
+
+func Testパスワードを設定すると全部に掛かる(t *testing.T) {
+	st := openStore(t)
+	defer st.Close()
+	srv := New(st, &fakeAnalyzer{})
+	srv.Password = "secret"
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	get := func(path, pass string) *http.Response {
+		req, _ := http.NewRequest("GET", ts.URL+path, nil)
+		if pass != "" {
+			req.SetBasicAuth("me", pass)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp
+	}
+	if r := get("/v1/players", ""); r.StatusCode != 401 || r.Header.Get("WWW-Authenticate") == "" {
+		t.Fatalf("パスワード無しで通った: %d", r.StatusCode)
+	}
+	if r := get("/v1/players", "wrong"); r.StatusCode != 401 {
+		t.Fatalf("違うパスワードで通った: %d", r.StatusCode)
+	}
+	if r := get("/v1/players", "secret"); r.StatusCode != 200 {
+		t.Fatalf("正しいパスワードで通らない: %d", r.StatusCode)
+	}
+	// 死活監視は通す
+	if r := get("/healthz", ""); r.StatusCode != 200 {
+		t.Fatalf("/healthz: %d", r.StatusCode)
+	}
+	if r := get("/healthz", ""); r.Header.Get("Referrer-Policy") != "no-referrer" {
+		t.Fatal("安全のためのヘッダーが無い")
+	}
 }

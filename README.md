@@ -66,6 +66,23 @@ curl -s -XPOST localhost:8080/v1/experiments/1/blocks -d '{"kind":"intervention"
 curl -s localhost:8080/v1/experiments/1/evaluation
 ```
 
+## 公開（Render）
+
+english-tts の Render のブループリント（english-tts の `render.yaml`）に、2つ目のサービスとして載せている。
+
+- 1つのコンテナ（`Dockerfile`）で Go の API と Python の分析サービスを動かす。外に開くのは Go だけ。
+- **保存先は PostgreSQL**（無料プランはディスクを持たないので SQLite だと再起動で消える）。
+  english-tts と同じデータベースの **`golf` スキーマ**に作る（english-tts のテーブルとぶつけない）。
+- **パスワード（`APP_PASSWORD`）を必ず掛ける。** 掛けないと URL を知った人があなたの API キーで読み取りを動かせる。
+- 環境変数: `DB_PATH`（PostgreSQL の URL）/ `APP_PASSWORD` / `ANTHROPIC_API_KEY`
+
+手元で本番と同じ形を試す:
+
+```sh
+docker build -t golf-diagnosis .
+docker run -p 8080:8080 -e APP_PASSWORD=... -e DB_PATH=postgres://... -e ANTHROPIC_API_KEY=... golf-diagnosis
+```
+
 ## API
 
 | メソッド | パス | 中身 |
@@ -89,6 +106,7 @@ curl -s localhost:8080/v1/experiments/1/evaluation
 
 ```sh
 cd api && go vet ./... && go test ./...
+TEST_DATABASE_URL=postgres://... go test ./internal/httpapi/   # PostgreSQL でも同じテストを通す（golf スキーマを作り直す）
 cd analysis && uv run pytest -q
 python3 scripts/e2e.py        # 2つのサービスを本当に立てて通しで確かめる
 python3 scripts/ui_check.py   # 画面をブラウザで操作（Playwright。PC幅とスマホ幅・横溢れ・JSエラー）

@@ -8,7 +8,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
-        with: { go-version: "1.24" }
+        with: { go-version-file: api/go.mod }
       - run: cd api && go vet ./... && go test ./...
   analysis:
     runs-on: ubuntu-latest
@@ -22,7 +22,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
-        with: { go-version: "1.24" }
+        with: { go-version-file: api/go.mod }
       - uses: astral-sh/setup-uv@v6
       - run: cd analysis && uv sync
       - run: python3 scripts/e2e.py

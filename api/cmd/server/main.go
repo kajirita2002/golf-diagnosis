@@ -1,9 +1,10 @@
 // server は Golf Swing Diagnosis Engine の API。
 //
-//	DB_PATH       SQLite のファイル（既定 golf.db）
+//	DB_PATH       保存先。SQLite のファイル（既定 golf.db）か PostgreSQL の URL（postgres://...。golf スキーマに作る）
 //	ANALYSIS_URL  Python の分析サービス（既定 http://127.0.0.1:8001）
 //	WEB_DIR       画面の静的ファイル（既定 ../web。無ければ配らない）
 //	PORT          待ち受け（既定 8080）
+//	APP_PASSWORD  空でなければ全部に Basic 認証を掛ける（公開するときは必ず入れる）
 package main
 
 import (
@@ -39,6 +40,10 @@ func main() {
 
 	srv := httpapi.New(st, analysis.New(env("ANALYSIS_URL", "http://127.0.0.1:8001")))
 	srv.Log = log
+	srv.Password = os.Getenv("APP_PASSWORD")
+	if srv.Password == "" {
+		log.Warn("APP_PASSWORD が未設定です。パスワード無しで動きます（手元で使うときだけにしてください）")
+	}
 	if dir := env("WEB_DIR", "../web"); dir != "" {
 		if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
 			srv.Static = http.FileServer(http.Dir(dir))

@@ -65,12 +65,13 @@ def _client():
     fake = os.environ.get("SCREENSHOT_FAKE_RESPONSE")
     if fake:
         return _FakeClient(fake)
+    # SDK は認証情報が無くても作れてしまい、送るときに TypeError で落ちる（1.x）。
+    # 先に見て、利用者に分かる理由で断る。サーバーでは環境変数で渡す約束。
+    if not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")):
+        raise HTTPException(503, "Claude の API キーが設定されていません（ANTHROPIC_API_KEY を設定してください）")
     import anthropic
 
-    try:
-        return anthropic.Anthropic()
-    except anthropic.AnthropicError as e:
-        raise HTTPException(503, f"Claude の API の認証情報がありません（ANTHROPIC_API_KEY を設定してください）: {e}") from e
+    return anthropic.Anthropic()
 
 
 @app.get("/healthz")
