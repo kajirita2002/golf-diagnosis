@@ -215,6 +215,59 @@ CREATE TABLE IF NOT EXISTS {s}llm_jobs (
 );
 CREATE INDEX IF NOT EXISTS llm_jobs_hash ON {s}llm_jobs(kind, input_hash);
 -- 1日（UTC）・1種類ごとの使った量。上限（LLM_DAILY_LIMIT_*）はここの calls で数える。
+-- 動画のスイング（docs/DESIGN_v2.md §13.2・DESIGN_coaching.md §10.3 の形）。動画そのものと全解像度のコマは置かない。
+-- view は カタログと同じ綴り（dtl / fo）。姿勢の時系列（series_gz）は自動の取り出し（段2b）から入る。
+CREATE TABLE IF NOT EXISTS {s}swings (
+	id                  {{ID}},
+	session_id          INTEGER NOT NULL REFERENCES {s}sessions(id),
+	view                TEXT NOT NULL CHECK (view IN ('dtl','fo')),
+	club                TEXT NOT NULL DEFAULT '',
+	club_class          TEXT NOT NULL,
+	fps_measured        DOUBLE PRECISION,
+	fps_source          TEXT NOT NULL DEFAULT '',
+	width               INTEGER NOT NULL,
+	height              INTEGER NOT NULL,
+	duration_s          DOUBLE PRECISION,
+	taps_json           TEXT NOT NULL DEFAULT '[]',
+	capture_json        TEXT NOT NULL DEFAULT '{}',
+	missing_json        TEXT NOT NULL DEFAULT '[]',
+	series_gz           {{BLOB}},
+	seq_from            INTEGER,
+	seq_to              INTEGER,
+	cp_catalog_version  TEXT NOT NULL DEFAULT '',
+	is_focus_test       INTEGER NOT NULL DEFAULT 0,
+	measure_json        TEXT,
+	deleted_at          TEXT,
+	created_at          TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS swings_session ON {s}swings(session_id);
+-- P のコマ。checkpoint の種類は Go で検査する（表の CHECK で縛らない＝あとで P を足せる）。
+-- thumb は長辺 360px の JPEG だけ（httpapi が大きさを確かめてから入れる）。
+CREATE TABLE IF NOT EXISTS {s}swing_frames (
+	swing_id        INTEGER NOT NULL REFERENCES {s}swings(id),
+	checkpoint      TEXT NOT NULL,
+	t               DOUBLE PRECISION,
+	frame           INTEGER,
+	source          TEXT NOT NULL DEFAULT 'manual',
+	landmarks_json  TEXT NOT NULL DEFAULT '[]',
+	taps_json       TEXT NOT NULL DEFAULT '{}',
+	thumb           {{BLOB}},
+	PRIMARY KEY (swing_id, checkpoint)
+);
+-- スイング × 項目 × カタログの版の判定（§13.2）。日をまたいで引く（比較・10球テスト・推移）
+CREATE TABLE IF NOT EXISTS {s}swing_checks (
+	swing_id         INTEGER NOT NULL REFERENCES {s}swings(id),
+	item_id          TEXT NOT NULL,
+	catalog_version  TEXT NOT NULL,
+	state            TEXT NOT NULL CHECK (state IN ('in_range','out_range','unknown','reference')),
+	fault_id         TEXT,
+	basis            TEXT NOT NULL,
+	reason           TEXT NOT NULL DEFAULT '',
+	evidence_json    TEXT NOT NULL DEFAULT '{}',
+	llm_job_id       INTEGER REFERENCES {s}llm_jobs(id),
+	created_at       TEXT NOT NULL,
+	PRIMARY KEY (swing_id, item_id, catalog_version)
+);
 CREATE TABLE IF NOT EXISTS {s}llm_usage (
 	day            TEXT NOT NULL,
 	kind           TEXT NOT NULL,
@@ -245,7 +298,7 @@ func Open(dsn string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	if _, err := db.Exec(rebind(false, strings.ReplaceAll(schema, "{{ID}}", "INTEGER PRIMARY KEY AUTOINCREMENT"))); err != nil {
+	if _, err := db.Exec(rebind(false, strings.NewReplacer("{{ID}}", "INTEGER PRIMARY KEY AUTOINCREMENT", "{{BLOB}}", "BLOB").Replace(schema))); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("テーブルを作れません: %w", err)
 	}
@@ -273,7 +326,7 @@ func openPostgres(dsn string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("スキーマを作れません: %w", err)
 	}
-	if _, err := db.ExecContext(ctx, rebind(true, strings.ReplaceAll(schema, "{{ID}}", "BIGSERIAL PRIMARY KEY"))); err != nil {
+	if _, err := db.ExecContext(ctx, rebind(true, strings.NewReplacer("{{ID}}", "BIGSERIAL PRIMARY KEY", "{{BLOB}}", "BYTEA").Replace(schema))); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("テーブルを作れません: %w", err)
 	}

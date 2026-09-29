@@ -39,6 +39,10 @@ type Analyzer interface {
 	Narrative(ctx context.Context, in analysis.NarrativeInput) (json.RawMessage, error)
 	PlanCandidates(ctx context.Context, in analysis.PlanCandidatesInput) (json.RawMessage, error)
 	Versions(ctx context.Context) (string, error)
+	// 動画のチェックポイント（checkpoint.go）
+	Checkpoints(ctx context.Context, hand model.Handedness) (json.RawMessage, error)
+	CheckpointsMeasure(ctx context.Context, sw analysis.CheckpointSwing) (json.RawMessage, error)
+	CheckpointsFocus(ctx context.Context, in analysis.CheckpointFocusInput) (json.RawMessage, error)
 }
 
 // Server は API のハンドラをまとめる。
@@ -171,8 +175,19 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/plan-runs/{id}", s.getPlanRun)
 	mux.HandleFunc("PUT /v1/plan-runs/{id}/blocks", s.replaceRunBlocks)
 	mux.HandleFunc("GET /v1/plan-runs/{id}/evaluation", s.evaluatePlanRun)
+	// 動画のチェックポイント（docs/DESIGN_v2.md §13.1・段2a。checkpoint.go）
+	mux.HandleFunc("GET /v1/checkpoints", s.getCheckpoints)
+	mux.HandleFunc("GET /v1/sessions/{id}/swings", s.listSwings)
+	mux.HandleFunc("POST /v1/sessions/{id}/swings", s.createSwing)
+	mux.HandleFunc("GET /v1/swings/{id}", s.getSwing)
+	mux.HandleFunc("PATCH /v1/swings/{id}", s.patchSwing)
+	mux.HandleFunc("DELETE /v1/swings/{id}", s.deleteSwing)
+	mux.HandleFunc("PUT /v1/swings/{id}/frames", s.putSwingFrames)
+	mux.HandleFunc("PUT /v1/swings/{id}/taps", s.putSwingTaps)
+	mux.HandleFunc("GET /v1/swings/{id}/thumbs/{p}", s.getSwingThumb)
+	mux.HandleFunc("GET /v1/sessions/{id}/checks", s.sessionChecks)
 	if s.Static != nil {
-		mux.Handle("GET /", s.Static)
+		mux.Handle("GET /", vendorCache(s.Static))
 	}
 	return securityHeaders(s.requireAuth(mux))
 }

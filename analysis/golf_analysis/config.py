@@ -5,7 +5,8 @@
 
 # 0.4: 実験の評価と比較の bootstrap・並べ替えをベクトル化（乱数の引き方が変わった）。
 #      プランの練習の球（warmup / drill）を診断から外す（docs/DESIGN_coaching.md §8.3・§10.2）。
-ENGINE_VERSION = "analysis/0.4"
+# 0.5: 動画のチェックポイントの測る・判定する（checkpoints/。docs/DESIGN_v2.md §5・§6.6・§13.4）。
+ENGINE_VERSION = "analysis/0.5"
 # 解説レポートとプランの候補の版（docs/DESIGN_coaching.md §10.3）。
 REPORT_VERSION = "report/0.1"
 PLAN_VERSION = "plan/0.2"
@@ -268,3 +269,33 @@ PLAIN_LABEL_PATTERNS = {
     "club": r"^\d{1,2}番(?:アイアン|ウッド|ユーティリティ)$|^(?:ドライバー|パター|ピッチングウェッジ|アプローチウェッジ|ギャップウェッジ|サンドウェッジ|ロブウェッジ)$",
     "brand": r"^Swing Lab$",
 }
+
+# ---- 動画のチェックポイント（docs/DESIGN_v2.md §5・§6）。どれも初期値・要較正 ----
+# 版（§13.4）。カタログの版はカタログの中（checkpoints/catalog.json の version）が持ち主。
+JUDGE_VERSION = "judge/1.0"
+VIDEO_VERSION = "video/0.2"
+# 初期の誤差（§5.5）。姿勢推定とタップの誤差の予算を実測するまで、画面の上の角度は ±5°、位置はボール ±0.5個。
+CP_ANGLE_ERR_DEG = 5.0
+CP_POS_ERR_BALL = 0.5
+# ボールの大きさが無いときの位置の誤差（胴の長さ L の割合）
+CP_POS_ERR_L = 0.03
+# 使う点の見えやすさ（visibility）がこれ未満なら、その項目は測らない（§6.6）
+CP_MIN_VISIBILITY = 0.6
+# 二つの物差し（ボールの直径と靴の長さ）がこれ以上食い違ったら、「測れた」を使わない（§5.4）
+CP_SCALE_MISMATCH = 0.20
+# 靴の長さをボール何個とみなすか（約 27cm ÷ 4.267cm。仮・要較正）
+CP_SHOE_LEN_BALLS = 6.3
+# 範囲が画面の上でこれより狭く写っていたら、位置の項目は測らない（ボール何個ぶん）
+CP_MIN_BAND_BALL = 0.3
+# 撮り方の検査（§6.2）: 腰の高さ・手元／スタンスの真ん中が、画面の真ん中の線からこの割合より離れたら外れ
+CP_CAMERA_TOL = 0.12
+# この fps 未満なら、P5〜P7 のクラブの項目は判断できない（§6.2。60fps を最低とする。少しの揺れを許して 50）
+CP_MIN_FPS_CLUB = 50.0
+# 足の指の付け根の仮の位置（かかと → つま先の割合）とおへその仮の高さ（腰 → 肩の割合）
+CP_BALL_OF_FOOT = 0.7
+CP_NAVEL = 0.3
+# 番手の分け方（§5.6。ボール位置の長い／真ん中／短いアイアン。人が決める値・要確認）
+CP_IRON_CLASS = {"long_iron": (3, 4, 5), "mid_iron": (6, 7), "short_iron": (8, 9, 10)}
+# 課題の候補にする条件（§4.4）: 測れた項目は何本以上の多数、見た目は何本以上の一致
+CP_FOCUS_MIN_MEASURED = 3
+CP_FOCUS_MIN_VISUAL = 2

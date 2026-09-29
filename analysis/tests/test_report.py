@@ -67,9 +67,10 @@ def _by_seq(shots):
 # ---------------------------------------------------------------- 版と既存の直し（§12）
 
 
-def test_版はanalysis_0_4(an):
-    assert config.ENGINE_VERSION == "analysis/0.4"
-    assert an["engine_version"] == "analysis/0.4"
+def test_版はanalysis_0_5(an):
+    # 0.5 は動画のチェックポイントの測る・判定を足した版（docs/DESIGN_v2.md §13.4）
+    assert config.ENGINE_VERSION == "analysis/0.5"
+    assert an["engine_version"] == "analysis/0.5"
 
 
 def test_極端な打点のフェースなしとパスなしを分けて数える(an):

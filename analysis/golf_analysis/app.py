@@ -14,7 +14,9 @@ from typing import Any
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-from . import coaching, config, drills, gist, narrative
+from . import checkpoints, coaching, config, drills, gist, narrative
+from .checkpoints import judge as cp_judge
+from .checkpoints import measure as cp_measure
 from .compare import compare_sessions
 from .experiment import VALID_GOALS, evaluate
 from .report import build_report
@@ -114,6 +116,21 @@ class VerifyIn(BaseModel):
     tsv: str
 
 
+class CheckpointMeasureIn(BaseModel):
+    """1スイングのコマ（姿勢の点・タップ・ボール）。形は checkpoints/measure.py の先頭。保存しない。"""
+
+    swing: dict[str, Any]
+
+
+class CheckpointFocusIn(BaseModel):
+    """スイングごとの判定（measure の結果に swing_id を付けたもの）→ 項目ごとの状態・課題。"""
+
+    swings: list[dict[str, Any]] = Field(default_factory=list)
+    handedness: str = "R"
+    prefs: dict[str, Any] = Field(default_factory=dict)
+    symptoms: list[str] = Field(default_factory=list)
+
+
 class _FakeClient:
     """テストと画面の確認用。SCREENSHOT_FAKE_RESPONSE のファイルの中身を Claude の答えとして返す。
     本物の API は呼ばない（本番では設定しないこと）。"""
@@ -144,7 +161,33 @@ def _client():
 @app.get("/healthz")
 def healthz() -> dict:
     # plan_version / engine_version は Go が保存した評価の版と比べる（版が変われば作り直す。§8.5）
-    return {"ok": True, "engine_version": config.ENGINE_VERSION, "plan_version": config.PLAN_VERSION}
+    return {"ok": True, "engine_version": config.ENGINE_VERSION, "plan_version": config.PLAN_VERSION,
+            "checkpoints_version": checkpoints.version(), "judge_version": config.JUDGE_VERSION}
+
+
+@app.get("/v1/checkpoints")
+def checkpoints_catalog(handedness: str = "") -> dict:
+    """チェックポイントのカタログ（版・見本の線画つき）。docs/DESIGN_v2.md §5.1。
+    handedness を渡すと {lead} / {trail} を差し込んで返す（渡さなければそのまま）。"""
+    return checkpoints.public(handedness if handedness in ("R", "L") else None)
+
+
+@app.post("/v1/checkpoints/measure")
+def checkpoints_measure(body: CheckpointMeasureIn) -> dict:
+    """1スイングを測って項目ごとに判定する（§5.4・§6.6。LLM を使わない・保存しない）。"""
+    sw = body.swing
+    if sw.get("view") not in ("dtl", "fo"):
+        raise HTTPException(400, "view は dtl か fo です")
+    _hand(sw.get("handedness") or "R")
+    if not isinstance(sw.get("frames"), dict):
+        raise HTTPException(400, "frames が要ります")
+    return cp_measure.measure_swing(sw)
+
+
+@app.post("/v1/checkpoints/focus")
+def checkpoints_focus(body: CheckpointFocusIn) -> dict:
+    """スイングごとの判定をまとめ、課題を1つと次に見るを選ぶ（§4.4）。"""
+    return cp_judge.aggregate(body.swings, _hand(body.handedness), body.prefs, body.symptoms)
 
 
 @app.post("/v1/session")

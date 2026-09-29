@@ -375,3 +375,65 @@ func truncate(s string, n int) string {
 	}
 	return s[:n] + "…"
 }
+
+// ---- 動画のチェックポイント（docs/DESIGN_v2.md §5・§6・§13.1）。持ち主は分析サービス ----
+
+// Checkpoints はカタログ（GET /v1/checkpoints）。hand を渡すと {lead} / {trail} を差し込んだ形。
+func (c *Client) Checkpoints(ctx context.Context, hand model.Handedness) (json.RawMessage, error) {
+	q := ""
+	if hand == model.RightHanded || hand == model.LeftHanded {
+		q = "?handedness=" + string(hand)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/v1/checkpoints"+q, nil)
+	if err != nil {
+		return nil, err
+	}
+	return c.do(req)
+}
+
+// CheckpointSwing は1スイングを測る入力（形は分析サービスの checkpoints/measure.py の先頭）。
+type CheckpointSwing struct {
+	View       string                     `json:"view"`
+	Club       string                     `json:"club"`
+	ClubClass  string                     `json:"club_class"`
+	Handedness model.Handedness           `json:"handedness"`
+	FPS        float64                    `json:"fps,omitempty"`
+	Width      int                        `json:"width"`
+	Height     int                        `json:"height"`
+	Ball       json.RawMessage            `json:"ball"`
+	Frames     map[string]json.RawMessage `json:"frames"`
+	Missing    []string                   `json:"missing"`
+}
+
+// CheckpointsMeasure は1スイングを測って項目ごとに判定する（保存は Go）。
+func (c *Client) CheckpointsMeasure(ctx context.Context, sw CheckpointSwing) (json.RawMessage, error) {
+	if sw.Frames == nil {
+		sw.Frames = map[string]json.RawMessage{}
+	}
+	if sw.Missing == nil {
+		sw.Missing = []string{}
+	}
+	return c.post(ctx, "/v1/checkpoints/measure", map[string]any{"swing": sw})
+}
+
+// CheckpointFocusInput はスイングごとの判定のまとめ（課題の選び方）への入力。
+type CheckpointFocusInput struct {
+	Swings     []json.RawMessage `json:"swings"`
+	Handedness model.Handedness  `json:"handedness"`
+	Prefs      json.RawMessage   `json:"prefs"`
+	Symptoms   []string          `json:"symptoms"`
+}
+
+// CheckpointsFocus はスイングごとの判定をまとめ、課題を1つ選ぶ。
+func (c *Client) CheckpointsFocus(ctx context.Context, in CheckpointFocusInput) (json.RawMessage, error) {
+	if in.Swings == nil {
+		in.Swings = []json.RawMessage{}
+	}
+	if in.Symptoms == nil {
+		in.Symptoms = []string{}
+	}
+	if len(in.Prefs) == 0 {
+		in.Prefs = json.RawMessage("{}")
+	}
+	return c.post(ctx, "/v1/checkpoints/focus", in)
+}

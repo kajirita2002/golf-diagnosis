@@ -53,6 +53,8 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 // prefsAllowed は設定に置いてよい値。知らない鍵・値は断る（画面の打ち間違いで壊れた値を残さない）。
 var prefsAllowed = map[string][]string{
 	"dist_unit": {"yd", "m"},
+	// 課題の選び方で「飛距離を優先」を選ぶと、飛ぶ力の項目を候補の先頭に寄せる（docs/DESIGN_v2.md §4.4 の 6）
+	"priority": {"accuracy", "distance"},
 }
 
 func (s *Server) patchPlayer(w http.ResponseWriter, r *http.Request) {

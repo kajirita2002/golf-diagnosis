@@ -35,6 +35,7 @@ type fakeAnalyzer struct {
 	reportErr      error
 	plan           planFake // プランの口（plan_test.go）
 	narr           narrFake // つなぎの文の口（narrative_test.go）
+	cp             cpFake   // チェックポイントの口（checkpoint_test.go）
 }
 
 func (f *fakeAnalyzer) Session(_ context.Context, shots []analysis.ShotPayload) (json.RawMessage, error) {
@@ -72,6 +73,7 @@ type env struct {
 	t  *testing.T
 	ts *httptest.Server
 	an *fakeAnalyzer
+	st *store.Store
 }
 
 // openStore は TEST_DATABASE_URL があれば PostgreSQL（毎回 golf スキーマを作り直す）、
@@ -105,7 +107,7 @@ func newEnv(t *testing.T) *env {
 	an := &fakeAnalyzer{}
 	ts := httptest.NewServer(New(st, an).Handler())
 	t.Cleanup(ts.Close)
-	return &env{t: t, ts: ts, an: an}
+	return &env{t: t, ts: ts, an: an, st: st}
 }
 
 func (e *env) do(method, path string, body any, want int) map[string]any {
