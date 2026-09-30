@@ -1232,3 +1232,88 @@ def evaluate_request(body: dict) -> dict:
         ev["progress"] = progress(plan_in, runs, body.get("history"), bool(body.get("continue_after_stop")), hand,
                                   continue_after_run=int(car) if car not in (None, "", 0) else None)
     return ev
+
+
+# ---------------------------------------------------------------- 動きのプラン（docs/DESIGN_v2.md §8.3・段4）
+
+# 見出しは STATE_TEXT を使い回し、2つ目の文だけ動きの話に替える（球の文を出すと嘘になる）。
+# stuck と pending は動きのプランでは使わない。どれも数字・専門用語・英字を使わない（テストで check_plain を当てる）
+STATE_TEXT_MOTION = {
+    "checking": "練習の最後の撮影で、範囲に入る回数を数えます。",
+    "maybe": "別の日にもう一回合格すれば「効いた」です。",
+    "worked": "別の日に続けて合格しました。次は、意識しない最初の撮影に残るかを見ます。",
+    "settled": "意識しない最初の撮影でも合格しました。",
+    "not_transferred": "意識するとできています。意識しない最初の撮影に移す段です。",
+    "failed": "何回撮り直しても合格に届きませんでした。やり方を替える段です。",
+    "stop": "飛ぶ距離か振りの速さが、続けて落ちました。",
+    "insufficient": "判定できたスイングが八回に届きませんでした。",
+}
+MOTION_FAIL_DAYS = 4  # 別の日に続けて合格しない回数（ガイドの「2〜4回」の上の端）
+MOTION_NOT_TRANSFERRED = 2
+MOTION_NEXT_TEXT = {
+    "adjust_feel": "感覚の量を変えて、もう一回撮ります。",
+    "try_baseline": "次は、練習の最初の撮影（いつも通り）で残っているかを見ます。",
+    "next_item": "次の項目へ進む候補を出します。",
+}
+
+
+def motion_progress(tests: list[dict]) -> dict:
+    """動きのプランの状態（§8.3 の表）。tests は10球テストの並び（古い順）:
+    {date, block: test | baseline, passed: true | false | null, next_hint}。
+
+    - その日の⑥（test）で合格 → 効いたかも。別の日の⑥でもう一回 → 効いた。
+    - ①（baseline・意識しない）で合格 → 定着した（⑥で合格したあと）。
+    - ⑥は合格・①は不合格が2回 → 移せていない。
+    - ⑥が別の日に4回続けて合格しない → 効かなかった（ドリルを替えるかコーチ）。2・3回目は感覚の量を変える。
+    - 最後のテストが判定できない → 足りない。
+    """
+    tests = [t for t in tests if isinstance(t, dict)]
+    pass_days: list[str] = []
+    fail_streak_days: list[str] = []
+    base_fail = 0
+    settled = False
+    for t in tests:
+        d = (t.get("date") or "")[:10]
+        if t.get("passed") is None:
+            continue
+        if t.get("block") == "baseline":
+            if t["passed"] and pass_days:
+                settled = True
+            elif not t["passed"] and pass_days:
+                base_fail += 1
+            continue
+        if t["passed"]:
+            if d not in pass_days:
+                pass_days.append(d)
+            fail_streak_days = []
+        elif d not in fail_streak_days:
+            fail_streak_days.append(d)
+    last = tests[-1] if tests else None
+    if settled:
+        state = "settled"
+    elif last and last.get("passed") is None:
+        state = "insufficient"
+    elif len(fail_streak_days) >= MOTION_FAIL_DAYS:
+        state = "failed"
+    elif pass_days and base_fail >= MOTION_NOT_TRANSFERRED:
+        state = "not_transferred"
+    elif len(pass_days) >= 2:
+        state = "worked"
+    elif pass_days:
+        state = "maybe"
+    else:
+        state = "checking"
+    head = STATE_TEXT[state][0]
+    action = {"checking": "same_template", "maybe": "same_template", "worked": "try_baseline", "settled": "next_item",
+              "not_transferred": "alternate_template", "failed": "switch_drill", "insufficient": "more_shots"}.get(state, "same_template")
+    if state in ("checking", "maybe") and 2 <= len(fail_streak_days) < MOTION_FAIL_DAYS:
+        action = "adjust_feel"
+    text = MOTION_NEXT_TEXT.get(action) or NEXT_TEXT.get(action, "")
+    if state == "insufficient":
+        text = "判定できるように撮り直します。"
+    out = {"version": config.PLAN_VERSION, "kind": "motion", "state": state, "head": head, "text": STATE_TEXT_MOTION[state],
+           "next_action": action, "next_text": text, "pass_days": pass_days, "fail_days": len(fail_streak_days)}
+    if state == "failed":
+        out["next_options"] = [{"action": "switch_drill", "text": NEXT_TEXT["switch_drill"]}, {"action": "video_or_coach", "text": NEXT_TEXT["video_or_coach"]}]
+        out["why"] = "二回から四回撮り直しても変わらないことがあります。ドリルを替えるか、コーチに見てもらう段です。約束はできません。"
+    return out
