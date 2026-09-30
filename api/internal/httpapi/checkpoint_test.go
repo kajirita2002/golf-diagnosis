@@ -23,6 +23,7 @@ import (
 // ---- 偽の分析サービス（チェックポイントの口） ----
 
 type cpFake struct {
+	video    []json.RawMessage
 	measured []analysis.CheckpointSwing
 	focus    []analysis.CheckpointFocusInput
 	stamp    string // 分析サービスの指紋（空なら stamp-1）
@@ -51,6 +52,14 @@ func (f *fakeAnalyzer) CheckpointsMeasure(_ context.Context, sw analysis.Checkpo
 		{"id":"iron.p1.dtl.hands","state":"in_range","basis":"measured_approx","reason":""},
 		{"id":"err.steep.p6","state":"same_as","reason":"","target":"iron.p6.dtl.head_vs_hands"},
 		{"id":"pow.turn","state":"unknown","reason":"not_in_2d"}]}`), nil
+}
+
+func (f *fakeAnalyzer) VideoCheckpoints(_ context.Context, body json.RawMessage) (json.RawMessage, error) {
+	if f.down {
+		return nil, analysis.ErrUnavailable
+	}
+	f.cp.video = append(f.cp.video, body)
+	return json.RawMessage(`{"video_version":"video/0.2","swings":[{"index":1,"t0":1.05,"ps":[]}],"excluded":[]}`), nil
 }
 
 func (f *fakeAnalyzer) CheckpointsStamp(_ context.Context) (string, error) {
@@ -388,5 +397,103 @@ func Testホームは動画だけの記録も返す(t *testing.T) {
 	v, _ := h["latest_video"].(map[string]any)
 	if v == nil || int64(v["session_id"].(float64)) != c.sid || v["n_swings"].(float64) != 1 || h["sessions_with_shots"].(float64) != 0 {
 		t.Fatalf("動画だけの記録: %v", h)
+	}
+}
+
+func seriesOf(n int) map[string]any {
+	t := make([]float64, n)
+	pts := make([][]float64, n)
+	for i := range t {
+		t[i] = 1 + float64(i)/60
+		pts[i] = []float64{0.5, 0.5, 0.9}
+	}
+	return map[string]any{"v": 1, "video_version": "video/0.2", "t0": 1.05, "fps": 60, "t": t, "hand": pts, "hip": pts, "chest": pts}
+}
+
+func Test姿勢の時系列は中継するだけで保存しない(t *testing.T) {
+	c := newCPEnv(t, "R")
+	frames := []map[string]any{}
+	for i := 0; i < 5; i++ {
+		frames = append(frames, map[string]any{"t": float64(i) / 60, "lm": nil})
+	}
+	out := c.do("POST", "/v1/video/checkpoints", map[string]any{"view": "dtl", "handedness": "R", "fps": 60, "width": 1280, "height": 720, "frames": frames}, 200)
+	if out["video_version"] != "video/0.2" || len(c.an.cp.video) != 1 {
+		t.Fatalf("中継: %v", out)
+	}
+	c.do("POST", "/v1/video/checkpoints", map[string]any{"view": "side", "frames": frames}, 400)
+	// 画像は送らない約束（base64 の JPEG が紛れていたら断る）
+	c.do("POST", "/v1/video/checkpoints", map[string]any{"view": "dtl", "frames": frames, "thumb": "/9j/4AAQ"}, 400)
+	if len(c.an.cp.video) != 1 {
+		t.Fatal("断った本文を分析サービスへ渡した")
+	}
+	// 上限を超える本文は読まずに断る
+	big := bytes.Repeat([]byte("0,"), maxVideoBody/2+10)
+	req, _ := http.NewRequest("POST", c.ts.URL+"/v1/video/checkpoints", bytes.NewReader(append(append([]byte(`{"view":"dtl","frames":[],"x":[`), big...), []byte(`0]}`)...)))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 400 {
+		t.Fatalf("大きすぎる本文: %d", resp.StatusCode)
+	}
+	// 何も保存していない（スイングの行ができていない）
+	if ss, _ := c.env.st.ListSwings(context.Background(), c.sid); len(ss) != 0 {
+		t.Fatalf("中継でスイングができた: %d", len(ss))
+	}
+}
+
+func Test自動で取り出した時系列をスイングに残して測る(t *testing.T) {
+	c := newCPEnv(t, "R")
+	id := c.swing("dtl")
+	frames := []map[string]any{{"checkpoint": "P1", "t": 1.0, "frame": 60, "source": "auto", "landmarks": lm33(), "thumb": jpegB64(t, 360, 202)},
+		{"checkpoint": "P4", "t": 1.8, "frame": 108, "source": "manual", "landmarks": lm33()}}
+	out := c.do("PUT", "/v1/swings/"+jsonNum(id)+"/frames", map[string]any{"frames": frames, "series": seriesOf(120)}, 200)
+	sw := out["swing"].(map[string]any)
+	if sw["has_series"] != true {
+		t.Fatalf("時系列の印: %v", sw)
+	}
+	m := c.an.cp.measured[len(c.an.cp.measured)-1]
+	if !strings.Contains(string(m.Series), `"t0":1.05`) {
+		t.Fatalf("測る入力に時系列が無い: %s", m.Series)
+	}
+	// 自動と手で直したコマは source で分かれて残る（手で直したコマの割合を出すため）
+	fs := out["frames"].([]any)
+	if fs[0].(map[string]any)["source"] != "auto" || fs[1].(map[string]any)["source"] != "manual" {
+		t.Fatalf("source: %v", fs)
+	}
+	// 時系列を渡さずにコマだけ直しても、時系列は残る
+	c.do("PUT", "/v1/swings/"+jsonNum(id)+"/frames", map[string]any{"frames": frames[:1]}, 200)
+	m = c.an.cp.measured[len(c.an.cp.measured)-1]
+	if len(m.Series) == 0 {
+		t.Fatal("コマだけ直したら時系列が消えた")
+	}
+	// 形の違う時系列・知らない欄・画像は断る
+	bad := seriesOf(10)
+	bad["thumb"] = "/9j/4AAQ"
+	c.do("PUT", "/v1/swings/"+jsonNum(id)+"/frames", map[string]any{"frames": frames, "series": bad}, 400)
+	short := seriesOf(10)
+	short["hand"] = [][]float64{{0.5, 0.5, 0.9}}
+	c.do("PUT", "/v1/swings/"+jsonNum(id)+"/frames", map[string]any{"frames": frames, "series": short}, 400)
+	back := seriesOf(10)
+	back["t"] = []float64{3, 2, 1, 4, 5, 6, 7, 8, 9, 10}
+	c.do("PUT", "/v1/swings/"+jsonNum(id)+"/frames", map[string]any{"frames": frames, "series": back}, 400)
+	c.do("PUT", "/v1/swings/"+jsonNum(id)+"/frames", map[string]any{"frames": frames, "series": seriesOf(maxSeriesFrames + 1)}, 400)
+	// 時系列が変わると指紋が変わり、次に一覧を開いたときに測り直す
+	n := len(c.an.cp.measured)
+	c.do("GET", "/v1/sessions/"+jsonNum(c.sid)+"/checks", nil, 200)
+	if len(c.an.cp.measured) != n {
+		t.Fatal("変わっていないのに測り直した")
+	}
+	if err := c.env.st.PutSwingSeries(context.Background(), id, json.RawMessage(`{"v":1,"t0":2,"fps":60,"t":[1,2,3],"hand":[null,null,null],"hip":[null,null,null],"chest":[null,null,null]}`)); err != nil {
+		t.Fatal(err)
+	}
+	c.do("GET", "/v1/sessions/"+jsonNum(c.sid)+"/checks", nil, 200)
+	if len(c.an.cp.measured) != n+1 {
+		t.Fatal("時系列が変わったのに測り直していない")
+	}
+	// JSON の列に画像は無い
+	if k, err := c.env.st.TextColumnsWithJPEG(context.Background()); err != nil || k != 0 {
+		t.Fatalf("画像: %v %d", err, k)
 	}
 }

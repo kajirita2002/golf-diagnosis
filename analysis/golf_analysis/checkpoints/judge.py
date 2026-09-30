@@ -136,6 +136,15 @@ def _one(it: dict, rs: list[tuple[Any, dict]], hand: str, symptoms: set[str]) ->
         reason = "split"
     if judged:
         basis = min((r["basis"] for _, r in judged), key=lambda b: BASIS_RANK.get(b, 9))
+    n_ref = 0
+    if state == "reference":
+        # 参考の項目（テンポ）: 値が出たスイングの多数が同じ言葉なら、その言葉を添える（合否ではない。言葉が無ければ目安の近く）
+        refs = [r for _, r in rs if r["state"] == "reference" and r.get("value")]
+        n_ref = len(refs)
+        if refs:
+            basis = min((r.get("basis") or "none" for r in refs), key=lambda b: BASIS_RANK.get(b, 9))
+            top, n = Counter(r.get("fault") for r in refs).most_common(1)[0]
+            fault = top if top and n * 2 > len(refs) else None
     single = len(judged) == 1
     measured = basis in MEASURED
     candidate = (
@@ -143,7 +152,7 @@ def _one(it: dict, rs: list[tuple[Any, dict]], hand: str, symptoms: set[str]) ->
         and ((measured and len(judged) >= config.CP_FOCUS_MIN_MEASURED) or (basis == "visual" and n_out >= config.CP_FOCUS_MIN_VISUAL))
     )
     # 代表の値（数字を見るの中だけ）: 範囲の外なら外のスイング、そうでなければ最初に判定できたもの
-    rep = next((r for _, r in judged if r["state"] == state), None) or (judged[0][1] if judged else next((r for _, r in rs if r.get("value")), None))
+    rep = next((r for _, r in judged if r["state"] == state), None) or (judged[0][1] if judged else next((r for _, r in rs if r.get("value") and (not fault or r.get("fault") == fault)), None))
     fl = next((f["label"] for f in v["faults"] if f["id"] == fault), "") if fault else ""
     frames = []
     for sid, r in rs:
@@ -153,7 +162,7 @@ def _one(it: dict, rs: list[tuple[Any, dict]], hand: str, symptoms: set[str]) ->
         "state": state, "reason": reason, "reason_text": REASON_TEXT.get(reason, reason) if reason else "",
         "detail": next((r.get("detail") for _, r in rs if r.get("detail")), ""),
         "fault": fault, "fault_label": fl, "basis": basis,
-        "n_swings": len(rs), "n_judged": len(judged), "n_in": n_in, "n_out": n_out, "single": single, "candidate": candidate,
+        "n_swings": len(rs), "n_judged": len(judged), "n_in": n_in, "n_out": n_out, "n_ref": n_ref, "single": single, "candidate": candidate,
         "value": rep.get("value") if rep else None,
         "values": [{"swing_id": sid, "state": r["state"], "value": r.get("value"), "reason": r.get("reason", "")} for sid, r in rs],
         "frames": frames[:12],

@@ -43,7 +43,9 @@ type Swing struct {
 	Missing          []string        `json:"missing"`
 	CPCatalogVersion string          `json:"cp_catalog_version"`
 	Measure          json.RawMessage `json:"measure,omitempty"` // 最後に測ったときの撮り方の検査・物差し
-	CreatedAt        time.Time       `json:"created_at"`
+	// HasSeries はスイングの区間の時系列（自動の取り出し・段2b）を残しているか
+	HasSeries bool      `json:"has_series"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // SwingFrame は1つの P のコマ（姿勢の点とタップ。サムネイルは別に取る）。

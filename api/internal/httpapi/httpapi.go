@@ -44,6 +44,7 @@ type Analyzer interface {
 	CheckpointsMeasure(ctx context.Context, sw analysis.CheckpointSwing) (json.RawMessage, error)
 	CheckpointsFocus(ctx context.Context, in analysis.CheckpointFocusInput) (json.RawMessage, error)
 	CheckpointsStamp(ctx context.Context) (string, error)
+	VideoCheckpoints(ctx context.Context, body json.RawMessage) (json.RawMessage, error)
 }
 
 // Server は API のハンドラをまとめる。
@@ -178,6 +179,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/plan-runs/{id}/evaluation", s.evaluatePlanRun)
 	// 動画のチェックポイント（docs/DESIGN_v2.md §13.1・段2a。checkpoint.go）
 	mux.HandleFunc("GET /v1/checkpoints", s.getCheckpoints)
+	mux.HandleFunc("POST /v1/video/checkpoints", s.videoCheckpoints)
 	mux.HandleFunc("GET /v1/sessions/{id}/swings", s.listSwings)
 	mux.HandleFunc("POST /v1/sessions/{id}/swings", s.createSwing)
 	mux.HandleFunc("GET /v1/swings/{id}", s.getSwing)

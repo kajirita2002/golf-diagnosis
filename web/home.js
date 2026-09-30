@@ -12,7 +12,12 @@ const Home = (() => {
   // 状態 → 見出し・主ボタン。h は GET /v1/players/{id}/home（使う人がまだいなければ null）。
   // local は端末の中だけの状態（段2以降: 動画の処理が途中・置き方が前回と違う）。
   function homeState(h, local = {}) {
-    if (local.videoPending) return { key: "video_resume", heading: "動画の処理が途中です", primary: { label: "続きから処理する", href: "#/record" } };
+    if (local.videoPending) {
+      // 途中の動画の記録へ（同じ動画を選び直すと、取ってある体の点で続きから処理する）
+      const vp = typeof local.videoPending === "object" ? local.videoPending : {};
+      const href = vp.date ? `#/video/${vp.date}${vp.session ? `?session=${vp.session}` : ""}` : "#/record";
+      return { key: "video_resume", heading: "動画の処理が途中です", primary: { label: "続きから処理する", href } };
+    }
     if (local.setupMismatch) return { key: "setup", heading: "撮り方を確かめたい", primary: { label: "撮り方を合わせる", href: "#/record" } };
     // 球は無く、動画のチェックだけがある（段2a）: 「ようこそ」のままにせず、動画のチェックへ
     if (h && !h.sessions_with_shots && h.latest_video) {
@@ -94,7 +99,7 @@ const Home = (() => {
   // 並び: 状態 → 今日の一点／いまの課題 → （合格の条件・前回）→ 主ボタン → 次に見る → 理想との差（小さな図）。
   // 主ボタンは320px でもスクロールせずに見える位置に置く（図が大きく、ボタンを画面の外へ押し出していた）。
   function draw(el, h, fromCopy) {
-    const st = homeState(h);
+    const st = homeState(h, { videoPending: LS.get("golf.videoPending") || null });
     const f = h && h.focus, p = h && h.plan;
     let body = `${appbar()}<h1 class="visually-hidden">ホーム</h1>${headHtml(st)}`;
     if (st.key === "first") {

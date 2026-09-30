@@ -1,11 +1,14 @@
 package store
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 
 	"github.com/kajirita2002/golf-diagnosis/api/internal/model"
 )
@@ -48,7 +51,7 @@ func (s *Store) CreateSwing(ctx context.Context, sw *model.Swing) error {
 	return nil
 }
 
-const swingCols = `id, session_id, view, club, club_class, fps_measured, fps_source, width, height, duration_s, taps_json, capture_json, missing_json, cp_catalog_version, measure_json, created_at`
+const swingCols = `id, session_id, view, club, club_class, fps_measured, fps_source, width, height, duration_s, taps_json, capture_json, missing_json, cp_catalog_version, measure_json, series_gz IS NOT NULL, created_at`
 
 func scanSwing(sc interface{ Scan(...any) error }) (*model.Swing, error) {
 	var sw model.Swing
@@ -56,7 +59,7 @@ func scanSwing(sc interface{ Scan(...any) error }) (*model.Swing, error) {
 	var ball, capture, missing, ts string
 	var measure sql.NullString
 	if err := sc.Scan(&sw.ID, &sw.SessionID, &sw.View, &sw.Club, &sw.ClubClass, &fps, &sw.FPSSource, &sw.Width, &sw.Height, &dur,
-		&ball, &capture, &missing, &sw.CPCatalogVersion, &measure, &ts); err != nil {
+		&ball, &capture, &missing, &sw.CPCatalogVersion, &measure, &sw.HasSeries, &ts); err != nil {
 		return nil, err
 	}
 	sw.FPS, sw.Duration = fps.Float64, dur.Float64
@@ -334,4 +337,47 @@ func (s *Store) TextColumnsWithJPEG(ctx context.Context) (int, error) {
 		+ (SELECT COUNT(*) FROM {s}swing_frames WHERE landmarks_json LIKE '%/9j/%' OR taps_json LIKE '%/9j/%')
 		+ (SELECT COUNT(*) FROM {s}swing_checks WHERE evidence_json LIKE '%/9j/%')`).Scan(&n)
 	return n, err
+}
+
+// PutSwingSeries はスイングの区間の手・腰・胸の時系列（自動の取り出し・段2b）を gzip で残す。
+// 中身は httpapi が形を確かめてから渡す（数値だけ。画像は入らない）。変わったので判定は古くする。
+func (s *Store) PutSwingSeries(ctx context.Context, swingID int64, raw json.RawMessage) error {
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	if _, err := zw.Write(raw); err != nil {
+		return err
+	}
+	if err := zw.Close(); err != nil {
+		return err
+	}
+	res, err := s.db.ExecContext(ctx, `UPDATE {s}swings SET series_gz=?, cp_catalog_version='' WHERE id=? AND deleted_at IS NULL`, buf.Bytes(), swingID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// GetSwingSeries は残した時系列（無ければ nil）。
+func (s *Store) GetSwingSeries(ctx context.Context, swingID int64) (json.RawMessage, error) {
+	var b []byte
+	err := s.db.QueryRowContext(ctx, `SELECT series_gz FROM {s}swings WHERE id=? AND deleted_at IS NULL`, swingID).Scan(&b)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil || len(b) == 0 {
+		return nil, err
+	}
+	zr, err := gzip.NewReader(bytes.NewReader(b))
+	if err != nil {
+		return nil, err
+	}
+	defer zr.Close()
+	out, err := io.ReadAll(io.LimitReader(zr, 8<<20))
+	if err != nil {
+		return nil, err
+	}
+	return json.RawMessage(out), nil
 }

@@ -7,6 +7,8 @@ analysis/tests/synthetic_swing.py の棒人間（P1〜P7 のコマ）を、1つ�
   testdata/synthetic/stick_dtl.webm   後ろから・60fps・3.5秒（P2 のクラブの先が内側）
   testdata/synthetic/stick_fo.webm    正面から・60fps・3.5秒
   testdata/synthetic/stick_dtl_240.mp4 後ろから・240fps・0.5秒（H.264・moov が末尾。コンテナの fps の読み取りの確認用）
+  testdata/synthetic/stick_motion_dtl.webm 後ろから・30fps・約13秒。スイング3本（2本目は素振り＝ボールが動かない）。
+      自動の取り出し（段2b）の確認用。棒人間の点は synthetic_swing.motion と同じ（画面の確認は window.__FAKE_POSE に同じ点を渡す）
 
 使い方: FFMPEG=/path/to/ffmpeg python3 scripts/make_synthetic_video.py
 （ffmpeg が無ければ pip の imageio-ffmpeg を入れて、その実行ファイルを FFMPEG に渡す）
@@ -88,7 +90,48 @@ def make(ffmpeg: str, view: str, name: str, fps: int, ps, seg_s: float, faults=(
     print(out, os.path.getsize(out))
 
 
+MOTION, MOTION_GROUND, MOTION_BALL = syn.MOTION, syn.MOTION_GROUND, syn.MOTION_BALL
+
+
+def draw_pose(pose: dict, ball: bool) -> np.ndarray:
+    img = np.full((syn.H, syn.W, 3), (238, 242, 236), dtype=np.uint8)
+    img[MOTION_GROUND:, :] = (120, 150, 100)
+    yy, xx = np.mgrid[0:syn.H, 0:syn.W]
+
+    def line(a, b, r, color):
+        n = int(max(abs(b[0] - a[0]), abs(b[1] - a[1])) / 2) + 2
+        for t in np.linspace(0, 1, n):
+            x, y = a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t
+            x0, x1, y0, y1 = int(max(0, x - r)), int(min(syn.W, x + r + 1)), int(max(0, y - r)), int(min(syn.H, y + r + 1))
+            m = (xx[y0:y1, x0:x1] - x) ** 2 + (yy[y0:y1, x0:x1] - y) ** 2 <= r * r
+            img[y0:y1, x0:x1][m] = color
+
+    for a, b in SEG:
+        line(pose[a], pose[b], 6, (40, 50, 45))
+    if ball:
+        line(MOTION_BALL, MOTION_BALL, syn.BALL_D / 2, (255, 255, 255))
+    return img
+
+
+def make_motion(ffmpeg: str) -> None:
+    body, _ = syn.motion(MOTION["view"], fps=MOTION["fps"], n_swings=MOTION["n_swings"], practice=MOTION["practice"])
+    tmp = tempfile.mkdtemp()
+    for k, f in enumerate(body["frames"]):
+        pose = {name: (f["lm"][syn.IDX[name]][0] * syn.W, f["lm"][syn.IDX[name]][1] * syn.H) for name in syn.IDX}
+        png(os.path.join(tmp, f"{k:05d}.png"), draw_pose(pose, body["roi"][k] < 0.25))
+    out = os.path.join(OUT, "stick_motion_dtl.webm")
+    subprocess.run([ffmpeg, "-y", "-loglevel", "error", "-framerate", str(int(MOTION["fps"])), "-i", os.path.join(tmp, "%05d.png"),
+                    "-vf", "format=yuv420p", "-c:v", "libvpx", "-b:v", "600k", "-auto-alt-ref", "0", out], check=True)
+    shutil.rmtree(tmp)
+    print(out, os.path.getsize(out))
+
+
 def main() -> None:
+    if "--motion" in sys.argv:
+        ffmpeg = os.environ.get("FFMPEG") or shutil.which("ffmpeg")
+        os.makedirs(OUT, exist_ok=True)
+        make_motion(ffmpeg)
+        return
     ffmpeg = os.environ.get("FFMPEG") or shutil.which("ffmpeg")
     if not ffmpeg:
         sys.exit("ffmpeg がありません（FFMPEG に実行ファイルを渡す）")
@@ -96,6 +139,7 @@ def main() -> None:
     make(ffmpeg, "dtl", "stick_dtl.webm", 60, syn.P_ORDER[:7], 0.5, faults=("p2_inside",))
     make(ffmpeg, "fo", "stick_fo.webm", 60, syn.P_ORDER[:7], 0.5)
     make(ffmpeg, "dtl", "stick_dtl_240.mp4", 240, ("P1", "P2"), 0.25, codec=("-c:v", "libx264", "-preset", "veryfast", "-crf", "30"))
+    make_motion(ffmpeg)
 
 
 if __name__ == "__main__":

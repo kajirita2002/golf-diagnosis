@@ -592,9 +592,36 @@ def run_video(base: str) -> None:
     print("OK（動画のチェックポイント）")
 
 
+def run_video_auto(base: str) -> None:
+    """自動の取り出し（段2b）: 合成の姿勢の時系列を Go の口から送り、スイングの区間と P を受け取り、
+    P のコマと時系列を送って測る。手の通り道の輪・テンポ（参考）が時系列から出る。時系列の中継は保存しない。"""
+    sys.path.insert(0, os.path.join(ROOT, "analysis", "tests"))
+    import synthetic_swing as syn
+
+    me = call("POST", f"{base}/players", {"name": "video-auto", "handedness": "R"})
+    se = call("POST", f"{base}/sessions", {"player_id": me["id"], "date": "2026-09-28"})
+    body, truth = syn.motion("dtl", fps=60.0, n_swings=3, practice=(2,))
+    r = call("POST", f"{base}/video/checkpoints", body)
+    assert r["video_version"] == "video/0.2" and len(r["swings"]) == 2 and len(r["excluded"]) == 1, (len(r["swings"]), len(r["excluded"]))
+    assert not call("GET", f"{base}/sessions/{se['id']}/swings"), "中継でスイングができた"
+    for det in r["swings"]:
+        m = syn.measure_input(body, det)
+        s = call("POST", f"{base}/sessions/{se['id']}/swings", {"view": "dtl", "club": "7 Iron", "club_class": "iron", "fps": 60, "fps_source": "container",
+                                                                "width": syn.W, "height": syn.H, "ball": m["ball"]})
+        frames = [{"checkpoint": p, "t": f["t"], "frame": int(round(f["t"] * 60)), "source": "auto", "landmarks": f["landmarks"], "taps": {}} for p, f in m["frames"].items()]
+        out = call("PUT", f"{base}/swings/{s['id']}/frames", {"frames": frames, "missing": [], "series": det["series"]})
+        assert out["swing"]["has_series"] is True
+    c = call("GET", f"{base}/sessions/{se['id']}/checks")["checks"]
+    by = {x["id"]: x for x in c["items"]}
+    assert by["path.loop"]["state"] == "in_range" and by["path.loop"]["n_judged"] == 2, by["path.loop"]
+    assert by["tempo.ratio"]["state"] == "reference" and by["tempo.ratio"]["n_ref"] == 2, by["tempo.ratio"]
+    print("OK（動画の自動の取り出し）")
+
+
 def main() -> None:
     with Services() as sv:
         run_video(sv.base)
+        run_video_auto(sv.base)
         run_home(sv.base)
         run(sv.base)
         run_real(sv.base)

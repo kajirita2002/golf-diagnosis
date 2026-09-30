@@ -58,6 +58,7 @@ REASON_TEXT = {
     "derive": "まとめる項目が判断できない",
     "split": "スイングごとに食い違う",
     "reference": "参考（合否を出さない）",
+    "no_series": "全部のコマの動きが無い",
 }
 
 # 端の値ちょうどを範囲の中に数えるときの遊び（値は小数2桁で出すので、その丸めの中の差は同じに扱う）
@@ -243,6 +244,108 @@ def _ball(raw, w: float, hand: str) -> dict | None:
     return {"c": ((x1 + x2) / 2, (y1 + y2) / 2, 1.0), "d": d}
 
 
+def _series(raw, w: float, h: float, hand: str) -> dict | None:
+    """保存した時系列（video.series_for の形・0〜1 の割合）→ 画素・右打ちの座標。形が違えば None（その項目は判断できない）。"""
+    if not isinstance(raw, dict) or not isinstance(raw.get("t"), list) or not isinstance(raw.get("t0"), (int, float)):
+        return None
+    t = raw["t"]
+    out = {"t0": float(raw["t0"]), "fps": float(raw.get("fps") or 0), "t": []}
+    for k in ("hand", "hip", "chest"):
+        out[k] = []
+    for i, ti in enumerate(t):
+        if not isinstance(ti, (int, float)):
+            return None
+        out["t"].append(float(ti))
+        for k in ("hand", "hip", "chest"):
+            arr = raw.get(k) or []
+            q = arr[i] if i < len(arr) else None
+            if isinstance(q, (list, tuple)) and len(q) >= 2 and all(isinstance(v, (int, float)) for v in q[:2]):
+                x, y = float(q[0]) * w, float(q[1]) * h
+                vis = float(q[2]) if len(q) > 2 and isinstance(q[2], (int, float)) else 1.0
+                out[k].append((w - x if hand == "L" else x, y, vis))
+            else:
+                out[k].append(None)
+    ds = sorted(math.hypot(c[0] - hh[0], c[1] - hh[1]) for c, hh in zip(out["chest"], out["hip"]) if c and hh)
+    out["L"] = ds[len(ds) // 2] if ds else 0.0
+    return out if len(out["t"]) >= 3 and out["L"] > 1 else None
+
+
+def _at(series: dict, key: str, t: float):
+    """時刻 t に一番近いコマの点（無ければ None）。"""
+    best, bd = None, math.inf
+    for ti, q in zip(series["t"], series[key]):
+        if q is not None and abs(ti - t) < bd:
+            best, bd = q, abs(ti - t)
+    return best if bd <= 0.1 else None
+
+
+def _cross_x(path: list[tuple[float, float]], y: float, rising: bool) -> float | None:
+    """手の通り道が高さ y を（rising なら上向きに）最初に越える所の x（線でつなぐ）。"""
+    for (x1, y1), (x2, y2) in zip(path, path[1:]):
+        if (rising and y1 > y >= y2) or (not rising and y1 < y <= y2):
+            s = (y - y1) / (y2 - y1) if y2 != y1 else 0.0
+            return x1 + (x2 - x1) * s
+    return None
+
+
+def _need_series(ctx: "Ctx") -> dict:
+    if not ctx.series:
+        raise Invalid("no_series", "動画から自動で取り出すと、全部のコマの動きから見られます")
+    ctx.used_pose = True
+    return ctx.series
+
+
+def _traj(ctx: "Ctx", spec: dict) -> dict:
+    """時系列の項目（手の通り道の輪・骨盤と胸の戻し・テンポ）。"""
+    from .. import video
+
+    k = spec["kind"]
+    se = _need_series(ctx)
+    L = se["L"]
+    if k == "loop":
+        # 後ろから: 同じ高さで、下ろしの手が上げより体の側（-x）を通れば「低い所を通る」（右ループ）
+        t4, t6 = ctx.frame(spec["p"]).raw.get("t"), ctx.frame(spec["p1"]).raw.get("t")
+        if not isinstance(t4, (int, float)) or not isinstance(t6, (int, float)):
+            raise Invalid("no_frame")
+        up = [(q[0], q[1]) for ti, q in zip(se["t"], se["hand"]) if q and se["t0"] - 1e-6 <= ti <= t4 + 1e-6]
+        down = [(q[0], q[1]) for ti, q in zip(se["t"], se["hand"]) if q and t4 - 1e-6 <= ti <= t6 + 1e-6]
+        c, hp = _at(se, "chest", se["t0"]), _at(se, "hip", se["t0"])
+        if not c or not hp or len(up) < 3 or len(down) < 3:
+            raise Invalid("low_visibility", "手の通り道が途切れている")
+        gaps = []
+        for j in range(config.CP_LOOP_LEVELS):
+            f = config.CP_LOOP_BAND[0] + (config.CP_LOOP_BAND[1] - config.CP_LOOP_BAND[0]) * j / max(1, config.CP_LOOP_LEVELS - 1)
+            y = c[1] + (hp[1] - c[1]) * f
+            xu, xd = _cross_x(up, y, True), _cross_x(down, y, False)
+            if xu is not None and xd is not None:
+                gaps.append((xu - xd) / L)
+        if len(gaps) < max(2, config.CP_LOOP_LEVELS // 2 + 1):
+            raise Invalid("low_visibility", "手の通り道が胸と腰のあいだを通っていない")
+        return {"v": sum(gaps) / len(gaps), "err": config.CP_TRAJ_ERR_L, "unit": "ratio", "extra": {"levels": len(gaps)}}
+    if k == "recenter":
+        # 正面から: 始動〜P3 で一番 {trail}（-x）へ寄った所から、P4 で {lead} へ戻っているか
+        t3, t4 = ctx.frame(spec["p0"]).raw.get("t"), ctx.frame(spec["p"]).raw.get("t")
+        if not isinstance(t3, (int, float)) or not isinstance(t4, (int, float)):
+            raise Invalid("no_frame")
+        xs = [q[0] for ti, q in zip(se["t"], se[spec["pt"]]) if q and se["t0"] - 1e-6 <= ti <= t3 + 1e-6]
+        q4 = _at(se, spec["pt"], t4)
+        if len(xs) < 2 or not q4:
+            raise Invalid("low_visibility", "骨盤と胸の点が途切れている")
+        return {"v": (q4[0] - min(xs)) / L, "err": config.CP_TRAJ_ERR_L, "unit": "ratio", "extra": {}}
+    if k == "tempo":
+        t4, t7 = ctx.frame(spec["p"]).raw.get("t"), ctx.frame(spec["p1"]).raw.get("t")
+        fps = ctx.fps or se["fps"]
+        if not fps:
+            raise Invalid("fps_unknown")
+        tp = video.tempo(se["t0"], t4, t7, 1.0 / float(fps))
+        if not tp:
+            raise Invalid("no_frame", "始まり・トップ・当たる瞬間の順番が合わない")
+        word, guide = video.tempo_word(tp, ctx.club_class)
+        return {"v": tp["ratio"], "err": round((tp["hi"] - tp["lo"]) / 2, 3), "unit": "ratio",
+                "extra": {"band_lo": tp["lo"], "band_hi": tp["hi"], "guide": guide, "word": word, "back_s": tp["back_s"], "down_s": tp["down_s"]}}
+    raise Invalid("not_built", k)
+
+
 # ------------------------------------------------------------ 幾何
 
 def _ang_v(a, b) -> float:
@@ -336,6 +439,8 @@ class Ctx:
         self.used_pose = False
         self.used_tap = False
         self.used_ball = False
+        self.club_class = "iron"
+        self.series = _series(swing.get("series"), self.w, self.h, self.hand)
 
     def frame(self, p: str) -> Frame:
         f = self.frames.get(p)
@@ -398,6 +503,8 @@ def compute(ctx: Ctx, spec: dict) -> dict:
     k = spec["kind"]
     p = spec.get("p")
     ang_err = config.CP_ANGLE_ERR_DEG
+    if k in TRAJ_KINDS:
+        return _traj(ctx, spec)
     if k in CLUB_LINE_KINDS and _uses_club(spec):
         for q in [x for x in (spec.get("p0"), p) if x]:
             _club_line_ok(ctx, q)
@@ -505,6 +612,9 @@ def compute(ctx: Ctx, spec: dict) -> dict:
         return {"v": b / a, "err": 0.1 * b / a, "unit": "ratio", "extra": {}}
     raise Invalid("not_built", k)
 
+
+# 全部のコマの時系列を使う測り方（段2b）
+TRAJ_KINDS = ("loop", "recenter", "tempo")
 
 # クラブの線の向きを使う測り方（線が短く写ると、1画素で角度が大きく動く）
 CLUB_LINE_KINDS = ("shaft_v", "ang_v", "ang_h", "ang_v_signed", "ang_between", "line_change", "butt_dir")
@@ -743,7 +853,7 @@ def judge_item(ctx: Ctx, it: dict, cam: dict, scale: dict, vision_ans: dict | No
     if spec and spec.get("kind") == "derive":
         return unknown("derive")  # まとめる項目は measure_swing の最後に決める
     measured = None
-    if m.get("how") not in ("vision", "none", "time", "trajectory") and spec:
+    if m.get("how") not in ("vision", "none") and spec:
         try:
             measured = _measure_item(ctx, it, cam, scale)
         except Invalid as e:
@@ -756,6 +866,13 @@ def judge_item(ctx: Ctx, it: dict, cam: dict, scale: dict, vision_ans: dict | No
         if measured and "invalid" not in measured:
             out["value"] = measured["value"]
             out["basis"] = measured["basis"]
+            # 参考の項目でも、言葉にしてよい外れ（テンポの「急ぎ気味」など。幅がガイドの目安＋余白を丸ごと外れたとき）
+            word = (measured["value"] or {}).get("word")
+            if word and any(f["id"] == word for f in it.get("faults") or []):
+                out["fault"] = word
+        elif measured:
+            out["ref_reason"] = measured.get("invalid")
+            out["detail"] = measured.get("detail", "")
         return out
     vstate, vfault = _vision_state(it, vision_ans)
     if vision_ans:
@@ -798,6 +915,7 @@ def measure_swing(swing: dict, vision: dict | None = None) -> dict:
     cls, num = club_class(swing.get("club") or swing.get("club_class"))
     if swing.get("club_class") in ("iron", "driver", "wood", "hybrid", "wedge") and not swing.get("club"):
         cls = swing["club_class"]
+    ctx.club_class = cls
     cam = camera_check(ctx)
     scale = scale_check(ctx)
     vc = view_check(ctx)
@@ -832,7 +950,7 @@ def measure_swing(swing: dict, vision: dict | None = None) -> dict:
     return {
         "catalog_version": version(), "judge_version": config.JUDGE_VERSION, "stamp": stamp(), "view": ctx.view, "handedness": ctx.hand,
         "club_class": cls, "club_number": num, "fps": ctx.fps, "camera": cam, "scale": scale, "view_check": vc,
-        "ball": bool(ctx.ball), "items": res,
+        "ball": bool(ctx.ball), "series": bool(ctx.series), "items": res,
     }
 
 

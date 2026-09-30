@@ -30,8 +30,13 @@ const (
 	ThumbMaxEdge = 360
 	// ThumbMaxBytes はサムネイル1枚の上限（長辺 360px の JPEG なら数十KB）
 	ThumbMaxBytes = 96 << 10
-	// maxFramesBody は P のコマの送信（10枚 × サムネイル＋点）の上限
-	maxFramesBody = 4 << 20
+	// maxFramesBody は P のコマの送信（12枚 × サムネイル＋点＋時系列）の上限
+	maxFramesBody = 6 << 20
+	// maxVideoBody は姿勢の時系列（POST /v1/video/checkpoints）の上限。数値だけで、画像は来ない
+	// （1万コマ × 33点 × [x,y,v] でおよそ 10MB。粗い走査と細かい走査を合わせてもこれに収まる）
+	maxVideoBody = 24 << 20
+	// maxSeriesFrames は残す時系列のコマ数の上限（スイングの区間だけ。240fps で約25秒）
+	maxSeriesFrames = 6000
 )
 
 var clubClasses = map[string]bool{"iron": true, "driver": true, "wood": true, "hybrid": true, "wedge": true}
@@ -54,6 +59,96 @@ func (s *Server) getCheckpoints(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeRaw(w, http.StatusOK, raw)
+}
+
+// videoCheckpoints は姿勢の時系列を分析サービスへ中継する（保存しない。§6.3・§13.1）。
+// 動画そのもの・コマの画像は受けない（大きさで断り、数値でない中身は分析サービスが断る）。
+func (s *Server) videoCheckpoints(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxVideoBody)
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		s.fail(w, bad("姿勢の時系列が大きすぎます（%dMB まで。動画や画像は送らない約束）", maxVideoBody>>20))
+		return
+	}
+	var head struct {
+		View   string            `json:"view"`
+		Frames []json.RawMessage `json:"frames"`
+	}
+	if err := json.Unmarshal(raw, &head); err != nil {
+		s.fail(w, bad("JSON を読めません: %v", err))
+		return
+	}
+	if head.View != "dtl" && head.View != "fo" {
+		s.fail(w, bad("view は dtl（後ろから）か fo（正面から）"))
+		return
+	}
+	if bytes.Contains(raw, []byte("/9j/")) || bytes.Contains(raw, []byte("data:image")) {
+		s.fail(w, bad("画像は送らない約束です（姿勢の点の数値だけ）"))
+		return
+	}
+	out, err := s.Analyzer.VideoCheckpoints(r.Context(), raw)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeRaw(w, http.StatusOK, out)
+}
+
+// seriesIn は残す時系列の形（video.py の series_for）。知らない欄は断り、書き直した形で残す（画像を紛れ込ませない）。
+type seriesIn struct {
+	V            int          `json:"v"`
+	VideoVersion string       `json:"video_version"`
+	T0           float64      `json:"t0"`
+	FPS          float64      `json:"fps"`
+	T            []float64    `json:"t"`
+	Hand         [][]*float64 `json:"hand"`
+	Hip          [][]*float64 `json:"hip"`
+	Chest        [][]*float64 `json:"chest"`
+}
+
+func validSeries(raw json.RawMessage) (json.RawMessage, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, nil
+	}
+	var se seriesIn
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&se); err != nil {
+		return nil, bad("series の形が違います: %v", err)
+	}
+	n := len(se.T)
+	if n < 3 || n > maxSeriesFrames {
+		return nil, bad("series のコマ数は 3〜%d", maxSeriesFrames)
+	}
+	if len(se.Hand) != n || len(se.Hip) != n || len(se.Chest) != n {
+		return nil, bad("series の t と点の数が合いません")
+	}
+	if len(se.VideoVersion) > 32 || math.IsNaN(se.T0) || math.IsInf(se.T0, 0) || se.FPS < 0 || se.FPS > 2000 {
+		return nil, bad("series の t0 / fps / 版が不正です")
+	}
+	prev := math.Inf(-1)
+	for i, t := range se.T {
+		if math.IsNaN(t) || math.IsInf(t, 0) || t < prev {
+			return nil, bad("series の t は古い順の数です")
+		}
+		prev = t
+		for _, arr := range [][][]*float64{se.Hand, se.Hip, se.Chest} {
+			q := arr[i]
+			if q == nil {
+				continue
+			}
+			if len(q) != 3 {
+				return nil, bad("series の点は [x, y, visibility]")
+			}
+			for _, v := range q {
+				if v == nil || math.IsNaN(*v) || math.IsInf(*v, 0) || *v < -5 || *v > 5 {
+					return nil, bad("series の点の値が不正です")
+				}
+			}
+		}
+	}
+	b, err := json.Marshal(se)
+	return b, err
 }
 
 // vendorCache は /vendor/（MediaPipe などの版入りのファイル）に immutable を付ける（§6.3）。
@@ -347,6 +442,7 @@ func (s *Server) putSwingFrames(w http.ResponseWriter, r *http.Request) {
 		Frames  []frameIn       `json:"frames"`
 		Missing []string        `json:"missing"`
 		Ball    json.RawMessage `json:"ball"`
+		Series  json.RawMessage `json:"series"`
 	}
 	dec := json.NewDecoder(io.LimitReader(r.Body, maxFramesBody))
 	dec.DisallowUnknownFields()
@@ -398,9 +494,21 @@ func (s *Server) putSwingFrames(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	series, err := validSeries(in.Series)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
 	if err := s.Store.PutSwingFrames(r.Context(), sw.ID, frames, true); err != nil {
 		s.fail(w, err)
 		return
+	}
+	// 時系列（自動の取り出しのとき）は渡されたときだけ入れ替える（手で選び直しても、同じスイングの動きは残す）
+	if series != nil {
+		if err := s.Store.PutSwingSeries(r.Context(), sw.ID, series); err != nil {
+			s.fail(w, err)
+			return
+		}
 	}
 	up := store.UpdateSwingInput{Missing: &in.Missing}
 	if in.Missing == nil {
@@ -551,7 +659,11 @@ func (s *Server) measureSwing(r *http.Request, sw *model.Swing) (json.RawMessage
 	if err != nil {
 		return nil, err
 	}
-	in := swingInput(sw, pl.Handedness, fs)
+	series, err := s.Store.GetSwingSeries(r.Context(), sw.ID)
+	if err != nil {
+		return nil, err
+	}
+	in := swingInput(sw, pl.Handedness, fs, series)
 	raw, err := s.Analyzer.CheckpointsMeasure(r.Context(), in)
 	if err != nil {
 		return nil, err
@@ -596,9 +708,9 @@ func (s *Server) measureSwing(r *http.Request, sw *model.Swing) (json.RawMessage
 }
 
 // swingInput は分析サービスに渡す1スイング（測る入力）。指紋もこの形から作る（渡した中身＝測った条件）。
-func swingInput(sw *model.Swing, hand model.Handedness, fs []model.SwingFrame) analysis.CheckpointSwing {
+func swingInput(sw *model.Swing, hand model.Handedness, fs []model.SwingFrame, series json.RawMessage) analysis.CheckpointSwing {
 	in := analysis.CheckpointSwing{View: sw.View, Club: sw.Club, ClubClass: sw.ClubClass, Handedness: hand, FPS: sw.FPS,
-		Width: sw.Width, Height: sw.Height, Ball: sw.Ball, Frames: map[string]json.RawMessage{}, Missing: sw.Missing}
+		Width: sw.Width, Height: sw.Height, Ball: sw.Ball, Frames: map[string]json.RawMessage{}, Missing: sw.Missing, Series: series}
 	for _, f := range fs {
 		b, _ := json.Marshal(map[string]any{"t": f.T, "landmarks": f.Landmarks, "taps": f.Taps})
 		in.Frames[f.Checkpoint] = b
@@ -666,7 +778,12 @@ func (s *Server) sessionChecks(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 			}
-			stale = storedFingerprint(sw) != swingFingerprint(stamp, swingInput(sw, pl.Handedness, fs))
+			series, err := s.Store.GetSwingSeries(r.Context(), sw.ID)
+			if err != nil {
+				s.fail(w, err)
+				return
+			}
+			stale = storedFingerprint(sw) != swingFingerprint(stamp, swingInput(sw, pl.Handedness, fs, series))
 		}
 		if stale {
 			if _, err := s.measureSwing(r, sw); err != nil {

@@ -14,7 +14,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-from . import checkpoints, coaching, config, drills, gist, narrative
+from . import checkpoints, coaching, config, drills, gist, narrative, video
 from .checkpoints import judge as cp_judge
 from .checkpoints import measure as cp_measure
 from .compare import compare_sessions
@@ -122,6 +122,19 @@ class CheckpointMeasureIn(BaseModel):
     swing: dict[str, Any]
 
 
+class VideoCheckpointsIn(BaseModel):
+    """動画の姿勢の時系列（数値だけ）。形は video.py の先頭。保存しない。"""
+
+    view: str
+    handedness: str = "R"
+    fps: float = 0
+    width: float
+    height: float
+    frames: list[dict[str, Any]] = Field(default_factory=list)
+    roi: list[Any] | None = None
+    club_taps: list[dict[str, Any]] = Field(default_factory=list)
+
+
 class CheckpointFocusIn(BaseModel):
     """スイングごとの判定（measure の結果に swing_id を付けたもの）→ 項目ごとの状態・課題。"""
 
@@ -162,7 +175,8 @@ def _client():
 def healthz() -> dict:
     # plan_version / engine_version は Go が保存した評価の版と比べる（版が変われば作り直す。§8.5）
     return {"ok": True, "engine_version": config.ENGINE_VERSION, "plan_version": config.PLAN_VERSION,
-            "checkpoints_version": checkpoints.version(), "judge_version": config.JUDGE_VERSION, "checkpoints_stamp": checkpoints.stamp()}
+            "checkpoints_version": checkpoints.version(), "judge_version": config.JUDGE_VERSION, "checkpoints_stamp": checkpoints.stamp(),
+            "video_version": config.VIDEO_VERSION}
 
 
 @app.get("/v1/checkpoints/stamp")
@@ -188,6 +202,21 @@ def checkpoints_measure(body: CheckpointMeasureIn) -> dict:
     if not isinstance(sw.get("frames"), dict):
         raise HTTPException(400, "frames が要ります")
     return cp_measure.measure_swing(sw)
+
+
+@app.post("/v1/video/checkpoints")
+def video_checkpoints(body: VideoCheckpointsIn) -> dict:
+    """姿勢の時系列 → スイングの区間と P1〜P10・中間・t₀（§6.3・§6.4。video/0.2。LLM を使わない・保存しない）。"""
+    if body.view not in ("dtl", "fo"):
+        raise HTTPException(400, "view は dtl か fo です")
+    _hand(body.handedness)
+    if body.width < 16 or body.height < 16:
+        raise HTTPException(400, "width / height が不正です")
+    if len(body.frames) > config.VIDEO_MAX_FRAMES:
+        raise HTTPException(400, f"コマが多すぎます（{config.VIDEO_MAX_FRAMES}まで）")
+    if body.roi is not None and len(body.roi) != len(body.frames):
+        raise HTTPException(400, "roi は frames と同じ数です")
+    return video.detect(body.model_dump())
 
 
 @app.post("/v1/checkpoints/focus")

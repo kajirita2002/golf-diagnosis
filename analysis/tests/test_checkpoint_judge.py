@@ -348,7 +348,7 @@ def test_口():
     raw = c.get("/v1/checkpoints").json()
     assert any("{lead}" in it["title"] for it in raw["items"])
     m = c.post("/v1/checkpoints/measure", json={"swing": syn.swing("dtl", faults=("p2_inside",))}).json()
-    assert m["catalog_version"] == "checkpoints/1.0-pgag" and m["judge_version"] == "judge/1.1"
+    assert m["catalog_version"] == "checkpoints/1.0-pgag" and m["judge_version"] == "judge/1.2"
     m["swing_id"] = 9
     f = c.post("/v1/checkpoints/focus", json={"swings": [m, {**m, "swing_id": 10}, {**m, "swing_id": 11}], "handedness": "R"}).json()
     assert f["focus"] == "iron.p2.dtl.head_vs_hands"

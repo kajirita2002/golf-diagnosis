@@ -220,5 +220,144 @@ def pose_json() -> dict:
     return out
 
 
+
+# ------------------------------------------------------------ 動画ぜんたいの時系列（段2b: 自動の取り出しのテスト）
+
+# 1スイングの中の時刻（始まりからの秒）。P1 のあと手が動き始める（t₀ はそのすぐ後）
+KEY_T = {"P1": 1.00, "P2": 1.35, "P3": 1.55, "P4": 1.80, "P5": 2.00, "P6": 2.07, "P7": 2.12, "P8": 2.18, "P9": 2.26, "P10": 2.70}
+FINISH_HOLD = 0.7   # フィニッシュで止まっている時間
+RELAX = 1.0         # フィニッシュから構えへ戻る時間
+SWING_LEN = KEY_T["P10"] + FINISH_HOLD + RELAX  # 次のスイングの始まりまで（その始まりから静かな構えが1秒）
+
+
+def _hands(view: str, p: str, body: dict, faults: set) -> tuple[tuple, tuple]:
+    """P ごとの手首（{lead}, {trail}）。§6.4 の規則がちょうどその時刻に当たるように、しきい値から1画素だけ越した所に置く。"""
+    hip = (body["left_hip"][1] + body["right_hip"][1]) / 2
+    sl, st = body["left_shoulder"], body["right_shoulder"]
+    over = "loop_over" in faults
+    if view == "dtl":
+        H = {"P1": (653, 451), "P2": (690, hip - 1), "P3": (604, sl[1] - 1), "P4": (588, 158),
+             "P5": ((640, sl[1] + 1) if over else (590, sl[1] + 1)), "P6": ((720, hip + 1) if over else (660, hip + 1)),
+             "P7": (668, 451), "P8": (762, hip - 1), "P9": (607, st[1] - 1), "P10": (561, 179)}[p]
+        return (H[0] + 2, H[1] - 1), (H[0] - 2, H[1] + 1)
+    if p == "P3":
+        a = math.radians(9.5)
+        wl = (sl[0] - 200 * math.cos(a), sl[1] + 200 * math.sin(a))
+        return wl, (wl[0] + 4, wl[1] - 4)
+    if p == "P9":
+        a = math.radians(9.5)
+        wt = (st[0] + 200 * math.cos(a), st[1] + 200 * math.sin(a))
+        return (wt[0] - 4, wt[1] - 4), wt
+    if p == "P4":
+        pts, _ = _fo("P4", faults)
+        return pts["left_wrist"], pts["right_wrist"]
+    H = {"P1": (642, 425), "P2": (558, hip - 1), "P5": (490, sl[1] + 1), "P6": (618, hip + 1), "P7": (670, 431),
+         "P8": (758, hip - 1), "P10": (718, 202)}[p]
+    return (H[0] + 2, H[1]), (H[0] - 2, H[1])
+
+
+# 正面の骨盤と胸の横の動き（胴の長さの割合・{trail} が負）: 上げの初めに {trail} へ動き、トップの前に {lead} へ戻り始める
+SHIFT = {"P1": 0.0, "P2": -0.08, "P3": -0.10, "P4": -0.02, "P5": 0.05, "P6": 0.08, "P7": 0.10, "P8": 0.10, "P9": 0.10, "P10": 0.10}
+SHIFT_STAY = {**SHIFT, "P3": -0.05, "P4": -0.12}
+
+
+def _key_pose(view: str, p: str, faults: set) -> dict:
+    pts, _ = (_dtl if view == "dtl" else _fo)(p, faults)
+    pts = dict(pts)
+    wl, wt = _hands(view, p, pts, faults)
+    pts["left_wrist"], pts["right_wrist"] = wl, wt
+    if view == "fo":
+        L = 155.0
+        dx = (SHIFT_STAY if "recenter_stay" in faults else SHIFT)[p] * L
+        for k in ("left_hip", "right_hip", "left_shoulder", "right_shoulder", "nose"):
+            pts[k] = (pts[k][0] + dx, pts[k][1])
+    return pts
+
+
+def _lerp_pose(a: dict, b: dict, s: float) -> dict:
+    return {k: (a[k][0] + (b[k][0] - a[k][0]) * s, a[k][1] + (b[k][1] - a[k][1]) * s) for k in a}
+
+
+def motion(view: str = "dtl", hand: str = "R", fps: float = 60.0, n_swings: int = 1, faults=(), waggle: bool = False,
+           practice: tuple = (), gaps: tuple = (), roi: bool = True, lead_in: float = 0.0) -> tuple[dict, list[dict]]:
+    """動画ぜんたいの姿勢の時系列（POST /v1/video/checkpoints の入力）と、スイングごとの本当の時刻。
+
+    - practice にスイングの番号（1から）を入れると、そのスイングは素振り（ボールのまわりが変わらない）。
+    - gaps: [(始まりの秒, 長さ)] の間は体の点が無い（欠け）。
+    - waggle: 最初のスイングの前に、手を小さく揺らしてから静かに構え直す。
+    - lead_in: 最初のスイングの前に足す時間（ワッグルの場所）。"""
+    fs = set(faults)
+    keys = {p: _key_pose(view, p, fs) for p in P_ORDER}
+    if waggle:
+        lead_in = max(lead_in, 1.6)
+    total = lead_in + n_swings * SWING_LEN
+    truths = []
+    frames, rois = [], []
+    n = int(round(total * fps))
+    for k in range(n):
+        t = k / fps
+        u = t - lead_in
+        idx = int(u // SWING_LEN) if u >= 0 else -1
+        if idx >= n_swings:
+            idx = n_swings - 1
+        s0 = lead_in + idx * SWING_LEN if idx >= 0 else 0.0
+        r = t - s0 if idx >= 0 else None
+        if r is None:
+            pose = dict(keys["P1"])
+            if waggle and 0.3 <= t <= 0.9:
+                # ワッグル: 手を胴の長さの 0.15 ほど {lead} 側へ揺らして戻す（胸までは上げない）
+                a = math.sin(math.pi * (t - 0.3) / 0.6) * 25
+                pose["left_wrist"] = (pose["left_wrist"][0] + a, pose["left_wrist"][1] - a * 0.5)
+                pose["right_wrist"] = (pose["right_wrist"][0] + a, pose["right_wrist"][1] - a * 0.5)
+        elif r <= KEY_T["P1"]:
+            pose = dict(keys["P1"])
+        elif r <= KEY_T["P10"]:
+            names = list(P_ORDER)
+            for i in range(len(names) - 1):
+                a, b = names[i], names[i + 1]
+                if KEY_T[a] <= r <= KEY_T[b]:
+                    pose = _lerp_pose(keys[a], keys[b], (r - KEY_T[a]) / (KEY_T[b] - KEY_T[a]))
+                    break
+        elif r <= KEY_T["P10"] + FINISH_HOLD:
+            pose = dict(keys["P10"])
+        else:
+            s = min(1.0, (r - KEY_T["P10"] - FINISH_HOLD) / RELAX)
+            pose = _lerp_pose(keys["P10"], keys["P1"], s)
+        if hand == "L":
+            pose, _ = _mirror(pose, {})
+        missing = any(g0 <= t < g0 + gl for g0, gl in gaps)
+        frames.append({"t": round(t, 5), "lm": None if missing else [[round(q["x"], 5), round(q["y"], 5), q["visibility"]] for q in landmarks(pose)]})
+        hit = idx >= 0 and r is not None and r >= KEY_T["P7"] - 1e-9 and (idx + 1) not in practice
+        rois.append(0.5 if hit else 0.0)
+    for i in range(n_swings):
+        s0 = lead_in + i * SWING_LEN
+        truths.append({"index": i + 1, "practice": (i + 1) in practice, **{p: round(s0 + KEY_T[p], 5) for p in P_ORDER}})
+    body = {"view": view, "handedness": hand, "fps": fps, "width": W, "height": H, "frames": frames}
+    if roi:
+        body["roi"] = rois
+    return body, truths
+
+
+# 合成の動画 testdata/synthetic/stick_motion_dtl.webm の中身（scripts/make_synthetic_video.py が作り、ui_check.py が同じ点を偽の姿勢推定に渡す）
+MOTION = {"view": "dtl", "fps": 30.0, "n_swings": 3, "practice": (2,)}
+MOTION_GROUND = 600       # 地面の上の端（ボールが地面の色の上に乗るように、ほかの動画より上げる）
+MOTION_BALL = (840, 632)  # ボールの中心（画素）
+
+
+def measure_input(body: dict, det: dict, club: str = "7 Iron") -> dict:
+    """自動で取り出した1スイング（video.detect の swings の1つ）→ measure の入力（P のコマの点・時系列）。"""
+    frames = {}
+    for p in det["ps"]:
+        if p["frame"] is None:
+            continue
+        lm = body["frames"][p["frame"]]["lm"]
+        frames[p["p"]] = {"t": p["t"], "landmarks": [{"x": q[0], "y": q[1], "visibility": q[2]} for q in lm] if lm else [], "taps": {}}
+    ball = [[840 - BALL_D / 2, 640], [840 + BALL_D / 2, 640]] if body["view"] == "dtl" else [[648 - BALL_D / 2, 640], [648 + BALL_D / 2, 640]]
+    if body["handedness"] == "L":
+        ball = [[W - x, y] for x, y in ball]
+    return {"view": body["view"], "handedness": body["handedness"], "club": club, "fps": body["fps"], "width": W, "height": H,
+            "ball": ball, "frames": frames, "missing": [], "series": det["series"]}
+
+
 if __name__ == "__main__":
     print(json.dumps(pose_json()))

@@ -9456,7 +9456,7 @@
    "faults": [
     {
      "id": "over",
-     "when": "vision",
+     "when": "lo",
      "label": "手が高い所からそのまま下りています"
     },
     {
@@ -9465,15 +9465,27 @@
      "label": "手が上げよりずっと低く下りています"
     }
    ],
-   "range": null,
+   "range": {
+    "quantity": "loop_gap",
+    "unit": "ratio",
+    "lo": 0,
+    "hi": null,
+    "side": "lo_only",
+    "speed_dependent": false
+   },
    "measure": {
-    "how": "vision",
+    "how": "trajectory",
     "points": [
-     "frame",
-     "traj.hands"
+     "traj.hands",
+     "pose.shoulders",
+     "pose.hips"
     ],
-    "proxy": "",
-    "spec": null
+    "proxy": "手の中心 → 両手首の中点。胸と腰のあいだの五つの高さで、上げと下ろしの手の横の位置を比べる（胴の長さの割合）",
+    "spec": {
+     "kind": "loop",
+     "p": "P4",
+     "p1": "P6"
+    }
    },
    "vision": {
     "question_id": "q.path_loop",
@@ -9492,7 +9504,7 @@
     },
     "ok_option": "少し低く通る"
    },
-   "judgeable": "visual",
+   "judgeable": "measurable",
    "needs_note": "",
    "judge": "binary",
    "domino_rank": 4,
@@ -9510,7 +9522,7 @@
    "definition_status": "ok",
    "checked_by": "",
    "version": "checkpoints/1.0-pgag",
-   "note": "全部のコマの手の点が要るので、自動の取り出し（段2b）から測る。それまでは見た目"
+   "note": "下ろしの手が上げより低い所を通ることだけを見ます（ガイドの言い方）。「極端に低い」の境目はガイドに数が無いので、測った値では言いません（見た目の評価だけが言います）"
   },
   {
    "id": "path.p6_arm_plane",
@@ -9968,19 +9980,54 @@
    "faults": [
     {
      "id": "stay",
-     "when": "vision",
+     "when": "lo",
      "label": "骨盤と胸が{trail}に残っています"
     }
    ],
-   "range": null,
+   "range": {
+    "quantity": "recenter",
+    "unit": "ratio",
+    "lo": 0,
+    "hi": null,
+    "side": "lo_only",
+    "speed_dependent": false
+   },
    "measure": {
-    "how": "vision",
+    "how": "trajectory",
     "points": [
-     "frame",
-     "traj.hips"
+     "traj.hips",
+     "traj.chest"
     ],
-    "proxy": "",
-    "spec": null
+    "proxy": "骨盤 → 両腰の中点、胸 → 両肩の中点。始動〜P3 で一番{trail}へ寄った所から、P4 で{lead}へ戻った量（胴の長さの割合）",
+    "spec": {
+     "kind": "all",
+     "parts": [
+      {
+       "kind": "recenter",
+       "p0": "P3",
+       "p": "P4",
+       "pt": "hip",
+       "range": {
+        "lo": 0,
+        "hi": null,
+        "side": "lo_only"
+       },
+       "fault": "stay"
+      },
+      {
+       "kind": "recenter",
+       "p0": "P3",
+       "p": "P4",
+       "pt": "chest",
+       "range": {
+        "lo": 0,
+        "hi": null,
+        "side": "lo_only"
+       },
+       "fault": "stay"
+      }
+     ]
+    }
    },
    "vision": {
     "question_id": "q.pow_recenter",
@@ -9997,7 +10044,7 @@
     },
     "ok_option": "戻り始める"
    },
-   "judgeable": "visual",
+   "judgeable": "measurable",
    "needs_note": "",
    "judge": "binary",
    "domino_rank": 1,
@@ -10016,7 +10063,7 @@
    "definition_status": "ok",
    "checked_by": "",
    "version": "checkpoints/1.0-pgag",
-   "note": "体重の話としては言わない（点の横の動きの目安）。全部のコマが要る数えは段2bから"
+   "note": "体重の話としては言いません（点の横の動きの目安）。点が胴の中の同じ所を指しているとは限らないので「目安」です"
   },
   {
    "id": "pow.sequence",
@@ -10304,7 +10351,11 @@
      "time.P7"
     ],
     "proxy": "始まり → 手が構えから離れて離れ続けた最初のコマ（こちらで決めた定義）",
-    "spec": null
+    "spec": {
+     "kind": "tempo",
+     "p": "P4",
+     "p1": "P7"
+    }
    },
    "vision": null,
    "judgeable": "measurable",
@@ -10326,7 +10377,7 @@
    "definition_status": "ok",
    "checked_by": "",
    "version": "checkpoints/1.0-pgag",
-   "note": "ガイドの目安は一つの値で範囲が無いので、合否を出さない。自動の取り出し（段2b）から数える"
+   "note": "ガイドの目安は一つの値で範囲が無いので、合否を出しません。時刻それぞれに一コマの誤差を足した比の幅が、目安から人が決めた余白を丸ごと外れたときだけ言葉にします"
   },
   {
    "id": "tip.takeaway.one_piece",

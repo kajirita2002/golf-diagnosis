@@ -896,7 +896,9 @@ def check_plan(browser, root: str, base: str, shots_dir: str, tag: str, w: int, 
     page.wait_for_selector("[data-route='/practice'] #tBlocks")
 
     # 取り込み（作った球・型どおり）→ 練習を記録 → 球の帯 → 境目 → 判定
-    s2 = call("POST", f"{base}/sessions", {"player_id": who["id"], "date": "2026-09-30", "location": "練習場"})
+    # 日付は「プランを作った日より後・今日ではない」日（今日にすると下の「今日の記録を作る」が出ない）
+    s2_date = (datetime.date.today() + datetime.timedelta(days=1)).isoformat()
+    s2 = call("POST", f"{base}/sessions", {"player_id": who["id"], "date": s2_date, "location": "練習場"})
     import_practice(base, s2["id"], practice_tsv(tpl, seed=21))
     goto(page, root, "/practice/result", "#tSess")
     page.wait_for_timeout(300)
@@ -1156,6 +1158,9 @@ def check_video(browser, root: str, base: str, pid: int, shots_dir: str, errors:
     no_overflow(page, tag, "向きと番手", errors)
     targets(page, tag, "向きと番手", errors)
     shot(page, shots_dir, f"{tag}-1-setup")
+    if page.get_attribute("[data-md=auto]", "aria-pressed") != "true":
+        errors.append(f"[{tag}] コマの選び方の既定が「自動で取り出す」でない")
+    page.click("[data-md=manual]")
     page.set_input_files("[data-file]", os.path.join(SYN, "stick_dtl.webm"))
     page.wait_for_selector("[data-vframe] video", timeout=30000)
     chips = page.locator("[data-pchips] .pchip")
@@ -1401,6 +1406,7 @@ def check_video_portrait(browser, root: str, pid: int, shots_dir: str, errors: l
     page = ctx.new_page()
     page.on("pageerror", lambda e: errors.append(f"[{tag}] JS エラー: {e}"))
     goto(page, root, "/video/2026-09-25", "[data-file]")
+    page.click("[data-md=manual]")
     import base64 as _b64
     data = _b64.b64decode(page.evaluate(PORTRAIT_JS))
     page.set_input_files("[data-file]", {"name": "portrait.webm", "mimeType": "video/webm", "buffer": data})
@@ -1442,6 +1448,168 @@ def check_video_portrait(browser, root: str, pid: int, shots_dir: str, errors: l
     no_overflow(page, tag, "タップ（縦長）", errors)
     shot(page, shots_dir, f"{tag}-taps", full=False)
     ctx.close()
+
+
+# ============================================================ 5. 自動で取り出す（段2b）
+
+FAKE_MOTION_JS = """(() => {
+  const M = %s;
+  // 合成の動画（stick_motion_dtl.webm）の各コマに写っている棒人間の点（MediaPipe の代わり。本物の姿勢推定は棒人間に点を返さない）
+  window.__FAKE_POSE = (m) => { const k = Math.max(0, Math.min(M.lm.length - 1, Math.floor(m.t * M.fps + 1e-6)));
+    const lm = M.lm[k]; return lm ? lm.map((q) => ({ x: q[0], y: q[1], visibility: q[2] })) : null; };
+})();"""
+
+
+def check_video_auto(browser, root: str, base: str, pid: int, shots_dir: str, errors: list[str]) -> None:
+    """合成の動画（スイング3本・2本目は素振り）で: 自動で取り出す → 止める → ホームの「続きから処理する」→ 同じ動画で続き
+    → ボールの両端 → 確かめるところ → P2 のクラブ → チェック一覧（手の通り道の輪・テンポが出る）。"""
+    tag = "video-auto"
+    MSV = SYNTH
+    body, truth = SYNTH.motion(MSV.MOTION["view"], fps=MSV.MOTION["fps"], n_swings=MSV.MOTION["n_swings"], practice=MSV.MOTION["practice"])
+    ses = call("POST", f"{base}/sessions", {"player_id": pid, "date": "2026-09-24", "location": "練習場"})
+    sid = ses["id"]
+    ctx, page = new_page(browser, 390, 844, errors, tag, pid)
+    ctx.add_init_script(FAKE_MOTION_JS % json.dumps({"fps": body["fps"], "lm": [f["lm"] for f in body["frames"]]}))
+    sent: list[tuple[str, str, int]] = []
+    page.on("request", lambda r: sent.append((r.method, r.url, len(r.post_data_buffer or b""))) if r.method in ("POST", "PUT", "PATCH") else None)
+    video = os.path.join(SYN, "stick_motion_dtl.webm")
+    goto(page, root, f"/video/2026-09-24?session={sid}", "[data-file]")
+    page.set_input_files("[data-file]", video)
+    # 処理の段が出る。止めると、取った体の点は端末に残り、ホームが「続きから処理する」になる
+    page.wait_for_selector("[data-astages] li.cur", timeout=30000)
+    no_overflow(page, tag, "処理の段", errors)
+    targets(page, tag, "処理の段", errors)
+    shot(page, shots_dir, f"{tag}-1-stages")
+    page.click("[data-stop]")
+    try:
+        page.wait_for_selector("[data-stopped]", timeout=30000)
+    except Exception:  # noqa: BLE001
+        errors.append(f"[{tag}] 止めたのに止まった知らせが出ない: {page.inner_text('#view')[:200]!r}")
+    shot(page, shots_dir, f"{tag}-2-stopped")
+    goto(page, root, "/home", "[data-home-state]")
+    if page.get_attribute("[data-home-state]", "data-home-state") != "video_resume":
+        errors.append(f"[{tag}] 止めたあとのホームが「動画の処理が途中です」にならない: {page.get_attribute('[data-home-state]', 'data-home-state')}")
+    href = page.get_attribute("[data-primary]", "href") or ""
+    if "/video/2026-09-24" not in href:
+        errors.append(f"[{tag}] 続きから処理するの行き先が途中の記録でない: {href}")
+    shot(page, shots_dir, f"{tag}-3-home-resume")
+    page.click("[data-primary]")
+    page.wait_for_selector("[data-pending]", timeout=15000)
+    page.set_input_files("[data-file]", video)
+    # ボールの両端（最初のスイングの構え）
+    try:
+        page.wait_for_selector("[data-body] h2[data-tap-p='P1']", timeout=90000)
+    except Exception:  # noqa: BLE001
+        errors.append(f"[{tag}] ボールの両端の画面が出ない: {page.inner_text('#view')[:300]!r}")
+        ctx.close()
+        return
+    bx, by = MSV.MOTION_BALL
+    canvas_click(page, "[data-stage] canvas.tapimg", bx - SYNTH.BALL_D / 2, by)
+    page.click("[data-sel] [data-pi='1']")
+    canvas_click(page, "[data-stage] canvas.tapimg", bx + SYNTH.BALL_D / 2, by)
+    page.click("[data-done]")
+    try:
+        page.wait_for_selector("[data-review-sum]", timeout=120000)
+    except Exception:  # noqa: BLE001
+        errors.append(f"[{tag}] 自動の取り出しが終わらない: {page.inner_text('#view')[:300]!r}")
+        ctx.close()
+        return
+    txt = page.inner_text("[data-body]")
+    if "2本" not in txt:
+        errors.append(f"[{tag}] 取り出したスイングの本数が違う（素振りを除いて2本）: {txt[:200]!r}")
+    if not page.locator("[data-excluded]").count() or "1本" not in page.inner_text("[data-excluded]"):
+        errors.append(f"[{tag}] 素振りを外したことが出ない")
+    no_overflow(page, tag, "確かめるところ", errors)
+    targets(page, tag, "確かめるところ", errors)
+    shot(page, shots_dir, f"{tag}-4-review")
+    if page.locator("[data-review-go]").count():
+        page.click("[data-review-go]")
+        for _ in range(20):
+            page.wait_for_selector("[data-ok], [data-body] h2[data-tap-p='P2']", timeout=30000)
+            if page.locator("[data-body] h2[data-tap-p='P2']").count():
+                break
+            page.click("[data-ok]")
+    else:
+        # 全部のコマを見る道: 一コマ直して「手で直した」を残す
+        page.click("[data-review-all]")
+        page.wait_for_selector("[data-review-p='P1']", timeout=15000)
+        shot(page, shots_dir, f"{tag}-5-review-one")
+        page.click("[data-ok]")
+        page.wait_for_selector("[data-review-p='P2']", timeout=15000)
+        page.click('[data-mv="+1"]')
+        page.wait_for_timeout(150)
+        page.click("[data-ok]")
+        page.wait_for_selector("[data-review-p='P3']", timeout=15000)
+        page.click("[data-skip-rest]")
+    # 代表スイングの P2 のクラブ
+    try:
+        page.wait_for_selector("[data-body] h2[data-tap-p='P2']", timeout=30000)
+        page.wait_for_selector("[data-stage] canvas.tapimg")
+        canvas_click(page, "[data-stage] canvas.tapimg", 696, 373)
+        canvas_click(page, "[data-stage] canvas.tapimg", 690, 368)
+        page.click("[data-done]")
+    except Exception as e:  # noqa: BLE001
+        errors.append(f"[{tag}] P2 のクラブの画面が出ない: {e}")
+    try:
+        page.wait_for_function(f"location.hash === '#/session/{sid}/check'", timeout=90000)
+        page.wait_for_selector("[data-summary]", timeout=60000)
+    except Exception:  # noqa: BLE001
+        errors.append(f"[{tag}] チェックの画面に進まない: {page.inner_text('#view')[:300]!r}")
+        ctx.close()
+        return
+    sws = call("GET", f"{base}/sessions/{sid}/swings")
+    if len(sws) != 2:
+        errors.append(f"[{tag}] スイングの本数が2本でない: {len(sws)}")
+    for sw in sws:
+        cap = sw.get("capture") or {}
+        perf, au = cap.get("perf") or {}, cap.get("auto") or {}
+        if not sw.get("has_series"):
+            errors.append(f"[{tag}] スイングに時系列が残っていない: {sw['id']}")
+        for k in ("coarse_ms", "dense_ms", "detect_ms", "total_ms", "coarse_frames", "dense_frames"):
+            if k not in perf:
+                errors.append(f"[{tag}] 処理の時間の記録に {k} が無い: {perf}")
+        if not perf.get("resumed"):
+            errors.append(f"[{tag}] 止めたあとの続きで、取ってある体の点を使っていない: {perf}")
+        if au.get("frames_auto", 0) < 7 or "manual" not in au:
+            errors.append(f"[{tag}] 自動のコマ・手で直したコマの数の記録が無い: {au}")
+        one = call("GET", f"{base}/swings/{sw['id']}")
+        fr = {f["checkpoint"]: f for f in one["frames"]}
+        need = ["P1", "P2", "P3", "P4", "P5", "P6", "P7"]
+        if not all(p in fr and fr[p]["has_thumb"] and len(fr[p]["landmarks"]) == 33 for p in need):
+            errors.append(f"[{tag}] P1〜P7 のコマ・点・サムネイルが揃わない: {sorted(fr)}")
+        if not any(f["source"] == "auto" for f in one["frames"]):
+            errors.append(f"[{tag}] 自動で選んだコマの印が無い")
+    # 自動で選んだ時刻が本当の時刻に近い（コマの間隔 30fps の2コマまで。P1 は動き始めの少し後ろ）
+    first = call("GET", f"{base}/swings/{sws[0]['id']}")
+    fr = {f["checkpoint"]: f for f in first["frames"]}
+    for p in ("P4", "P5", "P7"):
+        if p in fr and abs(fr[p]["t"] - truth[0][p]) > 2.5 / 30:
+            errors.append(f"[{tag}] {p} の時刻が本当の時刻から離れている: {fr[p]['t']} / {truth[0][p]}")
+    chk = call("GET", f"{base}/sessions/{sid}/checks")["checks"]
+    by = {x["id"]: x for x in chk["items"]}
+    if by.get("path.loop", {}).get("state") != "in_range" or by["path.loop"].get("n_judged") != 2:
+        errors.append(f"[{tag}] 手の通り道の輪が2本とも測れていない: {by.get('path.loop', {}).get('state')} {by.get('path.loop', {}).get('reason')}")
+    if by.get("tempo.ratio", {}).get("n_ref") != 2:
+        errors.append(f"[{tag}] テンポが数えられていない: {by.get('tempo.ratio')}")
+    if page.locator("details[data-fold=tempo]").count() != 1 or "まだ" in page.inner_text("details[data-fold=tempo] > summary"):
+        errors.append(f"[{tag}] テンポの畳みが出ない・数えられていない")
+    page.click("[data-counts] > summary")
+    if not page.locator("[data-frames-src]").count():
+        errors.append(f"[{tag}] 件数を見るに、自動で選んだコマと手で直したコマの数が無い")
+    # 動画そのものは送らない（大きな送信が無い）
+    big = [x for x in sent if x[2] > 3 * 1024 * 1024]
+    if big:
+        errors.append(f"[{tag}] 大きな送信がある（動画を送っていないか）: {big}")
+    if LS_get(page, "golf.videoPending"):
+        errors.append(f"[{tag}] 終わったのに途中の印が残っている")
+    plain_first(page, "#view", tag, "チェック一覧（自動）", errors)
+    no_overflow(page, tag, "チェック一覧（自動）", errors)
+    shot(page, shots_dir, f"{tag}-6-check")
+    ctx.close()
+
+
+def LS_get(page, key: str):
+    return page.evaluate("(k) => { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } }", key)
 
 
 def tiny_png() -> bytes:
@@ -1513,6 +1681,7 @@ def main() -> None:
         check_settings(browser, sv.root, sv.base, me["id"], real_id, shots_dir, errors)
         check_video(browser, sv.root, sv.base, me["id"], shots_dir, errors)
         check_video_portrait(browser, sv.root, me["id"], shots_dir, errors)
+        check_video_auto(browser, sv.root, sv.base, me["id"], shots_dir, errors)
         check_routes(browser, sv.root, me["id"], real_id, shots_dir, errors)
         check_narrative(browser, shots_dir, errors)
         browser.close()

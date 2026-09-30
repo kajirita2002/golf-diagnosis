@@ -423,6 +423,8 @@ type CheckpointSwing struct {
 	Ball       json.RawMessage            `json:"ball"`
 	Frames     map[string]json.RawMessage `json:"frames"`
 	Missing    []string                   `json:"missing"`
+	// Series は自動の取り出し（段2b）で残した、スイングの区間の手・腰・胸の時系列（無ければ入れない）
+	Series json.RawMessage `json:"series,omitempty"`
 }
 
 // CheckpointsMeasure は1スイングを測って項目ごとに判定する（保存は Go）。
@@ -434,6 +436,17 @@ func (c *Client) CheckpointsMeasure(ctx context.Context, sw CheckpointSwing) (js
 		sw.Missing = []string{}
 	}
 	return c.post(ctx, "/v1/checkpoints/measure", map[string]any{"swing": sw})
+}
+
+// VideoCheckpoints は姿勢の時系列（端末が取った数値だけ）から、スイングの区間と P を取り出す（POST /v1/video/checkpoints）。
+// 本文は画面から来たものをそのまま渡す（形は分析サービスの video.py の先頭。Go は大きさだけを見る）。
+func (c *Client) VideoCheckpoints(ctx context.Context, body json.RawMessage) (json.RawMessage, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/v1/video/checkpoints", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	return c.do(req)
 }
 
 // CheckpointFocusInput はスイングごとの判定のまとめ（課題の選び方）への入力。
