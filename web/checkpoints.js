@@ -102,7 +102,7 @@ const Checks = (() => {
     let a = 0, m = 0;
     for (const s of sws) for (const f of s.frames || []) { if (f.source === "auto") a += 1; else m += 1; }
     if (!a) return "";
-    return `<p class="caption" data-frames-src>コマは自動で選んだもの${lab("count", a + "つ")}・手で選んだり直したりしたもの${lab("count", m + "つ")}。</p>`;
+    return `<p class="caption" data-frames-src>自動で選んだコマ${lab("count", a + "コマ")}・手で選んだり直したりしたコマ${lab("count", m + "コマ")}。</p>`;
   }
 
   function pStrip(data) {
