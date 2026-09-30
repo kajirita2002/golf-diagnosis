@@ -425,6 +425,8 @@ type CheckpointSwing struct {
 	Missing    []string                   `json:"missing"`
 	// Series は自動の取り出し（段2b）で残した、スイングの区間の手・腰・胸の時系列（無ければ入れない）
 	Series json.RawMessage `json:"series,omitempty"`
+	// Vision は見た目の評価（Claude）の答え（項目 id → 答え。無ければ入れない）
+	Vision json.RawMessage `json:"vision,omitempty"`
 }
 
 // CheckpointsMeasure は1スイングを測って項目ごとに判定する（保存は Go）。
@@ -469,4 +471,81 @@ func (c *Client) CheckpointsFocus(ctx context.Context, in CheckpointFocusInput) 
 		in.Prefs = json.RawMessage("{}")
 	}
 	return c.post(ctx, "/v1/checkpoints/focus", in)
+}
+
+// VisionStatus は見た目の評価を呼べるか・料金の見積もり・版（GET /v1/checkpoints/vision/status）。
+type VisionStatus struct {
+	Ready           bool      `json:"ready"`
+	Reason          string    `json:"reason"`
+	Model           string    `json:"model"`
+	PromptVersion   string    `json:"prompt_version"`
+	CatalogStamp    string    `json:"catalog_stamp"`
+	CostPerSwingUSD []float64 `json:"cost_per_swing_usd"`
+	DefaultSwings   int       `json:"default_swings"`
+	MaxSwings       int       `json:"max_swings"`
+	MaxImages       int       `json:"max_images"`
+}
+
+// CheckpointsVisionStatus は見た目の評価の状態を読む。
+func (c *Client) CheckpointsVisionStatus(ctx context.Context) (*VisionStatus, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/v1/checkpoints/vision/status", nil)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := c.do(req)
+	if err != nil {
+		return nil, err
+	}
+	var v VisionStatus
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return nil, fmt.Errorf("分析サービスの応答を読めません: %w", err)
+	}
+	return &v, nil
+}
+
+// VisionSwing は見た目の評価へ渡す1スイング。Frames は P → JPEG（ここで base64 にする。保存しない）。
+type VisionSwing struct {
+	SwingID    int64             `json:"swing_id"`
+	View       string            `json:"view"`
+	Club       string            `json:"club"`
+	ClubClass  string            `json:"club_class"`
+	Handedness model.Handedness  `json:"handedness"`
+	FPS        float64           `json:"fps"`
+	Frames     map[string][]byte `json:"frames"` // encoding/json が []byte を base64 にする
+}
+
+// CheckpointsVision は見た目の項目を Claude に聞く（Claude の応答を待つので時間がかかる。ctx だけで切る）。
+func (c *Client) CheckpointsVision(ctx context.Context, swings []VisionSwing) (json.RawMessage, error) {
+	b, err := json.Marshal(map[string]any{"swings": swings})
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/v1/checkpoints/vision", bytes.NewReader(b))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	return c.doWith(&http.Client{}, req)
+}
+
+// SymptomsInput は症状を探す入力（§9.1）。
+type SymptomsInput struct {
+	Shots       []ShotPayload    `json:"shots"`
+	Handedness  model.Handedness `json:"handedness"`
+	Clubs       []string         `json:"clubs"`
+	MatchedSeqs []int            `json:"matched_seqs"`
+}
+
+// CheckpointsSymptoms はその日の球の症状と、課題の印に使う症状の id を返す。
+func (c *Client) CheckpointsSymptoms(ctx context.Context, in SymptomsInput) (json.RawMessage, error) {
+	if in.Shots == nil {
+		in.Shots = []ShotPayload{}
+	}
+	if in.Clubs == nil {
+		in.Clubs = []string{}
+	}
+	if in.MatchedSeqs == nil {
+		in.MatchedSeqs = []int{}
+	}
+	return c.post(ctx, "/v1/checkpoints/symptoms", in)
 }

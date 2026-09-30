@@ -54,6 +54,9 @@ REASON_TEXT = {
     "ref_club": "この番手の基準はガイドに無い",
     "not_built": "測り方をまだ作っていない",
     "vision_pending": "見た目の評価はまだ",
+    "vision_unclear": "見た目でも判断できない",
+    "vision_dropped": "見た目の答えが検証を通らなかった",
+    "vision_reselect": "コマが定義の瞬間に見えない",
     "conflict": "測った値と見た目の食い違い",
     "derive": "まとめる項目が判断できない",
     "split": "スイングごとに食い違う",
@@ -890,9 +893,14 @@ def judge_item(ctx: Ctx, it: dict, cam: dict, scale: dict, vision_ans: dict | No
             out["ref_reason"] = measured.get("invalid")
             out["detail"] = measured.get("detail", "")
         return out
+    # 検証に落ちた答え・コマを選び直す答えは、答えが無いものとして扱い、理由だけを残す
+    vmark = None
+    if vision_ans and (vision_ans.get("dropped") or vision_ans.get("reselect")):
+        vmark = "vision_reselect" if vision_ans.get("reselect") else "vision_dropped"
+        vision_ans = None
     vstate, vfault = _vision_state(it, vision_ans)
     if vision_ans:
-        out["vision"] = {"option": vision_ans.get("option"), "visual": vision_ans.get("visual", "")}
+        out["vision"] = {"option": vision_ans.get("option"), "visual": vision_ans.get("visual", ""), "visibility": vision_ans.get("visibility", "")}
     mres = measured.get("res") if measured and "invalid" not in measured else None
     if mres in ("in", "out_lo", "out_hi"):
         mstate = "in_range" if mres == "in" else "out_range"
@@ -920,7 +928,9 @@ def judge_item(ctx: Ctx, it: dict, cam: dict, scale: dict, vision_ans: dict | No
     if measured and "invalid" in measured:
         return unknown(measured["invalid"], measured.get("detail", ""))
     if m.get("how") == "vision" or it.get("vision"):
-        return unknown("vision_pending")
+        if vmark:
+            return unknown(vmark, "P を選び直すと見られます" if vmark == "vision_reselect" else "")
+        return unknown("vision_unclear" if vision_ans else "vision_pending")
     return unknown("not_built")
 
 

@@ -175,6 +175,9 @@ def _one(it: dict, rs: list[tuple[Any, dict]], hand: str, symptoms: set[str]) ->
         "value": rep.get("value") if rep else None,
         "values": [{"swing_id": sid, "state": r["state"], "value": r.get("value"), "reason": r.get("reason", "")} for sid, r in rs],
         "frames": frames[:12],
+        # 見た目の答え（「なぜそう言える？」の中だけ。判定は measure.py が選択肢から決めたもの）
+        "visions": [{"swing_id": sid, "option": r["vision"].get("option"), "visual": r["vision"].get("visual", ""), "state": r["state"]}
+                    for sid, r in rs if r.get("vision")],
         "linked": bool(symptoms & set(it.get("l1_links") or [])),
         "conflict": any(r.get("conflict") for _, r in rs),
         "tight": _tight(rep.get("value") if rep else None),

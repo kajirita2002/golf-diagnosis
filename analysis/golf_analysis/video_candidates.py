@@ -13,80 +13,81 @@ from statistics import median
 
 from .shots import dec, m
 
-VERSION = "video_candidates/0.1"
+VERSION = "video_candidates/0.2"
 
+# 症状 → 動画で見る項目（docs/DESIGN_v2.md §9.1。事前の表・1つだけ）。
+# items はチェックポイントのカタログの id（`setup.ball_pos` は番手ごとの `setup.ball_pos.*` の束）。
+# カタログの `l1_links` と両方向で一致することを pytest が見る（`linked_items` はカタログから逆引きする）。
+# features は既存の特徴量の名前（カタログの pose 項目の中身として残す）。
+# S8（振りの速さが伸びない）は**判定の規則を人が決めるまで detect で出さない**（rule が None）。
 SYMPTOMS = [
-    {
-        "id": "S1",
-        "title": "ネック寄りの当たり",
-        "rule": "extreme_strike の contact == heel_extreme が2球以上",
-        "features": ["dtl.butt_line_gap", "dtl.hands_out", "dtl.spine_tilt_delta"],
-        "questions": ["q.p1_ball_on_face", "q.p7_butt_line", "q.p7_hands_out"],
-        "capture": "DTL。その球の動画が要る（散発的）",
-        "view": "dtl",
-        "needs_that_shot": True,
-    },
-    {
-        "id": "S2",
-        "title": "打点が全体にヒール寄り",
-        "rule": "打点の平均がヒール側に 10mm 超",
-        "features": ["dtl.butt_line_gap", "dtl.hands_out", "dtl.spine_tilt_delta"],
-        "questions": ["q.p1_ball_on_face", "q.p7_butt_line"],
-        "capture": "DTL。どのスイングでもよい（系統的）",
-        "view": "dtl",
-        "needs_that_shot": False,
-    },
-    {
-        "id": "S3",
-        "title": "フェースが系統的に右",
-        "rule": "フェースの bias が right",
-        "features": [],
-        "questions": ["q.grip", "q.p4_lead_wrist", "q.p4_face"],
-        "capture": "どのスイングでもよい",
-        "view": "dtl",
-        "needs_that_shot": False,
-    },
-    {
-        "id": "S4",
-        "title": "フェースが散発的に大きく右",
-        "rule": "フェースが中央値から MAD の3倍より外の球",
-        "features": [],
-        "questions": ["q.grip", "q.p4_lead_wrist", "q.p4_face"],
-        "capture": "その球の動画。S3 と同じ質問を、その球と普段の球で比べる",
-        "view": "dtl",
-        "needs_that_shot": True,
-    },
-    {
-        "id": "S5",
-        "title": "パスが右",
-        "rule": "パスの平均が +2° 超",
-        "features": ["dtl.hand_path_gap", "fo.ball_position", "fo.pelvis_shift_impact"],
-        "questions": ["q.p6_shaft"],
-        "capture": "入射角を一緒に見る（下に打つほどパスは右に出る）",
-        "view": "dtl",
-        "needs_that_shot": False,
-    },
-    {
-        "id": "S6",
-        "title": "パスが左",
-        "rule": "パスの平均が −2° 超",
-        "features": ["dtl.hand_path_gap", "fo.ball_position", "fo.pelvis_shift_impact"],
-        "questions": ["q.p6_shaft"],
-        "capture": "入射角を一緒に見る",
-        "view": "dtl",
-        "needs_that_shot": False,
-    },
-    {
-        "id": "S7",
-        "title": "アイアンの入射角が浅い・上向き",
-        "rule": "アイアンの入射角の平均が 0° 以上（基準の出典は未確認）",
-        "features": ["fo.ball_position", "fo.head_shift_impact", "fo.pelvis_shift_impact"],
-        "questions": ["q.p7_head_height"],
-        "capture": "Face-on（Phase 3）",
-        "view": "face_on",
-        "needs_that_shot": False,
-    },
+    {"id": "S1", "title": "ネック寄りの当たり", "rule": "extreme_strike の contact == heel_extreme が2球以上",
+     "items": ["setup.ball_pos", "iron.p1.dtl.hands", "iron.p7.dtl.hands", "err.early_ext.dtl", "iron.p7.dtl.hand_height"],
+     "features": ["dtl.butt_line_gap", "dtl.hands_out", "dtl.spine_tilt_delta"], "view": "dtl", "needs_that_shot": True},
+    {"id": "S2", "title": "打点が全体にヒール寄り", "rule": "打点の平均がヒール側に 10mm 超",
+     "items": ["iron.p1.dtl.hands", "iron.p7.dtl.hands", "err.early_ext.dtl"],
+     "features": ["dtl.butt_line_gap", "dtl.hands_out", "dtl.spine_tilt_delta"], "view": "dtl", "needs_that_shot": False},
+    {"id": "S3", "title": "フェースが系統的に右", "rule": "フェースの bias が right",
+     "items": ["setup.grip", "iron.p4.dtl.shaft_vs_forearm", "err.early_release.p6"],
+     "features": [], "view": "both", "needs_that_shot": False},
+    {"id": "S4", "title": "フェースが散発的に大きく右", "rule": "フェースが中央値から MAD の3倍より外の球",
+     "items": ["setup.grip", "iron.p4.dtl.shaft_vs_forearm", "err.early_release.p6"],
+     "features": [], "view": "both", "needs_that_shot": True},
+    {"id": "S5", "title": "パスが右", "rule": "パスの平均が +2° 超",
+     "items": ["path.loop", "err.steep.p5", "err.steep.p6", "iron.p2.dtl.head_vs_hands", "setup.ball_pos"],
+     "features": ["dtl.hand_path_gap", "fo.ball_position", "fo.pelvis_shift_impact"], "view": "both", "needs_that_shot": False},
+    {"id": "S6", "title": "パスが左", "rule": "パスの平均が −2° 超",
+     "items": ["path.loop", "err.steep.p5", "err.steep.p6", "iron.p2.dtl.head_vs_hands", "setup.ball_pos"],
+     "features": ["dtl.hand_path_gap", "fo.ball_position", "fo.pelvis_shift_impact"], "view": "both", "needs_that_shot": False},
+    {"id": "S7", "title": "アイアンの入射角が浅い・上向き", "rule": "アイアンの入射角の平均が 0° 以上（基準の出典は未確認）",
+     "items": ["err.sway.p7", "iron.p7.fo.side_bend", "iron.p7.fo.hands_ahead", "setup.ball_pos"],
+     "features": ["fo.ball_position", "fo.head_shift_impact", "fo.pelvis_shift_impact"], "view": "fo", "needs_that_shot": False},
+    {"id": "S8", "title": "振りの速さが伸びない", "rule": None,
+     "items": ["pow.head_fb", "pow.recenter", "pow.width", "pow.trail_knee", "tempo.ratio"],
+     "features": [], "view": "both", "needs_that_shot": False},
 ]
+MAX_ITEMS = 5
+# 画面の言い方（§9.1）。ガイドも動きを「可能性」として扱っているので、ここまでしか言わない
+LINK_TEXT = "球の課題とつながる候補です（まだ確かめていません）"
+
+
+def canonical(item_id: str) -> str:
+    """表と突き合わせる形: 番手ごとのボールの位置は束ね、束ねた項目（same_as）は相手の id にする。"""
+    from .checkpoints import by_id
+
+    if item_id.startswith("setup.ball_pos."):
+        return "setup.ball_pos"
+    it = by_id(item_id) or {}
+    return it.get("same_as") or item_id
+
+
+def linked_items(symptom_id: str) -> set[str]:
+    """カタログの l1_links から逆引きした、その症状の項目（canonical の形）。"""
+    from .checkpoints import items
+
+    return {canonical(it["id"]) for it in items() if symptom_id in (it.get("l1_links") or [])}
+
+
+def table_items(symptom_id: str) -> set[str]:
+    s = next((x for x in SYMPTOMS if x["id"] == symptom_id), None)
+    return {canonical(i) for i in (s or {}).get("items", [])}
+
+
+def symptoms_for_focus(found: list[dict], matched_seqs: set[int] | None = None) -> list[str]:
+    """課題の「球の課題とつながる候補」の印に使う症状の id。
+
+    その球の動画が要る症状（S1・S4）は、対応づけた（人が確かめた）スイングの球が症状の球に入っているときだけ数える。"""
+    matched_seqs = matched_seqs or set()
+    out = []
+    for f in found:
+        s = next((x for x in SYMPTOMS if x["id"] == f["id"]), None)
+        if not s or s["rule"] is None:
+            continue
+        if s["needs_that_shot"] and not (set(f.get("seqs") or []) & matched_seqs):
+            continue
+        out.append(f["id"])
+    return out
+
 
 # 解説の⑧「動画で見る候補」（§6.3）。人が書いて確かめた文だけを出す（checked_by）。
 # 鍵は「どの所見から」（cross_club の common / 症状の id）。
@@ -153,4 +154,28 @@ def hints_for(keys: list[str]) -> list[dict]:
                 continue
             seen.add(look)
             out.append(h)
+    return out
+
+
+def session_symptoms(shots: list[dict], categories: list[str] | None = None) -> list[dict]:
+    """その日の球から症状を探す（クラブごと・解説の本体の範囲と同じ球数の条件）。categories を渡せばそのクラブの種類だけ。
+
+    返すのは {id, club, seqs?} の並び。S8 は規則が無いので出さない。"""
+    from . import config
+    from .session import analyze_session
+    from .shots import drop_practice
+
+    use = [s for s in drop_practice(shots) if not s.get("excluded")]
+    an = analyze_session(use)
+    out = []
+    for c in an["clubs"]:
+        p = c["profile"]
+        if categories and p.get("category") not in categories:
+            continue
+        if p["n"] - p["mishit_excluded"] < config.MIN_SCOPE_N:
+            continue
+        sh = [s for s in use if (s.get("club") or "(クラブ不明)") == c["club"]]
+        skip = {s["id"] for s in sh if s["seq"] in p["mishit_seqs"]}
+        for f in detect(p, sh, skip):
+            out.append({**f, "club": c["club"]})
     return out

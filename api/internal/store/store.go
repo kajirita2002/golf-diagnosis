@@ -267,6 +267,15 @@ CREATE TABLE IF NOT EXISTS {s}swing_checks (
 	created_at       TEXT NOT NULL,
 	PRIMARY KEY (swing_id, item_id, catalog_version)
 );
+-- 見た目の評価（Claude）のスイングごとの答え（docs/DESIGN_v2.md §6.7・段2c）。画像は置かない。
+-- answers_json は 項目 id → {option, visibility, visual} / {dropped} / {reselect}。測り直すときに measure へ渡す。
+CREATE TABLE IF NOT EXISTS {s}swing_vision (
+	swing_id         INTEGER PRIMARY KEY REFERENCES {s}swings(id),
+	llm_job_id       INTEGER REFERENCES {s}llm_jobs(id),
+	catalog_version  TEXT NOT NULL,
+	answers_json     TEXT NOT NULL DEFAULT '{}',
+	created_at       TEXT NOT NULL
+);
 -- 1日（UTC）・1種類ごとの使った量。上限（LLM_DAILY_LIMIT_*）はここの calls で数える。
 CREATE TABLE IF NOT EXISTS {s}llm_usage (
 	day            TEXT NOT NULL,

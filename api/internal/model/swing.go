@@ -43,6 +43,11 @@ type Swing struct {
 	Missing          []string        `json:"missing"`
 	CPCatalogVersion string          `json:"cp_catalog_version"`
 	Measure          json.RawMessage `json:"measure,omitempty"` // 最後に測ったときの撮り方の検査・物差し
+	// SeqFrom / SeqTo は、人が確かめて結んだ TrackMan の球の番号（1スイング＝1球なので同じ値。結んでいなければ nil。§9.1）
+	SeqFrom *int `json:"seq_from"`
+	SeqTo   *int `json:"seq_to"`
+	// HasVision は見た目の評価（Claude）の答えを持っているか（いまのカタログの版で）
+	HasVision bool `json:"has_vision"`
 	// HasSeries はスイングの区間の時系列（自動の取り出し・段2b）を残しているか
 	HasSeries bool      `json:"has_series"`
 	CreatedAt time.Time `json:"created_at"`

@@ -34,6 +34,9 @@ type LLMConfig struct {
 	Enabled bool // REPORT_LLM=on
 	// DailyLimitNarrative は1日に Claude を呼ぶ範囲の数。負なら上限なし。
 	DailyLimitNarrative int
+	// DailyLimitVideo は1日に見た目の評価（動画のコマ）で Claude を呼ぶ回数。負なら上限なし（既定）。
+	// 見た目の評価は REPORT_LLM に関係なく、本人が料金を見て押したときだけ呼ぶ（§6.7）。
+	DailyLimitVideo int
 	// Timeout は1範囲ぶんの生成を待つ長さ（要求とは切り離して数える）。
 	Timeout time.Duration
 	// Concurrency は同時に走らせる生成の数（CPU 0.1・512MB の無料プランで詰まらせない）。
@@ -45,7 +48,7 @@ const DefaultNarrativeLimit = 20
 
 // DefaultLLMConfig は既定（off・20/日）。
 func DefaultLLMConfig() LLMConfig {
-	return LLMConfig{Enabled: false, DailyLimitNarrative: DefaultNarrativeLimit, Timeout: 5 * time.Minute, Concurrency: 2}
+	return LLMConfig{Enabled: false, DailyLimitNarrative: DefaultNarrativeLimit, DailyLimitVideo: -1, Timeout: 5 * time.Minute, Concurrency: 2}
 }
 
 // LLMConfigFromEnv は環境変数から読む。読めない値は既定に戻し、その理由を warnings に返す。
@@ -68,6 +71,14 @@ func LLMConfigFromEnv(get func(string) string) (LLMConfig, []string) {
 			warns = append(warns, fmt.Sprintf("LLM_DAILY_LIMIT_NARRATIVE=%q は整数ではないので %d にしました", v, DefaultNarrativeLimit))
 		} else {
 			c.DailyLimitNarrative = n
+		}
+	}
+	if v := strings.TrimSpace(get("LLM_DAILY_LIMIT_VIDEO")); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			warns = append(warns, fmt.Sprintf("LLM_DAILY_LIMIT_VIDEO=%q は整数ではないので上限なしにしました", v))
+		} else {
+			c.DailyLimitVideo = n
 		}
 	}
 	return c, warns

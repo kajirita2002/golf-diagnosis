@@ -9,6 +9,7 @@
 //	APP_PASSWORD  空でなければ全部に Basic 認証を掛ける（公開するときは必ず入れる）
 //	REPORT_LLM    on なら解説のつなぎの文に Claude を使う（既定 off。off なら Claude を一切呼ばない）
 //	LLM_DAILY_LIMIT_NARRATIVE  つなぎの文で Claude を呼ぶ範囲の数の1日の上限（既定 20。負なら上限なし）
+//	LLM_DAILY_LIMIT_VIDEO      見た目の評価（動画のコマ）で Claude を呼ぶ回数の1日の上限（既定 上限なし）
 //
 // **起動の約束: 待ち受けは最初に開き、何があっても落とさない。**
 // Render は待ち受けが開かないと「起動中」の画面のまま再起動を繰り返し、原因が外から見えない

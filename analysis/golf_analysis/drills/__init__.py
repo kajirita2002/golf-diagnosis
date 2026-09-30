@@ -269,3 +269,69 @@ def for_candidate(cand: dict, category: str | None, hand: str, history: list[dic
             p["record_note"] = "not_worked_before"
         out.append(p)
     return {"drills": out, "n_matching": len(pool), "n_unchecked": len(pool) - len(shown)}
+
+
+# ---------------------------------------------------------------- チェックポイント版（docs/DESIGN_v2.md §15 段2c）
+
+CP_PATH = os.path.join(HERE, "checkpoints.json")
+CP_TEXT_FIELDS = ("title", "what_changes", "cue", "adjust")
+
+
+def cp_load() -> dict:
+    with open(CP_PATH, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def cp_validate(cat: dict | None = None) -> list[str]:
+    """形の検査。項目と外れの向きがカタログにあること・右左を直書きしないこと。"""
+    from ..checkpoints import by_id
+    from ..checkpoints import page_ranges
+
+    cat = cat or cp_load()
+    errs: list[str] = []
+    seen = set()
+    for d in cat.get("drills") or []:
+        did = d.get("id") or "?"
+        if did in seen:
+            errs.append(f"{did}: id が重なっています")
+        seen.add(did)
+        for k in CP_TEXT_FIELDS:
+            if not (d.get(k) or "").strip():
+                errs.append(f"{did}: {k} が空です")
+        if not d.get("items"):
+            errs.append(f"{did}: items が要ります")
+        for iid in d.get("items") or []:
+            it = by_id(iid)
+            if not it:
+                errs.append(f"{did}: カタログに無い項目 {iid}")
+                continue
+            fids = {f["id"] for f in it.get("faults") or []}
+            if not set(d.get("faults") or []) <= fids:
+                errs.append(f"{did}: {iid} に無い外れの向き {d.get('faults')}")
+        steps = d.get("steps") or []
+        if not steps or len(steps) > MAX_STEPS:
+            errs.append(f"{did}: steps は1〜{MAX_STEPS}個です")
+        for t in [d.get(k) or "" for k in CP_TEXT_FIELDS] + steps:
+            if "右" in t or "左" in t:
+                errs.append(f"{did}: 右・左を直書きしています: {t}")
+        try:
+            page_ranges((d.get("guide") or {}).get("pages", ""))
+        except ValueError as e:
+            errs.append(f"{did}: {e}")
+        if "checked_by" not in d or not (d.get("author") or "").strip():
+            errs.append(f"{did}: author / checked_by の欄が要ります")
+    return errs
+
+
+def cp_for(item_id: str, fault: str | None, hand: str = "R") -> list[dict]:
+    """その項目・その外れの向きの練習（確かめ中のものは checked=False の札つきで出す）。"""
+    out = []
+    for d in cp_load().get("drills") or []:
+        if item_id in (d.get("items") or []) and (not fault or fault in (d.get("faults") or [])):
+            v = copy.deepcopy(d)
+            for k in CP_TEXT_FIELDS:
+                v[k] = render(v.get(k) or "", hand)
+            v["steps"] = [render(s, hand) for s in v.get("steps") or []]
+            v["checked"] = is_checked(d)
+            out.append(v)
+    return out

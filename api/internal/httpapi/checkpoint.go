@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -663,24 +664,41 @@ type measureResult struct {
 }
 
 func (s *Server) measureSwing(r *http.Request, sw *model.Swing) (json.RawMessage, error) {
-	se, err := s.Store.GetSession(r.Context(), sw.SessionID)
+	return s.measureSwingCtx(r.Context(), sw)
+}
+
+// swingVisionOf は見た目の評価の答え（無ければ nil）。
+func (s *Server) swingVisionOf(ctx context.Context, swingID int64) (json.RawMessage, error) {
+	v, err := s.Store.GetSwingVision(ctx, swingID)
+	if err != nil || v == nil {
+		return nil, err
+	}
+	return v.Answers, nil
+}
+
+func (s *Server) measureSwingCtx(ctx context.Context, sw *model.Swing) (json.RawMessage, error) {
+	se, err := s.Store.GetSession(ctx, sw.SessionID)
 	if err != nil {
 		return nil, err
 	}
-	pl, err := s.Store.GetPlayer(r.Context(), se.PlayerID)
+	pl, err := s.Store.GetPlayer(ctx, se.PlayerID)
 	if err != nil {
 		return nil, err
 	}
-	fs, err := s.Store.ListSwingFrames(r.Context(), sw.ID)
+	fs, err := s.Store.ListSwingFrames(ctx, sw.ID)
 	if err != nil {
 		return nil, err
 	}
-	series, err := s.Store.GetSwingSeries(r.Context(), sw.ID)
+	series, err := s.Store.GetSwingSeries(ctx, sw.ID)
 	if err != nil {
 		return nil, err
 	}
-	in := swingInput(sw, pl.Handedness, fs, series)
-	raw, err := s.Analyzer.CheckpointsMeasure(r.Context(), in)
+	vis, err := s.swingVisionOf(ctx, sw.ID)
+	if err != nil {
+		return nil, err
+	}
+	in := swingInput(sw, pl.Handedness, fs, series, vis)
+	raw, err := s.Analyzer.CheckpointsMeasure(ctx, in)
 	if err != nil {
 		return nil, err
 	}
@@ -717,16 +735,16 @@ func (s *Server) measureSwing(r *http.Request, sw *model.Swing) (json.RawMessage
 	}
 	// fp: 測った条件の指紋（分析サービスの指紋・利き手・向き・番手・コマとタップ）。GET のときに違えば測り直す
 	meta, _ := json.Marshal(map[string]any{"camera": m.Camera, "scale": m.Scale, "view_check": m.ViewCheck, "fp": swingFingerprint(m.Stamp, in)})
-	if err := s.Store.PutSwingChecks(r.Context(), sw.ID, m.CatalogVersion, meta, checks); err != nil {
+	if err := s.Store.PutSwingChecks(ctx, sw.ID, m.CatalogVersion, meta, checks); err != nil {
 		return nil, err
 	}
 	return raw, nil
 }
 
 // swingInput は分析サービスに渡す1スイング（測る入力）。指紋もこの形から作る（渡した中身＝測った条件）。
-func swingInput(sw *model.Swing, hand model.Handedness, fs []model.SwingFrame, series json.RawMessage) analysis.CheckpointSwing {
+func swingInput(sw *model.Swing, hand model.Handedness, fs []model.SwingFrame, series, vision json.RawMessage) analysis.CheckpointSwing {
 	in := analysis.CheckpointSwing{View: sw.View, Club: sw.Club, ClubClass: sw.ClubClass, Handedness: hand, FPS: sw.FPS,
-		Width: sw.Width, Height: sw.Height, Ball: sw.Ball, Frames: map[string]json.RawMessage{}, Missing: sw.Missing, Series: series}
+		Width: sw.Width, Height: sw.Height, Ball: sw.Ball, Frames: map[string]json.RawMessage{}, Missing: sw.Missing, Series: series, Vision: vision}
 	for _, f := range fs {
 		b, _ := json.Marshal(map[string]any{"t": f.T, "landmarks": f.Landmarks, "taps": f.Taps})
 		in.Frames[f.Checkpoint] = b
@@ -763,10 +781,19 @@ func (s *Server) sessionChecks(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	ss, err := s.Store.ListSwings(r.Context(), se.ID)
+	out, err := s.checksData(r.Context(), se, pl, true)
 	if err != nil {
 		s.fail(w, err)
 		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// checksData は sessionChecks の中身（ホームの「今日の1点」でも使う）。full なら見た目の評価の状態と対応づけの案も付ける。
+func (s *Server) checksData(ctx context.Context, se *model.Session, pl *model.Player, full bool) (map[string]any, error) {
+	ss, err := s.Store.ListSwings(ctx, se.ID)
+	if err != nil {
+		return nil, err
 	}
 	type swingOut struct {
 		model.Swing
@@ -774,13 +801,13 @@ func (s *Server) sessionChecks(w http.ResponseWriter, r *http.Request) {
 	}
 	var payload []json.RawMessage
 	outs := []swingOut{}
+	measured := []model.Swing{}
 	stamp := ""
 	for i := range ss {
 		sw := &ss[i]
-		fs, err := s.Store.ListSwingFrames(r.Context(), sw.ID)
+		fs, err := s.Store.ListSwingFrames(ctx, sw.ID)
 		if err != nil {
-			s.fail(w, err)
-			return
+			return nil, err
 		}
 		if len(fs) == 0 {
 			outs = append(outs, swingOut{*sw, fs})
@@ -789,32 +816,31 @@ func (s *Server) sessionChecks(w http.ResponseWriter, r *http.Request) {
 		stale := sw.CPCatalogVersion == ""
 		if !stale {
 			if stamp == "" {
-				if stamp, err = s.Analyzer.CheckpointsStamp(r.Context()); err != nil {
-					s.fail(w, err)
-					return
+				if stamp, err = s.Analyzer.CheckpointsStamp(ctx); err != nil {
+					return nil, err
 				}
 			}
-			series, err := s.Store.GetSwingSeries(r.Context(), sw.ID)
+			series, err := s.Store.GetSwingSeries(ctx, sw.ID)
 			if err != nil {
-				s.fail(w, err)
-				return
+				return nil, err
 			}
-			stale = storedFingerprint(sw) != swingFingerprint(stamp, swingInput(sw, pl.Handedness, fs, series))
+			vis, err := s.swingVisionOf(ctx, sw.ID)
+			if err != nil {
+				return nil, err
+			}
+			stale = storedFingerprint(sw) != swingFingerprint(stamp, swingInput(sw, pl.Handedness, fs, series, vis))
 		}
 		if stale {
-			if _, err := s.measureSwing(r, sw); err != nil {
-				s.fail(w, err)
-				return
+			if _, err := s.measureSwingCtx(ctx, sw); err != nil {
+				return nil, err
 			}
-			if sw, err = s.Store.GetSwing(r.Context(), sw.ID); err != nil {
-				s.fail(w, err)
-				return
+			if sw, err = s.Store.GetSwing(ctx, sw.ID); err != nil {
+				return nil, err
 			}
 		}
-		cs, err := s.Store.ListSwingChecks(r.Context(), sw.ID, sw.CPCatalogVersion)
+		cs, err := s.Store.ListSwingChecks(ctx, sw.ID, sw.CPCatalogVersion)
 		if err != nil {
-			s.fail(w, err)
-			return
+			return nil, err
 		}
 		items := make([]json.RawMessage, 0, len(cs))
 		for _, c := range cs {
@@ -826,21 +852,30 @@ func (s *Server) sessionChecks(w http.ResponseWriter, r *http.Request) {
 			fs[j].Landmarks, fs[j].Taps = nil, nil // 一覧には要らない（コマの有る無しとサムネイルの有無だけ）
 		}
 		outs = append(outs, swingOut{*sw, fs})
+		measured = append(measured, *sw)
 	}
 	out := map[string]any{"session_id": se.ID, "swings": outs, "handedness": pl.Handedness}
+	if full {
+		out["vision"] = s.visionInfo(ctx, se.ID, len(measured))
+		if mp, err := s.matchPlan(ctx, se.ID); err == nil {
+			out["match"] = mp
+		}
+	}
 	if len(payload) == 0 {
 		out["checks"] = nil
-		writeJSON(w, http.StatusOK, out)
-		return
+		return out, nil
+	}
+	symRaw, symptoms := s.sessionSymptoms(ctx, se, pl, measured)
+	if symRaw != nil {
+		out["symptoms"] = symRaw
 	}
 	var prefs map[string]any
 	_ = json.Unmarshal(pl.Prefs, &prefs)
 	pb, _ := json.Marshal(map[string]any{"priority": prefs["priority"]})
-	agg, err := s.Analyzer.CheckpointsFocus(r.Context(), analysis.CheckpointFocusInput{Swings: payload, Handedness: pl.Handedness, Prefs: pb})
+	agg, err := s.Analyzer.CheckpointsFocus(ctx, analysis.CheckpointFocusInput{Swings: payload, Handedness: pl.Handedness, Prefs: pb, Symptoms: symptoms})
 	if err != nil {
-		s.fail(w, err)
-		return
+		return nil, err
 	}
 	out["checks"] = agg
-	writeJSON(w, http.StatusOK, out)
+	return out, nil
 }

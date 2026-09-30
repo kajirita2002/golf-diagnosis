@@ -193,6 +193,12 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) {
 				most = max(most, c)
 			}
 			out["latest_video"] = map[string]any{"session_id": ss[i].ID, "date": ss[i].Date, "n_swings": n, "n_same_view": most}
+			// 動きの課題（段2c）: 動画の判定から選んだ「まずここ」。ホームの「今日の1点」の候補（どちらを出すかは画面の homeState）
+			ctx, cancel := context.WithTimeout(r.Context(), homeReportTimeout)
+			if mf := s.motionFocus(ctx, &ss[i], pl); mf != nil {
+				out["motion_focus"] = mf
+			}
+			cancel()
 			break
 		}
 	}
@@ -422,4 +428,57 @@ func (s *Server) homeFocusOf(ctx context.Context, sid int64, scope, planIssue st
 		return f, "found"
 	}
 	return nil, "no_focus"
+}
+
+// motionFocus は動画の判定の「まずここ」（無ければ nil）。文はカタログの定型文だけ（ここで作らない）。
+func (s *Server) motionFocus(ctx context.Context, se *model.Session, pl *model.Player) map[string]any {
+	d, err := s.checksData(ctx, se, pl, false)
+	if err != nil {
+		if !errors.Is(err, analysis.ErrUnavailable) && !errors.Is(err, context.DeadlineExceeded) {
+			s.Log.Warn("home motion focus failed", "session", se.ID, "err", err)
+		}
+		return nil
+	}
+	raw, ok := d["checks"].(json.RawMessage)
+	if !ok || len(raw) == 0 {
+		return nil
+	}
+	var c struct {
+		Focus     string `json:"focus"`
+		Rationale string `json:"rationale"`
+		Items     []struct {
+			ID         string            `json:"id"`
+			Title      string            `json:"title"`
+			P          string            `json:"p"`
+			FaultLabel string            `json:"fault_label"`
+			LookAt     string            `json:"look_at"`
+			Basis      string            `json:"basis"`
+			Linked     bool              `json:"linked"`
+			LinkedText string            `json:"linked_text"`
+			Frames     []json.RawMessage `json:"frames"`
+			Drills     []struct {
+				ID    string `json:"id"`
+				Title string `json:"title"`
+				Cue   string `json:"cue"`
+			} `json:"drills"`
+		} `json:"items"`
+	}
+	if json.Unmarshal(raw, &c) != nil || c.Focus == "" {
+		return nil
+	}
+	for _, it := range c.Items {
+		if it.ID != c.Focus {
+			continue
+		}
+		out := map[string]any{"session_id": se.ID, "date": se.Date, "item_id": it.ID, "title": it.Title, "p": it.P, "fault_label": it.FaultLabel,
+			"look_at": it.LookAt, "basis": it.Basis, "linked": it.Linked, "linked_text": it.LinkedText, "rationale": c.Rationale}
+		if len(it.Frames) > 0 {
+			out["frame"] = it.Frames[0]
+		}
+		if len(it.Drills) > 0 {
+			out["drill"] = it.Drills[0]
+		}
+		return out
+	}
+	return nil
 }

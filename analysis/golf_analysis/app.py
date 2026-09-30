@@ -17,6 +17,8 @@ from pydantic import BaseModel, Field
 from . import checkpoints, coaching, config, drills, gist, narrative, video
 from .checkpoints import judge as cp_judge
 from .checkpoints import measure as cp_measure
+from .checkpoints import vision as cp_vision
+from . import video_candidates
 from .compare import compare_sessions
 from .experiment import VALID_GOALS, evaluate
 from .report import build_report
@@ -138,6 +140,13 @@ class VideoCheckpointsIn(BaseModel):
     practice_fallback: bool = True
 
 
+class CheckpointVisionIn(BaseModel):
+    """見た目の項目を Claude に聞く（§6.7）。swings[].frames は P → 長辺 1024px の JPEG（base64）。保存しない。"""
+
+    swings: list[dict[str, Any]] = Field(default_factory=list)
+    seed: int | None = None
+
+
 class CheckpointFocusIn(BaseModel):
     """スイングごとの判定（measure の結果に swing_id を付けたもの）→ 項目ごとの状態・課題。"""
 
@@ -224,8 +233,51 @@ def video_checkpoints(body: VideoCheckpointsIn) -> dict:
 
 @app.post("/v1/checkpoints/focus")
 def checkpoints_focus(body: CheckpointFocusIn) -> dict:
-    """スイングごとの判定をまとめ、課題を1つと次に見るを選ぶ（§4.4）。"""
-    return cp_judge.aggregate(body.swings, _hand(body.handedness), body.prefs, body.symptoms)
+    """スイングごとの判定をまとめ、課題を1つと次に見るを選ぶ（§4.4）。
+
+    まずここ・次に見るの項目には、チェックポイント版のドリル（drills/checkpoints.json）と、
+    球の症状とつながる候補の印の言葉（§9.1）を添える。"""
+    hand = _hand(body.handedness)
+    out = cp_judge.aggregate(body.swings, hand, body.prefs, body.symptoms)
+    for it in out["items"]:
+        if (it.get("focus") or it.get("next")) and it["state"] == "out_range":
+            it["drills"] = drills.cp_for(it["id"], it.get("fault"), hand)
+        if it.get("linked"):
+            it["linked_text"] = video_candidates.LINK_TEXT
+    out["symptoms"] = list(body.symptoms)
+    return out
+
+
+@app.get("/v1/checkpoints/vision/status")
+def checkpoints_vision_status() -> dict:
+    """見た目の評価を呼べるか・料金の見積もり・版（§6.7）。"""
+    return cp_vision.status()
+
+
+@app.post("/v1/checkpoints/vision")
+def checkpoints_vision(body: CheckpointVisionIn) -> dict:
+    """見た目の項目を Claude に聞く（§6.7）。画像は返さない・保存しない。キーが無ければ called=0 で理由を返す。"""
+    try:
+        return cp_vision.review(cp_vision.default_client, body.swings, body.seed)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+class SymptomsIn(BaseModel):
+    """症状を探す（§9.1）。shots は /v1/session と同じ形。"""
+
+    shots: list[dict[str, Any]] = Field(default_factory=list)
+    handedness: str = "R"
+    clubs: list[str] = Field(default_factory=list)
+    matched_seqs: list[int] = Field(default_factory=list)
+
+
+@app.post("/v1/checkpoints/symptoms")
+def checkpoints_symptoms(body: SymptomsIn) -> dict:
+    """その日の球の症状（§9.1 の事前の表）と、課題の印に使う症状の id（その球の動画が要るものは対応づけたときだけ）。"""
+    found = video_candidates.session_symptoms(body.shots, body.clubs or None)
+    return {"version": video_candidates.VERSION, "found": found,
+            "for_focus": video_candidates.symptoms_for_focus(found, set(body.matched_seqs))}
 
 
 @app.post("/v1/session")

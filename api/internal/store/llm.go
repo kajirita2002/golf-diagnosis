@@ -206,3 +206,12 @@ func (s *Store) FindRefusedLLMJobSince(ctx context.Context, kind model.LLMJobKin
 	}
 	return j, err
 }
+
+// LatestLLMJobForSession はその記録の、その種類のいちばん新しいジョブ（無ければ nil）。
+func (s *Store) LatestLLMJobForSession(ctx context.Context, kind model.LLMJobKind, sessionID int64) (*model.LLMJob, error) {
+	j, err := scanLLMJob(s.db.QueryRowContext(ctx, `SELECT `+llmJobCols+` FROM {s}llm_jobs WHERE kind=? AND session_id=? ORDER BY id DESC LIMIT 1`, kind, sessionID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return j, err
+}

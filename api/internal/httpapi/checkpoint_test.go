@@ -28,6 +28,12 @@ type cpFake struct {
 	focus    []analysis.CheckpointFocusInput
 	stamp    string // 分析サービスの指紋（空なら stamp-1）
 	failNext bool   // 次の測るを 503 にする（保存のあとに測るのが失敗した道）
+	// 見た目の評価（段2c）
+	visionOff   bool
+	focusOut    string
+	visionOut   string
+	visionCalls [][]analysis.VisionSwing
+	symptoms    []analysis.SymptomsInput
 }
 
 func (f *fakeAnalyzer) Checkpoints(_ context.Context, hand model.Handedness) (json.RawMessage, error) {
@@ -74,6 +80,9 @@ func (f *fakeAnalyzer) CheckpointsStamp(_ context.Context) (string, error) {
 
 func (f *fakeAnalyzer) CheckpointsFocus(_ context.Context, in analysis.CheckpointFocusInput) (json.RawMessage, error) {
 	f.cp.focus = append(f.cp.focus, in)
+	if f.cp.focusOut != "" {
+		return json.RawMessage(f.cp.focusOut), nil
+	}
 	return json.RawMessage(`{"focus":"iron.p2.dtl.head_vs_hands","items":[]}`), nil
 }
 
@@ -510,4 +519,32 @@ func Test自動で取り出した時系列をスイングに残して測る(t *t
 	if k, err := c.env.st.TextColumnsWithJPEG(context.Background()); err != nil || k != 0 {
 		t.Fatalf("画像: %v %d", err, k)
 	}
+}
+
+func (f *fakeAnalyzer) CheckpointsVisionStatus(_ context.Context) (*analysis.VisionStatus, error) {
+	if f.down {
+		return nil, analysis.ErrUnavailable
+	}
+	if f.cp.visionOff {
+		return &analysis.VisionStatus{Ready: false, Reason: "AI の評価はまだ使えません", Model: "claude-opus-5-5", PromptVersion: "checkpoints_q/1.0", CostPerSwingUSD: []float64{0.08, 0.14}, DefaultSwings: 2}, nil
+	}
+	return &analysis.VisionStatus{Ready: true, Model: "claude-opus-5-5", PromptVersion: "checkpoints_q/1.0", CatalogStamp: "st", CostPerSwingUSD: []float64{0.08, 0.14}, DefaultSwings: 2, MaxSwings: 4, MaxImages: 32}, nil
+}
+
+func (f *fakeAnalyzer) CheckpointsVision(_ context.Context, swings []analysis.VisionSwing) (json.RawMessage, error) {
+	f.cp.visionCalls = append(f.cp.visionCalls, swings)
+	if f.cp.visionOut != "" {
+		return json.RawMessage(f.cp.visionOut), nil
+	}
+	var sw []string
+	for i := range swings {
+		sw = append(sw, `{"swing":`+jsonNum(int64(i+1))+`,"swing_id":`+jsonNum(swings[i].SwingID)+`,"answers":{"setup.spine":{"option":"丸まっている","visibility":"clear","visual":"背中が丸く見えます"}},"reselect":[]}`)
+	}
+	return json.RawMessage(`{"called":1,"model":"claude-opus-5-5","cacheable":true,"reason":null,"usage":{"input_tokens":14000,"output_tokens":2500,"cost_usd":0.106},
+		"validation":[{"attempt":1,"problems":[]}],"dropped":[],"extra":["手元が低く見えます"],"n_asked":20,"swings":[` + strings.Join(sw, ",") + `]}`), nil
+}
+
+func (f *fakeAnalyzer) CheckpointsSymptoms(_ context.Context, in analysis.SymptomsInput) (json.RawMessage, error) {
+	f.cp.symptoms = append(f.cp.symptoms, in)
+	return json.RawMessage(`{"found":[{"id":"S5"}],"for_focus":["S5"]}`), nil
 }

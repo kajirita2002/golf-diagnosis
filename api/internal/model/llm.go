@@ -17,6 +17,7 @@ const (
 	LLMNarrative   LLMJobKind = "narrative"    // 解説のつなぎの文（1c）
 	LLMVideoReview LLMJobKind = "video_review" // 動画の質問票（2）
 	LLMVideoPair   LLMJobKind = "video_pair"   // 動画の比較（2）
+	LLMCPReview    LLMJobKind = "cp_review"    // チェックポイントの見た目の項目（docs/DESIGN_v2.md §6.7・段2c）
 )
 
 // LLMJobStatus はジョブの状態。

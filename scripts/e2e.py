@@ -82,8 +82,10 @@ class Services:
     fake_screenshot に JSON のファイルを渡すと、スクショの読み取りは Claude を呼ばずにその中身を返す。
     """
 
-    def __init__(self, fake_screenshot: str | None = None, fake_narrative: str | None = None):
+    def __init__(self, fake_screenshot: str | None = None, fake_narrative: str | None = None, fake_vision: str | None = None):
         self.fake_screenshot = fake_screenshot
+        # fake_vision に偽の Claude の答えのファイルを渡すと、見た目の評価（段2c）がその偽物で動く（本物の API は呼ばない）
+        self.fake_vision = fake_vision
         # fake_narrative に偽の Claude の答えのファイルを渡すと、REPORT_LLM=on で起動する（本物の API は呼ばない）
         self.fake_narrative = fake_narrative
 
@@ -102,6 +104,13 @@ class Services:
         py_env.pop("NARRATIVE_FAKE_RESPONSE", None)
         if self.fake_narrative:
             py_env["NARRATIVE_FAKE_RESPONSE"] = self.fake_narrative
+        py_env.pop("VISION_FAKE_RESPONSE", None)
+        if not self.fake_screenshot:
+            # 鍵が無い状態で確かめる（手元の環境変数に鍵が残っていても）
+            py_env.pop("ANTHROPIC_API_KEY", None)
+            py_env.pop("ANTHROPIC_AUTH_TOKEN", None)
+        if self.fake_vision:
+            py_env["VISION_FAKE_RESPONSE"] = self.fake_vision
         self.py = subprocess.Popen(
             ["uv", "run", "uvicorn", "golf_analysis.app:app", "--port", str(ap), "--log-level", "warning"],
             cwd=os.path.join(ROOT, "analysis"),
@@ -618,8 +627,82 @@ def run_video_auto(base: str) -> None:
     print("OK（動画の自動の取り出し）")
 
 
+# 長辺 1024px の JPEG の見出し（576×1024 と名乗る。Go は大きさだけを読み、分析サービスは頭の3バイトだけを見る）
+JPEG_1024 = bytes.fromhex("ffd8ffe000104a46494600010100000100010000ffc0001108024004000301220002110103110" + "1ffd9")
+
+
+def post_vision(base: str, session_id: int, swing_ids: list[int], ps=("P1", "P2", "P3")) -> dict:
+    import uuid
+
+    bd = uuid.uuid4().hex
+    parts = [f"--{bd}\r\nContent-Disposition: form-data; name=\"meta\"\r\n\r\n".encode()
+             + json.dumps({"session_id": session_id, "swings": [{"swing_id": i} for i in swing_ids]}).encode() + b"\r\n"]
+    for i in swing_ids:
+        for p in ps:
+            parts.append(f"--{bd}\r\nContent-Disposition: form-data; name=\"f.{i}.{p}\"; filename=\"{p}.jpg\"\r\nContent-Type: image/jpeg\r\n\r\n".encode() + JPEG_1024 + b"\r\n")
+    body = b"".join(parts) + f"--{bd}--\r\n".encode()
+    return call("POST", f"{base}/swings/checks", raw=body, ctype=f"multipart/form-data; boundary={bd}")
+
+
+def vision_session(base: str, name: str) -> tuple[int, list[int]]:
+    sys.path.insert(0, os.path.join(ROOT, "analysis", "tests"))
+    import synthetic_swing as syn
+
+    me = call("POST", f"{base}/players", {"name": name, "handedness": "R"})
+    se = call("POST", f"{base}/sessions", {"player_id": me["id"], "date": "2026-09-30"})
+    ids = []
+    for _ in range(2):
+        sw = syn.swing("dtl")
+        s = call("POST", f"{base}/sessions/{se['id']}/swings", {"view": "dtl", "club": "7 Iron", "club_class": "iron", "fps": 240, "fps_source": "container",
+                                                                "width": syn.W, "height": syn.H, "ball": sw["ball"]})
+        frames = [{"checkpoint": p, "t": f["t"], "frame": int(f["t"] * 240), "landmarks": f["landmarks"], "taps": f["taps"]} for p, f in sw["frames"].items()]
+        call("PUT", f"{base}/swings/{s['id']}/frames", {"frames": frames, "missing": []})
+        ids.append(s["id"])
+    return se["id"], ids
+
+
+def run_vision_off(base: str) -> None:
+    """鍵が無い本番に近い状態（段2c）: 一覧は壊れず「まだ使えません」と出し、押しても Claude を呼ばない。"""
+    sid, ids = vision_session(base, "vision-off")
+    d = call("GET", f"{base}/sessions/{sid}/checks")
+    assert d["vision"]["ready"] is False and d["vision"]["reason"], d["vision"]
+    assert d["checks"] is not None
+    out = post_vision(base, sid, ids)
+    assert "job_id" not in out and out["reason"], out
+    print("OK（見た目の評価・鍵なし）")
+
+
+def fake_vision_file() -> str:
+    path = os.path.join(tempfile.mkdtemp(), "vision.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"mode": "auto", "pick": "fault", "bad_first": True, "extra": ["全体に落ち着いた構えに見えます"]}, f, ensure_ascii=False)
+    return path
+
+
+def run_vision_on(base: str) -> None:
+    """偽の Claude で見た目の評価（段2c）: 202 → ジョブ → 見た目の項目が埋まる。二度目はキャッシュ。"""
+    sid, ids = vision_session(base, "vision-on")
+    before = call("GET", f"{base}/sessions/{sid}/checks")
+    assert before["vision"]["ready"] is True and before["vision"]["n_target"] == 2, before["vision"]
+    pend = [x for x in before["checks"]["items"] if x.get("reason") == "vision_pending"]
+    assert pend, "見た目の項目が「まだ」になっていない"
+    out = post_vision(base, sid, ids)
+    job = wait_jobs(base, [{"job_id": out["job_id"]}])[0]
+    assert job["status"] == "done", job
+    assert "/9j/" not in json.dumps(job)
+    after = call("GET", f"{base}/sessions/{sid}/checks")
+    vis = [x for x in after["checks"]["items"] if x["basis"] == "visual"]
+    assert vis and all(x["state"] == "out_range" and x["n_judged"] == 2 for x in vis), [(x["id"], x["state"]) for x in vis]
+    assert any(x["candidate"] for x in vis)  # 二本で一致した見た目の項目は課題の候補
+    assert after["vision"]["last"]["status"] == "done" and after["vision"]["last"]["n_dropped"] == 0
+    again = post_vision(base, sid, ids)
+    assert again.get("cached") is True, again
+    print(f"OK（見た目の評価・偽の Claude。見た目で埋まった項目 {len(vis)}件）")
+
+
 def main() -> None:
     with Services() as sv:
+        run_vision_off(sv.base)
         run_video(sv.base)
         run_video_auto(sv.base)
         run_home(sv.base)
@@ -629,6 +712,8 @@ def main() -> None:
         run_narrative_off(sv.base)
     with Services(fake_narrative=fake_narrative_file()) as sv:
         run_narrative_on(sv.base)
+    with Services(fake_vision=fake_vision_file()) as sv:
+        run_vision_on(sv.base)
 
 
 if __name__ == "__main__":

@@ -51,16 +51,26 @@ func (s *Store) CreateSwing(ctx context.Context, sw *model.Swing) error {
 	return nil
 }
 
-const swingCols = `id, session_id, view, club, club_class, fps_measured, fps_source, width, height, duration_s, taps_json, capture_json, missing_json, cp_catalog_version, measure_json, series_gz IS NOT NULL, created_at`
+const swingCols = `id, session_id, view, club, club_class, fps_measured, fps_source, width, height, duration_s, taps_json, capture_json, missing_json, cp_catalog_version, measure_json, series_gz IS NOT NULL, seq_from, seq_to,
+	EXISTS (SELECT 1 FROM {s}swing_vision v WHERE v.swing_id = {s}swings.id), created_at`
 
 func scanSwing(sc interface{ Scan(...any) error }) (*model.Swing, error) {
 	var sw model.Swing
 	var fps, dur sql.NullFloat64
 	var ball, capture, missing, ts string
 	var measure sql.NullString
+	var sf, st sql.NullInt64
 	if err := sc.Scan(&sw.ID, &sw.SessionID, &sw.View, &sw.Club, &sw.ClubClass, &fps, &sw.FPSSource, &sw.Width, &sw.Height, &dur,
-		&ball, &capture, &missing, &sw.CPCatalogVersion, &measure, &sw.HasSeries, &ts); err != nil {
+		&ball, &capture, &missing, &sw.CPCatalogVersion, &measure, &sw.HasSeries, &sf, &st, &sw.HasVision, &ts); err != nil {
 		return nil, err
+	}
+	if sf.Valid {
+		v := int(sf.Int64)
+		sw.SeqFrom = &v
+	}
+	if st.Valid {
+		v := int(st.Int64)
+		sw.SeqTo = &v
 	}
 	sw.FPS, sw.Duration = fps.Float64, dur.Float64
 	sw.Ball, sw.Capture = json.RawMessage(ball), json.RawMessage(capture)
@@ -335,7 +345,9 @@ func (s *Store) TextColumnsWithJPEG(ctx context.Context) (int, error) {
 	err := s.db.QueryRowContext(ctx, `SELECT
 		(SELECT COUNT(*) FROM {s}swings WHERE taps_json LIKE '%/9j/%' OR capture_json LIKE '%/9j/%' OR COALESCE(measure_json,'') LIKE '%/9j/%')
 		+ (SELECT COUNT(*) FROM {s}swing_frames WHERE landmarks_json LIKE '%/9j/%' OR taps_json LIKE '%/9j/%')
-		+ (SELECT COUNT(*) FROM {s}swing_checks WHERE evidence_json LIKE '%/9j/%')`).Scan(&n)
+		+ (SELECT COUNT(*) FROM {s}swing_checks WHERE evidence_json LIKE '%/9j/%')
+		+ (SELECT COUNT(*) FROM {s}swing_vision WHERE answers_json LIKE '%/9j/%')
+		+ (SELECT COUNT(*) FROM {s}llm_jobs WHERE COALESCE(result_json,'') LIKE '%/9j/%' OR COALESCE(validation_json,'') LIKE '%/9j/%')`).Scan(&n)
 	return n, err
 }
 
@@ -380,4 +392,67 @@ func (s *Store) GetSwingSeries(ctx context.Context, swingID int64) (json.RawMess
 		return nil, err
 	}
 	return json.RawMessage(out), nil
+}
+
+// PutSwingVision は見た目の評価の答えを入れ替える（スイングに1つ。画像は来ない）。判定は古くする（次に測り直す）。
+func (s *Store) PutSwingVision(ctx context.Context, swingID, jobID int64, catalogVersion string, answers json.RawMessage) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var job any
+	if jobID > 0 {
+		job = jobID
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM {s}swing_vision WHERE swing_id=?`, swingID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO {s}swing_vision(swing_id, llm_job_id, catalog_version, answers_json, created_at) VALUES(?,?,?,?,?)`,
+		swingID, job, catalogVersion, rawOr(answers, "{}"), now()); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE {s}swings SET cp_catalog_version='' WHERE id=?`, swingID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// SwingVision は見た目の評価の答え（無ければ nil）。
+type SwingVision struct {
+	JobID          int64
+	CatalogVersion string
+	Answers        json.RawMessage
+}
+
+// GetSwingVision は見た目の評価の答え。無ければ (nil, nil)。
+func (s *Store) GetSwingVision(ctx context.Context, swingID int64) (*SwingVision, error) {
+	var v SwingVision
+	var job sql.NullInt64
+	var ans string
+	err := s.db.QueryRowContext(ctx, `SELECT llm_job_id, catalog_version, answers_json FROM {s}swing_vision WHERE swing_id=?`, swingID).Scan(&job, &v.CatalogVersion, &ans)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	v.JobID, v.Answers = job.Int64, json.RawMessage(ans)
+	return &v, nil
+}
+
+// SetSwingMatch は、人が確かめた TrackMan の球の番号を結ぶ（nil で外す）。判定は変わらない。
+func (s *Store) SetSwingMatch(ctx context.Context, swingID int64, seq *int) error {
+	var v any
+	if seq != nil {
+		v = *seq
+	}
+	res, err := s.db.ExecContext(ctx, `UPDATE {s}swings SET seq_from=?, seq_to=? WHERE id=? AND deleted_at IS NULL`, v, v, swingID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }

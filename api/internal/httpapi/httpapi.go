@@ -45,6 +45,9 @@ type Analyzer interface {
 	CheckpointsFocus(ctx context.Context, in analysis.CheckpointFocusInput) (json.RawMessage, error)
 	CheckpointsStamp(ctx context.Context) (string, error)
 	VideoCheckpoints(ctx context.Context, body json.RawMessage) (json.RawMessage, error)
+	CheckpointsVisionStatus(ctx context.Context) (*analysis.VisionStatus, error)
+	CheckpointsVision(ctx context.Context, swings []analysis.VisionSwing) (json.RawMessage, error)
+	CheckpointsSymptoms(ctx context.Context, in analysis.SymptomsInput) (json.RawMessage, error)
 }
 
 // Server は API のハンドラをまとめる。
@@ -189,6 +192,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /v1/swings/{id}/taps", s.putSwingTaps)
 	mux.HandleFunc("GET /v1/swings/{id}/thumbs/{p}", s.getSwingThumb)
 	mux.HandleFunc("GET /v1/sessions/{id}/checks", s.sessionChecks)
+	mux.HandleFunc("POST /v1/swings/checks", s.startSwingChecks)
+	mux.HandleFunc("POST /v1/sessions/{id}/swings/match-suggest", s.matchSuggest)
+	mux.HandleFunc("PUT /v1/swings/{id}/match", s.putSwingMatch)
 	if s.Static != nil {
 		mux.Handle("GET /", vendorCache(s.Static))
 	}
