@@ -6,7 +6,7 @@
   - 札（字）: 測れた／測れた（目安）／測れた（あなたが示した点から）／見た目／判断できない。
   - 範囲の中・判断できない・参考・フォロー（任意）は畳む。判断できない理由は束ねて1行、どう撮れば見られるかを添える。
   - 判定の文は全部サーバーの定型文（カタログ）。ここで事実の文を作らない。
-  - 理想の帯と線（段3）はまだ描かない。
+  - 理想との比較（段3。ideal.js）: 範囲の外の項目は、写真の上に範囲の面と「範囲に入れた目安」の線を重ね、［理想と比べる］（I）へ。
   - 見た目の項目（段2c）: ［見た目を評価する（料金）］で、端末に置いたコマの写真（長辺 1024px）を送り、AI（Claude）の答えで埋める。
     写真はサーバーにも残さない。鍵が無い・上限・失敗でも、測れる項目の一覧はそのまま出す（押せない理由を1行で出す）。
   - 球の課題とつながる候補（§9.1）は印だけ。「まだ確かめていません」まで言う。TrackMan の球とは本人が確かめて結ぶ。
@@ -416,8 +416,9 @@ const Checks = (() => {
     const c = d && d.checks;
     const f = c && (c.items || []).find((x) => x.focus);
     if (!f) return "";
+    const fig = typeof Ideal !== "undefined" ? await Ideal.thumbHtml(d, f) : "";
     return `<a class="card block cpcard focus" data-motion-card href="#/session/${sid}/check/${encodeURIComponent(f.id)}">
-      ${thumbOf(d, f) ? `<img src="${esc(thumbOf(d, f))}" alt="${esc(pLabel(f.p))} のあなたのコマ" loading="lazy">` : `<span class="noimg" aria-hidden="true">${icon("video")}</span>`}
+      ${fig || (thumbOf(d, f) ? `<img src="${esc(thumbOf(d, f))}" alt="${esc(pLabel(f.p))} のあなたのコマ" loading="lazy">` : `<span class="noimg" aria-hidden="true">${icon("video")}</span>`)}
       <span class="grow1"><span class="label">動きの課題</span><span class="cph">${esc(f.fault_label || f.title)}</span>
       <span class="cpf">${/^P\d/.test(f.p || "") ? lab("p", pLabel(f.p)) + " " : ""}${esc(f.title)}</span>${linkChip(f)}</span>${icon("chevron-right", "chev")}</a>`;
   }
@@ -465,6 +466,7 @@ const Checks = (() => {
         ${nxt ? `<a class="btn" data-next href="#/session/${sid}/check/${encodeURIComponent(nxt.id)}">次の項目${icon("chevron-right")}</a>` : "<span></span>"}</nav>
       ${prev || nxt ? `<p class="caption" style="text-align:center">${esc(GROUP_WORD[g])}の項目だけを順に見ます（${lab("count", (k + 1) + " / " + same.length)}）</p>` : ""}`;
     $("[data-why]", body).addEventListener("click", () => openWhy(data, it));
+    if (!tempo && src && typeof Ideal !== "undefined") Ideal.enhance($(".cpfig", body), data, it, sid);
   }
 
   // 写真に使ったコマが「目安」（代わりの規則で決めた）か（§6.4）

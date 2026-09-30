@@ -584,6 +584,12 @@ def run_video(base: str) -> None:
         assert "左" not in f["title"] and "右" not in f["title"]
         assert c["counts"]["judged"] == c["counts"]["in_range"] + c["counts"]["out_range"]
         assert all(x["state"] != "out_range" or x["id"] != "err.steep.p6" for x in c["items"])  # 束ねた項目は一覧に出ない
+        # 理想との比較（段3）: 範囲の外の項目は範囲の形と、範囲の外の部位だけを動かした線。範囲の中の項目には描かない
+        sw0 = call("GET", f"{base}/sessions/{sid}/swings")[0]
+        idl = call("GET", f"{base}/swings/{sw0['id']}/ideal?item={c['focus']}")
+        assert idl["state"] == "out_range" and idl["zone"]["kind"] == "circle" and idl["fixed"]["moved"] == ["head"], idl
+        ok = call("GET", f"{base}/swings/{sw0['id']}/ideal?item=iron.p1.dtl.hands")
+        assert ok["zone"] is None and ok["fixed"] is None, ok
     sid = put("R", "fo", ("p3_bent",), 1)
     c = call("GET", f"{base}/sessions/{sid}/checks")["checks"]
     arm = next(x for x in c["items"] if x["id"] == "iron.p3.fo.lead_arm")

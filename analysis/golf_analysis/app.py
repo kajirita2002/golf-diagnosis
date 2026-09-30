@@ -18,6 +18,7 @@ from . import checkpoints, coaching, config, drills, gist, narrative, video
 from .checkpoints import judge as cp_judge
 from .checkpoints import measure as cp_measure
 from .checkpoints import vision as cp_vision
+from .checkpoints import ideal as cp_ideal
 from . import video_candidates
 from .compare import compare_sessions
 from .experiment import VALID_GOALS, evaluate
@@ -140,6 +141,13 @@ class VideoCheckpointsIn(BaseModel):
     practice_fallback: bool = True
 
 
+class CheckpointIdealIn(BaseModel):
+    """理想との比較（§7.2）: 1スイング（measure と同じ形）と課題の項目1つ。保存しない。"""
+
+    swing: dict[str, Any]
+    item_id: str
+
+
 class CheckpointVisionIn(BaseModel):
     """見た目の項目を Claude に聞く（§6.7）。swings[].frames は P → 長辺 1024px の JPEG（base64）。保存しない。"""
 
@@ -214,6 +222,18 @@ def checkpoints_measure(body: CheckpointMeasureIn) -> dict:
     if not isinstance(sw.get("frames"), dict):
         raise HTTPException(400, "frames が要ります")
     return cp_measure.measure_swing(sw)
+
+
+@app.post("/v1/checkpoints/ideal")
+def checkpoints_ideal(body: CheckpointIdealIn) -> dict:
+    """課題の項目1つの範囲の形と、範囲の外の部位だけを範囲に入れた線（§7.2。LLM を使わない・保存しない）。"""
+    sw = body.swing
+    if sw.get("view") not in ("dtl", "fo"):
+        raise HTTPException(400, "view は dtl か fo です")
+    _hand(sw.get("handedness") or "R")
+    if not isinstance(sw.get("frames"), dict):
+        raise HTTPException(400, "frames が要ります")
+    return cp_ideal.ideal(sw, body.item_id)
 
 
 @app.post("/v1/video/checkpoints")
