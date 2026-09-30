@@ -356,3 +356,60 @@ def test_症状はその日の球から探す():
     r2 = TestClient(app).post("/v1/checkpoints/symptoms", json={"shots": shots, "clubs": ["driver"]}).json()
     assert r2["found"] == []
     assert config.MIN_SCOPE_N <= 12
+
+
+# ------------------------------------------------------------ 断る・切れる・形が不正・つながらない（段2c の点検）
+
+class StopFake(Fake):
+    """stop_reason を呼ばれた順に返す偽物（最後のものを繰り返す）。"""
+
+    def __init__(self, answer, stops):
+        super().__init__(answer)
+        self.stops = stops
+
+    def _create(self, **kw):
+        r = super()._create(**kw)
+        r.stop_reason = self.stops[min(len(self.requests) - 1, len(self.stops) - 1)]
+        return r
+
+
+def test_断られたら頼み直さずに理由を返す():
+    fake = StopFake(lambda req, n: good_answer(req), ["refusal"])
+    out = cv.review(lambda: fake, [swing_in()], 1)
+    assert out["called"] == 1 and not out["cacheable"] and out["reason"] == "refusal"
+    assert "断り" in out["message"] and not any(v.get("option") for v in out["swings"][0]["answers"].values())
+
+
+def test_切れたら一回だけ頼み直す():
+    fake = StopFake(lambda req, n: good_answer(req), ["max_tokens"])
+    out = cv.review(lambda: fake, [swing_in()], 1)
+    assert out["called"] == 2 and not out["cacheable"] and out["reason"] == "max_tokens" and "切れ" in out["message"]
+    assert out["usage"]["input_tokens"] == 24000  # 切れた回のトークンも数える
+    fake = StopFake(lambda req, n: good_answer(req), ["max_tokens", "end_turn"])
+    out = cv.review(lambda: fake, [swing_in()], 1)
+    assert out["called"] == 2 and out["cacheable"] and not out["dropped"]
+
+
+@pytest.mark.parametrize("bad", [
+    [],
+    {"frames": "x", "answers": []},
+    {"frames": [{"swing": [1], "p": "P1"}], "answers": [{"swing": [1], "item": ["q01"], "option": "o1"}], "extra": "ばらばら"},
+    {"frames": [{"swing": 1, "p": "P1", "note": 5}], "answers": [{"swing": 1, "item": {"x": 1}, "option": "o1", "visibility": "clear", "visual": 3}]},
+])
+def test_形が不正な答えでも落ちずに出さない(bad):
+    out, _ = run(lambda req, n: bad)
+    assert out["called"] == 2 and not out["cacheable"] and out["extra"] == []
+    assert not any(v.get("option") for v in out["swings"][0]["answers"].values())
+
+
+def test_つながらなければ失敗にして理由を返す():
+    import anthropic
+    import httpx
+
+    class Down(Fake):
+        def _create(self, **kw):
+            raise anthropic.APIConnectionError(request=httpx.Request("POST", "https://example.invalid"))
+
+    fake = Down(lambda req, n: good_answer(req))
+    out = cv.review(lambda: fake, [swing_in()], 1)
+    assert out["called"] == 0 and not out["cacheable"] and "接続" in out["message"]

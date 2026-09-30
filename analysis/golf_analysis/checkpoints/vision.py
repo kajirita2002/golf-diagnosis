@@ -92,6 +92,8 @@ def status() -> dict:
 
 def text_problems(text: str) -> list[str]:
     """答えの文（visual / note / extra）の検査。"""
+    if text is not None and not isinstance(text, str):
+        return ["文字ではありません"]
     t = text or ""
     bad = []
     if len(t) > TEXT_MAX:
@@ -245,7 +247,7 @@ def validate(qset: dict, out: Any) -> dict:
         if not isinstance(f, dict):
             continue
         n, p = f.get("swing"), str(f.get("p") or "").replace(".5", "_5")
-        if n not in by_n or p not in by_n[n]["ps"]:
+        if not isinstance(n, int) or n not in by_n or p not in by_n[n]["ps"]:
             res["problems"].append(f"frames に渡していないコマがあります（スイング{n} {p}）")
             continue
         if f.get("is_phase") == "no":
@@ -259,7 +261,7 @@ def validate(qset: dict, out: Any) -> dict:
             res["problems"].append("answers に形の違う要素があります")
             continue
         key = (a.get("swing"), a.get("item"))
-        q = qmap.get(key)
+        q = qmap.get(key) if isinstance(key[0], int) and isinstance(key[1], str) else None
         if q is None:
             res["problems"].append(f"渡していない質問への答えがあります（スイング{key[0]} {key[1]}）")
             continue
@@ -291,7 +293,8 @@ def validate(qset: dict, out: Any) -> dict:
     for key, q in qmap.items():
         if key not in seen:
             res["problems"].append(f"スイング{key[0]} {key[1]} に答えがありません")
-    for e in out.get("extra") or []:
+    extra = out.get("extra")
+    for e in extra if isinstance(extra, list) else []:
         if isinstance(e, str) and e.strip() and not text_problems(e):
             res["extra"].append(e.strip())
     return res
@@ -423,7 +426,8 @@ def review(client_factory, raw_swings: list[dict], seed: int | None = None) -> d
     except anthropic.APIConnectionError:
         return {**base, **_finish(qset, best, calls, validation, "api_error", False), "message": "Claude の API に接続できません"}
     if best is None:
-        return {**base, **_finish(qset, None, calls, validation, reason or "api_error", False), "message": "Claude から使える答えが返りませんでした"}
+        why = {"refusal": "Claude がこの写真を読むのを断りました", "max_tokens": "Claude の答えが途中で切れました"}.get(reason or "", "Claude から使える答えが返りませんでした")
+        return {**base, **_finish(qset, None, calls, validation, reason or "api_error", False), "message": why}
     if not best["accepted"] and not best["reselect"]:
         # 答えは受け取れたが、使える答えが一つも無い。使い回さない（次に押せば頼み直せる）
         return {**base, **_finish(qset, best, calls, validation, "validation", False), "message": "Claude の答えが検証を通りませんでした"}

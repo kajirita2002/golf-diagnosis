@@ -108,7 +108,7 @@ const Checks = (() => {
     club_short: "この向きではクラブが短く写り、向きを測れません", border: "範囲の境目なので、どちらとも言えません。もう何本か選ぶと決まることがあります",
     split: "スイングによって分かれています。もう何本か選ぶと決まることがあります", vision_pending: "「見た目を評価する」で見られます",
     vision_unclear: "写真では見えにくかった項目です。明るく、全身が入るように撮ると見られます",
-    vision_dropped: "見た目の答えが検証を通らなかったので出していません。もう一度評価すると見られることがあります",
+    vision_dropped: "見た目の答えが検証を通らなかったので出していません。もう一回評価すると見られることがあります",
     vision_reselect: "このコマを選び直すと見られます",
     scale: "ボールの両端を押し直すと見られます", unclear: "ガイドの読み方を確かめているところです", ref_club: "この番手の基準はガイドにありません",
   };
@@ -224,10 +224,11 @@ const Checks = (() => {
     const vl = data.vision && data.vision.last;
     if (vl && (vl.status === "queued" || vl.status === "running")) pollVision(sid, vl.job_id, alive);
     body.addEventListener("click", async (ev) => {
+      // 送っているあいだ（aria-disabled）は二度押しを受けない（二重に料金がかからないように）
       const vr = ev.target.closest("[data-vision-run]");
-      if (vr) { runVision(sid, data, vr, alive); return; }
+      if (vr) { if (vr.getAttribute("aria-disabled") !== "true") runVision(sid, data, vr, alive); return; }
       const mr = ev.target.closest("[data-match-run]");
-      if (mr) { runMatch(sid, data, mr); return; }
+      if (mr) { if (mr.getAttribute("aria-disabled") !== "true") runMatch(sid, data, mr); return; }
       const fx = ev.target.closest("[data-fix-view]");
       const del = ev.target.closest("[data-del-swing]");
       if (!fx && !del) return;
@@ -265,7 +266,7 @@ const Checks = (() => {
     if (!pend && !last) return "";
     let h = `<section class="card block" data-vision aria-labelledby="h-vis"><h2 id="h-vis" class="label">見た目の項目</h2>`;
     if (running) h += `<p data-vision-state="running" role="status">写真を読んでいます（一分ほど）。この画面を離れても続きます。</p>`;
-    else if (last && last.status === "failed") h += `<div class="note warn" data-vision-state="failed"><p style="margin:0">見た目の評価ができませんでした。もう一度押すと頼み直せます。</p>
+    else if (last && last.status === "failed") h += `<div class="note warn" data-vision-state="failed"><p style="margin:0">見た目の評価ができませんでした。もう一回押すと頼み直せます。</p>
       ${last.error ? `<details><summary class="textbtn">くわしく</summary><p class="caption">${esc(last.error)}</p></details>` : ""}</div>`;
     if (done) {
       h += `<p data-vision-state="done">見た目の項目は、写真を読んで選んだ答えで埋めています（札は「見た目」）。</p>`;
@@ -308,7 +309,7 @@ const Checks = (() => {
     const box = btn.closest("[data-vision]");
     const say = (html) => { const old = box.querySelector("[data-vision-msg]"); if (old) old.remove(); box.insertAdjacentHTML("beforeend", `<div data-vision-msg>${html}</div>`); };
     const ok = await App.ask({ title: "見た目を評価しますか", text: `料金は ${costText(v)} までの見積もりです。選んだコマの写真を AI（Claude）に送ります。写真はサーバーにも残しません。`, ok: "評価する", cancel: "やめる" });
-    if (!ok) return;
+    if (!ok || btn.getAttribute("aria-disabled") === "true") return;
     btn.setAttribute("aria-disabled", "true");
     try {
       // 同じ向きが多いほうの、判定したスイングから（見た目の答えがまだのものを先に）
@@ -363,6 +364,10 @@ const Checks = (() => {
         return;
       }
     }
+    // 待ちきれなかった（5分）: 続いているかもしれないので、開き直しを案内する（黙って「読んでいます」のままにしない）
+    if (!alive()) return;
+    const st = document.querySelector("[data-vision] [data-vision-state=running]");
+    if (st) st.textContent = "まだ終わっていません。少ししてから開き直すと、結果が見られます。";
   }
 
   // ---- 球との対応づけ（§9.1） ----
@@ -379,6 +384,8 @@ const Checks = (() => {
 
   async function runMatch(sid, data, btn) {
     btn.setAttribute("aria-disabled", "true");
+    const old = btn.parentNode.querySelector("[data-match-err]");
+    if (old) old.remove();
     try {
       const plan = await api("POST", `/v1/sessions/${sid}/swings/match-suggest`);
       if (plan.mismatch) throw new Error("本数が合わなくなりました。開き直してください");
@@ -387,7 +394,7 @@ const Checks = (() => {
       invalidate(sid); App.invalidate(sid); App.render();
     } catch (e) {
       btn.removeAttribute("aria-disabled");
-      btn.insertAdjacentHTML("afterend", App.errOf(e, { what: "結べませんでした", saved: "前のままです。" }));
+      btn.insertAdjacentHTML("afterend", `<div data-match-err>${App.errOf(e, { what: "結べませんでした", saved: "前のままです。" })}</div>`);
     }
   }
 

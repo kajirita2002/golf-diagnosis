@@ -1821,6 +1821,40 @@ def check_vision_on(browser, shots_dir: str, errors: list[str]) -> None:
         ctx.close()
 
 
+def check_vision_fail(browser, shots_dir: str, errors: list[str]) -> None:
+    """偽の Claude が断る（段2c の点検）: 390px で失敗の注意が1つ出て、項目は「まだ」のまま、もう一度押せる。"""
+    tag = "vision-fail"
+    path = os.path.join(tempfile.mkdtemp(), "vision_refusal.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"responses": [{"frames": [], "answers": []}], "stop_reason": "refusal"}, f)
+    with Services(fake_vision=path) as sv:
+        me = call("POST", f"{sv.base}/me")["player"]
+        ses = call("POST", f"{sv.base}/sessions", {"player_id": me["id"], "date": "2026-09-29", "location": "練習場"})
+        sid = ses["id"]
+        seed_swings(sv.base, sid, 3)
+        ids = [s["id"] for s in call("GET", f"{sv.base}/sessions/{sid}/swings")]
+        ctx, page = new_page(browser, 390, 844, errors, tag, me["id"])
+        goto(page, sv.root, f"/session/{sid}/check", "[data-summary]")
+        page.evaluate(KEEP_JS, [ids, ["P1", "P2", "P3", "P4", "P5", "P6", "P7"]])
+        page.click("[data-vision-run]")
+        page.wait_for_selector("[data-sheet=confirm].on")
+        page.click("[data-sheet=confirm] [data-ok]")
+        try:
+            page.wait_for_selector("[data-vision-state=failed]", timeout=60000)
+        except Exception:  # noqa: BLE001
+            errors.append(f"[{tag}] 断られたのに失敗の表示にならない: {page.inner_text('[data-vision]')[:200]!r}")
+        if page.locator("[data-vision-run]").count() != 1:
+            errors.append(f"[{tag}] 断られたあと、もう一度押せない")
+        items = call("GET", f"{sv.base}/sessions/{sid}/checks")["checks"]["items"]
+        if any(x["basis"] == "visual" for x in items):
+            errors.append(f"[{tag}] 断られたのに見た目の項目が埋まった")
+        plain_first(page, "#view", tag, "チェック一覧（断られた）", errors)
+        no_overflow(page, tag, "チェック一覧（断られた）", errors)
+        targets(page, tag, "チェック一覧（断られた）", errors)
+        shot(page, shots_dir, f"{tag}-check")
+        ctx.close()
+
+
 def main() -> None:
     shots_dir = os.environ.get("SHOTS_DIR") or tempfile.mkdtemp(prefix="ui-")
     os.makedirs(shots_dir, exist_ok=True)
@@ -1862,6 +1896,7 @@ def main() -> None:
         check_vision_off(browser, sv.root, sv.base, me["id"], shots_dir, errors)
         check_narrative(browser, shots_dir, errors)
         check_vision_on(browser, shots_dir, errors)
+        check_vision_fail(browser, shots_dir, errors)
         browser.close()
     print("スクリーンショット:", shots_dir)
     if errors:
