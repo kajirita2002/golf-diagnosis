@@ -549,3 +549,14 @@ func (c *Client) CheckpointsSymptoms(ctx context.Context, in SymptomsInput) (jso
 	}
 	return c.post(ctx, "/v1/checkpoints/symptoms", in)
 }
+
+// CheckpointsIdeal は課題の項目1つの範囲の形と、範囲の外の部位だけを範囲に入れた線を返す（§7.2。保存しない）。
+func (c *Client) CheckpointsIdeal(ctx context.Context, sw CheckpointSwing, itemID string) (json.RawMessage, error) {
+	if sw.Frames == nil {
+		sw.Frames = map[string]json.RawMessage{}
+	}
+	if sw.Missing == nil {
+		sw.Missing = []string{}
+	}
+	return c.post(ctx, "/v1/checkpoints/ideal", map[string]any{"swing": sw, "item_id": itemID})
+}
