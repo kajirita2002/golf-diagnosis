@@ -1308,7 +1308,8 @@ const Video = (() => {
         return;
       }
       // ボールの両端（最初のスイングの構え）。当たる瞬間の挟み込みと、ボール一個の物差しに使う
-      if (!st.ball) {
+      // ボールの両端は、自動のときは押させない（本人の声「全部自動でやって」）。当たる瞬間は手の動きから目安で決める
+      if (!st.ball && st.askBall) {
         const p1 = r1.swings[0].ps.find((x) => x.p === "P1");
         const g = await grabAt(st, p1 && p1.t != null ? p1.t : r1.swings[0].window[0]);
         const c = await blobCanvas(g.blob);
@@ -1413,7 +1414,10 @@ const Video = (() => {
       st.auto = { swings: auto, excluded };
       st.perf.total_ms = Math.round(performance.now() - ctx.t0);
       endRun(st);
-      stepReview(el, st, cat);
+      // 確かめる画面とクラブの点は挟まない（全部自動）。自信の低いコマは自動のまま使い、見つからなかった所は判断できないにする。
+      // コマは、あとでチェックの画面から直せる
+      for (const { sw, p } of reviewItems(st)) if (!sw.frames[p]) sw.missing.add(p);
+      stepAutoSend(el, st, cat);
     } catch (e) {
       await keep();
       autoFail(el, st, cat, body, e);
@@ -1691,7 +1695,7 @@ const Video = (() => {
       endRun(st);
       await clearPending(true);
       st.auto = null;
-      App.go(`/session/${st.sid}/check`); // 知らせ（トースト）は出さない。チェックの見出しで足りる（下の案内を隠さない）
+      App.go(`/session/${st.sid}/check?auto=1`); // 知らせ（トースト）は出さない。?auto=1 で見た目の評価も自動で始める
     } catch (e) {
       endRun(st);
       autoHalt(body, "送れませんでした");

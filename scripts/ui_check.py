@@ -1655,84 +1655,20 @@ def check_video_auto(browser, root: str, base: str, pid: int, shots_dir: str, er
     if not LS_get(page, "golf.videoPending"):
         errors.append(f"[{tag}] 途中の分を消すを取り消したのに、途中の印が消えた")
     page.set_input_files("[data-file]", video)
-    # ボールの両端（最初のスイングの構え）
+    # 全部自動（本人の声「全部自動でやって」2026-09-30）: ボールの両端・確かめる画面・クラブの点を挟まず、チェックの画面まで進む
     try:
-        page.wait_for_selector("[data-body] h2[data-tap-p='P1']", timeout=90000)
-    except Exception:  # noqa: BLE001
-        errors.append(f"[{tag}] ボールの両端の画面が出ない: {page.inner_text('#view')[:300]!r}")
-        ctx.close()
-        return
-    bx, by = MSV.MOTION_BALL
-    canvas_click(page, "[data-stage] canvas.tapimg", bx - SYNTH.BALL_D / 2, by)
-    page.click("[data-sel] [data-pi='1']")
-    canvas_click(page, "[data-stage] canvas.tapimg", bx + SYNTH.BALL_D / 2, by)
-    page.click("[data-done]")
-    try:
-        page.wait_for_selector("[data-review-sum]", timeout=120000)
-    except Exception:  # noqa: BLE001
-        errors.append(f"[{tag}] 自動の取り出しが終わらない: {page.inner_text('#view')[:300]!r}")
-        ctx.close()
-        return
-    txt = page.inner_text("[data-body]")
-    if "2本" not in txt:
-        errors.append(f"[{tag}] 取り出したスイングの本数が違う（素振りを除いて2本）: {txt[:200]!r}")
-    if not page.locator("[data-excluded]").count() or "1本" not in page.inner_text("[data-excluded]"):
-        errors.append(f"[{tag}] 素振りを外したことが出ない")
-    no_overflow(page, tag, "確かめるところ", errors)
-    targets(page, tag, "確かめるところ", errors)
-    shot(page, shots_dir, f"{tag}-4-review")
-    # 確かめる画面で「<」を押すと、確かめてから戻る（取り出した形を黙って消さない）
-    page.click("[data-back]")
-    try:
-        page.wait_for_selector("[data-sheet=confirm]", timeout=5000)
-        page.click("[data-sheet=confirm] [data-cancel]")
-        page.wait_for_selector("[data-sheet=confirm]", state="detached")
-    except Exception:  # noqa: BLE001
-        errors.append(f"[{tag}] 確かめる画面の「<」が、確かめずに記録へ戻った")
-    if "/video/" not in page.evaluate("location.hash"):
-        errors.append(f"[{tag}] 「<」を取り消したのに動画の画面から離れた")
-    if page.locator("[data-review-go]").count():
-        page.click("[data-review-go]")
-        for _ in range(20):
-            page.wait_for_selector("[data-ok], [data-body] h2[data-tap-p='P2']", timeout=30000)
-            if page.locator("[data-body] h2[data-tap-p='P2']").count():
-                break
-            page.click("[data-ok]")
-    else:
-        # 全部のコマを見る道: 一コマ直して「手で直した」を残す
-        page.click("[data-review-all]")
-        page.wait_for_selector("[data-review-p='P1']", timeout=15000)
-        if page.locator("[data-rstrip] .pchip").count() != 7 or not page.locator("[data-rprev]").count() or not page.locator("[data-reset]").count():
-            errors.append(f"[{tag}] 一つずつの画面に P の帯・前へ・自動の位置に戻すが無い")
-        no_overflow(page, tag, "一つずつ確かめる", errors)
-        targets(page, tag, "一つずつ確かめる", errors)
-        shot(page, shots_dir, f"{tag}-5-review-one")
-        page.click("[data-ok]")
-        page.wait_for_selector("[data-review-p='P2']", timeout=15000)
-        page.click('[data-mv="+1"]')
-        page.wait_for_timeout(150)
-        page.click("[data-ok]")
-        page.wait_for_selector("[data-review-p='P3']", timeout=15000)
-        page.click("[data-skip-rest]")
-    # 代表スイングの P2 のクラブ
-    try:
-        page.wait_for_selector("[data-body] h2[data-tap-p='P2']", timeout=30000)
-        page.wait_for_selector("[data-stage] canvas.tapimg")
-        canvas_click(page, "[data-stage] canvas.tapimg", 696, 373)
-        canvas_click(page, "[data-stage] canvas.tapimg", 690, 368)
-        page.click("[data-done]")
-    except Exception as e:  # noqa: BLE001
-        errors.append(f"[{tag}] P2 のクラブの画面が出ない: {e}")
-    try:
-        page.wait_for_function(f"location.hash === '#/session/{sid}/check'", timeout=90000)
+        page.wait_for_function(f"location.hash === '#/session/{sid}/check?auto=1'", timeout=180000)
         page.wait_for_selector("[data-summary]", timeout=60000)
     except Exception:  # noqa: BLE001
-        errors.append(f"[{tag}] チェックの画面に進まない: {page.inner_text('#view')[:300]!r}")
+        errors.append(f"[{tag}] 押さずにチェックの画面まで進まない: {page.inner_text('#view')[:300]!r}")
         ctx.close()
         return
+    if page.locator("[data-body] h2[data-tap-p]").count() or page.locator("[data-review-sum]").count():
+        errors.append(f"[{tag}] 自動なのに点を押す画面・確かめる画面が出た")
     sws = call("GET", f"{base}/sessions/{sid}/swings")
-    if len(sws) != 2:
-        errors.append(f"[{tag}] スイングの本数が2本でない: {len(sws)}")
+    # 自動ではボールを押さないので、素振りの見分け（ボールが動いたか）はしない。3本とも数える
+    if len(sws) != 3:
+        errors.append(f"[{tag}] スイングの本数が3本でない: {len(sws)}")
     for sw in sws:
         cap = sw.get("capture") or {}
         perf, au = cap.get("perf") or {}, cap.get("auto") or {}
@@ -1760,8 +1696,8 @@ def check_video_auto(browser, root: str, base: str, pid: int, shots_dir: str, er
             errors.append(f"[{tag}] {p} の時刻が本当の時刻から離れている: {fr[p]['t']} / {truth[0][p]}")
     chk = call("GET", f"{base}/sessions/{sid}/checks")["checks"]
     by = {x["id"]: x for x in chk["items"]}
-    if by.get("path.loop", {}).get("state") != "in_range" or by["path.loop"].get("n_judged") != 2:
-        errors.append(f"[{tag}] 手の通り道の輪が2本とも測れていない: {by.get('path.loop', {}).get('state')} {by.get('path.loop', {}).get('reason')}")
+    if by.get("path.loop", {}).get("state") != "in_range" or by["path.loop"].get("n_judged") != 3:
+        errors.append(f"[{tag}] 手の通り道の輪が3本とも測れていない: {by.get('path.loop', {}).get('state')} {by.get('path.loop', {}).get('reason')}")
     # 合成の動画は 30fps。コマの少ない動画はテンポを判断しない（§6.2・§12。「目安の近く」と言わない）
     tp = by.get("tempo.ratio", {})
     if tp.get("n_ref") != 0 or tp.get("ref_reason") != "fps":

@@ -139,7 +139,7 @@ const Checks = (() => {
   }
 
   // ---- C チェック一覧 ----
-  async function renderC({ el, params, alive }) {
+  async function renderC({ el, params, query, alive }) {
     const sid = Number(params.id);
     el.innerHTML = `<div class="pagehead"><a class="iconbtn" href="#/session/${sid}" aria-label="診断へ戻る">${icon("chevron-left")}</a><h1>チェック</h1></div><div data-body></div>`;
     const body = $("[data-body]", el);
@@ -225,6 +225,15 @@ const Checks = (() => {
     body.innerHTML = h;
     const vl = data.vision && data.vision.last;
     if (vl && (vl.status === "queued" || vl.status === "running")) pollVision(sid, vl.job_id, alive);
+    // 動画を自動で取り出したあと（?auto=1）は、見た目の評価も押さずに始める（本人の声「全部自動でやって」2026-09-30）。
+    // 同じ記録で二回は始めない（開き直すたびに料金がかからないように）
+    const vrun = body.querySelector("[data-vision-run]");
+    if (query && query.auto === "1" && vrun) {
+      const key = `golf.autoVision.${sid}`;
+      let done = false;
+      try { done = sessionStorage.getItem(key) === "1"; sessionStorage.setItem(key, "1"); } catch { /* 覚えられなくても一回は走らせる */ }
+      if (!done) runVision(sid, data, vrun, alive, { auto: true });
+    }
     body.addEventListener("click", async (ev) => {
       // 送っているあいだ（aria-disabled）は二度押しを受けない（二重に料金がかからないように）
       const vr = ev.target.closest("[data-vision-run]");
@@ -306,11 +315,11 @@ const Checks = (() => {
     } catch { return blob; }
   }
 
-  async function runVision(sid, data, btn, alive) {
+  async function runVision(sid, data, btn, alive, { auto = false } = {}) {
     const v = data.vision;
     const box = btn.closest("[data-vision]");
     const say = (html) => { const old = box.querySelector("[data-vision-msg]"); if (old) old.remove(); box.insertAdjacentHTML("beforeend", `<div data-vision-msg>${html}</div>`); };
-    const ok = await App.ask({ title: "見た目を評価しますか", text: `料金は ${costText(v)} までの見積もりです。選んだコマの写真を AI（Claude）に送ります。写真はサーバーにも残しません。`, ok: "評価する", cancel: "やめる" });
+    const ok = auto || await App.ask({ title: "見た目を評価しますか", text: `料金は ${costText(v)} までの見積もりです。選んだコマの写真を AI（Claude）に送ります。写真はサーバーにも残しません。`, ok: "評価する", cancel: "やめる" });
     if (!ok || btn.getAttribute("aria-disabled") === "true") return;
     btn.setAttribute("aria-disabled", "true");
     try {
