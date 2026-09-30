@@ -1,4 +1,4 @@
-"""動画の姿勢の時系列から、スイングの区間と P1〜P10（と中間の P5.5・P6.5）を取り出す（docs/DESIGN_v2.md §6.3・§6.4。版 video/0.3）。
+"""動画の姿勢の時系列から、スイングの区間と P1〜P10（と中間の P5.5・P6.5）を取り出す（docs/DESIGN_v2.md §6.3・§6.4。版 video/0.4）。
 
 - **LLM を使わない。** 規則は全部ここに1か所で持ち、pytest で固定する（tests/test_video.py）。
 - 入力は端末が取った姿勢の点の時系列（数値だけ。動画そのものは来ない）。保存しない。
@@ -157,9 +157,19 @@ class Series:
         def mid(a, b):
             return ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, min(a[2], b[2]))
 
+        def hands(a, b):
+            # 両手はグリップで一緒にあるので、片方の手首が体に隠れても（正面のトップで右手首が隠れる）見えているほうを手の位置にする。
+            # 両方とも見えにくいときだけ欠けにする（本人の正面の動画で、トップから下ろしの手が全部欠けていた 2026-09-30）
+            ok_a, ok_b = a[2] >= config.CP_MIN_VISIBILITY, b[2] >= config.CP_MIN_VISIBILITY
+            if ok_a and ok_b:
+                return mid(a, b)
+            if ok_a or ok_b:
+                return a if ok_a else b
+            return mid(a, b)
+
         out = {
             "Sl": P[f"{lead}_shoulder"], "St": P[f"{trail}_shoulder"], "wl": P[f"{lead}_wrist"], "wt": P[f"{trail}_wrist"],
-            "H": mid(P["left_wrist"], P["right_wrist"]), "hip": mid(P["left_hip"], P["right_hip"]),
+            "H": hands(P["left_wrist"], P["right_wrist"]), "hip": mid(P["left_hip"], P["right_hip"]),
             "chest": mid(P["left_shoulder"], P["right_shoulder"]), "nose": P["nose"],
         }
         # 見えにくい点は欠けとして扱う（線でつなぐか、つなげなければ判断できない）
@@ -374,6 +384,19 @@ def _quiet_window(s: Series, lo: int, hi: int) -> dict | None:
     return {"a": a, "b": b, "addr": c, "tol": tol, "guess": True}
 
 
+def _start_window(s: Series, lo: int, hi: int) -> dict | None:
+    """動画が構えの途中から始まっているとき（リプレイの切り出し・撮り始めが遅い）の「構え（推定）」:
+    腰より下の区間が動画の最初の見えているコマから始まっていれば、短くてもその頭の数コマを構えにする。
+    本人のモニターのリプレイの動画は、構えが実時間で一瞬しか写っておらず、ほかの道では全部はじかれていた（2026-09-30）。"""
+    if any(s.rok(q) for q in range(0, lo)):
+        return None
+    idx = [q for q in range(lo, hi + 1) if s.rok(q) and s.t[q] - s.t[lo] <= config.VIDEO_STATIC_S + 1e-9]
+    if len(idx) < 2:
+        return None
+    c, tol = _addr_of(s, idx, cap_l=config.VIDEO_ADDR_GUESS_L / 2)
+    return {"a": idx[0], "b": idx[-1], "addr": c, "tol": tol, "guess": True}
+
+
 def find_swings(s: Series, why: dict | None = None) -> list[dict]:
     """手が胸より上に上がった区間ごとに、その前に構え（手が腰より下で静か）があり、後で胸より下へ下りたものをスイングにする。
 
@@ -441,7 +464,7 @@ def find_swings(s: Series, why: dict | None = None) -> list[dict]:
         if win:
             st["static"] += 1
         else:
-            win = _quiet_window(s, m, k)
+            win = _quiet_window(s, m, k) or _start_window(s, m, k)
         if win:
             st["address"] += 1
         # 後で胸より下へ下りるか（下ろし。粗い走査では腰より下のコマが一つも無いことがあるので、胸で見る）
@@ -731,6 +754,16 @@ def detect_one(s: Series, sw: dict) -> dict:
             warnings.append("order")
             continue
         prev = name
+    # P7 が取れなかった・順番に反したが、P6 と P8 が取れているときは、その間で手が一番低いコマを当たる瞬間の目安にする
+    # （ボールのまわりの変化が読めない動画＝モニターのリプレイを撮ったもの・ボールの押し位置のずれ、で行き止まりにしない。
+    # 自信は低いので必ず確かめてもらう）
+    if ps["P7"]["t"] is None and ps["P6"]["t"] is not None and ps["P8"]["t"] is not None and ps["P6"]["t"] < ps["P8"]["t"]:
+        f6, f8 = ps["P6"]["frame"], ps["P8"]["frame"]
+        mid = [q for q in range(f6 + 1, f8) if s.ok(q, "H")]
+        if mid:
+            q7 = max(mid, key=lambda q: s.Hs[q][1])
+            ps["P7"] = _p(s, "P7", q7, "hand_low", "estimated", "proxy")
+            ps["P7"].update(confidence="low")
     # 時間の検査（上げ 0.6〜1.5秒・下ろし 0.2〜0.5秒。外れたら警告し、端の P を確かめてもらう）
     t0 = s.t[t0i]
     if ps["P4"]["t"] is not None:
@@ -850,8 +883,86 @@ def series_for(body: dict, s: Series, sw: dict) -> dict:
 # ------------------------------------------------------------ 入口
 
 
+def _scale_body(body: dict, k: float) -> dict:
+    """時刻を 1/k にした写し（スロー再生を実時間の速さに直して探すため）。"""
+    b = dict(body)
+    b["frames"] = [({**f, "t": f["t"] / k} if isinstance(f, dict) and isinstance(f.get("t"), (int, float)) else f) for f in (body.get("frames") or [])]
+    if body.get("fps"):
+        b["fps"] = float(body["fps"]) * k
+    for key in ("ball_seen", "club_taps"):
+        if isinstance(body.get(key), list):
+            b[key] = [({**x, "t": x["t"] / k} if isinstance(x, dict) and isinstance(x.get("t"), (int, float)) else x) for x in body[key]]
+    return b
+
+
+def _unscale(out: dict, k: float) -> None:
+    """スロー再生として探した結果の時刻を、動画の時刻に戻す（コマ番号はそのまま）。"""
+    for sw in out.get("swings", []) + out.get("excluded", []):
+        for p in sw.get("ps", []):
+            if isinstance(p.get("t"), (int, float)):
+                p["t"] = round(p["t"] * k, 4)
+        if isinstance(sw.get("t0"), (int, float)):
+            sw["t0"] = round(sw["t0"] * k, 4)
+        if isinstance(sw.get("window"), list):
+            sw["window"] = [round(x * k, 3) for x in sw["window"]]
+        ser = sw.get("series")
+        if isinstance(ser, dict):
+            if isinstance(ser.get("t"), list):
+                ser["t"] = [round(x * k, 4) for x in ser["t"]]
+            if isinstance(ser.get("t0"), (int, float)):
+                ser["t0"] = round(ser["t0"] * k, 4)
+            if ser.get("fps"):
+                ser["fps"] = ser["fps"] / k
+        # スロー再生は速さが一定とは限らない（シミュレーターは下ろしだけもっと遅くすることがある）ので、テンポの比は出さない
+        sw["tempo"] = None
+        sw.setdefault("warnings", []).append("slow_motion")
+
+
+def _slowmo_factors(s: "Series") -> list[float]:
+    """手が腰の下から胸の上へ上がるのにかかった時間が実際のスイングよりずっと長ければ、スロー再生とみなしてその倍率を返す。
+
+    実際のスイングでは、腰の高さから胸の高さまで上がるのに 0.3〜0.8 秒ほど。モニターのスロー再生をスマホで撮った
+    本人の動画では 3 秒以上かかり、上げの時間の上限（VIDEO_RISE_MAX_S・VIDEO_MAX_BACK_S）で全部はじかれていた。
+    返すのは試す倍率の候補（見つかった順）。"""
+    rises = []
+    i, n = 0, s.n
+    while i < n:
+        if not _above_chest(s, i):
+            i += 1
+            continue
+        k = i - 1
+        while k >= 0 and not _below_hip(s, k):
+            k -= 1
+        if k >= 0:
+            rises.append(s.t[i] - s.t[k])
+        while i < n and (_above_chest(s, i) or not s.ok(i, "H", "chest")):
+            i += 1
+    # 上がった区間ごとに倍率の候補を出す（フォローで上がる区間は上げより短いので、一つに絞らず順に試す）
+    ks = []
+    for r in rises:
+        if r > config.VIDEO_RISE_MAX_S:
+            k = round(max(config.VIDEO_SLOWMO_MIN, min(config.VIDEO_SLOWMO_MAX, r / config.VIDEO_SLOWMO_RISE_S)), 2)
+            if k not in ks:
+                ks.append(k)
+    return ks
+
+
 def detect(body: dict) -> dict:
-    """POST /v1/video/checkpoints の中身。"""
+    """POST /v1/video/checkpoints の中身。見つからず、上げがとても遅ければ、スロー再生として探し直す。"""
+    out = _detect(body)
+    if out["swings"] or body.get("slowmo") is False:
+        return out
+    for k in _slowmo_factors(Series(body)):
+        out2 = _detect(_scale_body(body, k))
+        if out2["swings"]:
+            _unscale(out2, k)
+            out2["slow_motion"] = round(k, 2)
+            return out2
+    return out
+
+
+def _detect(body: dict) -> dict:
+    """POST /v1/video/checkpoints の中身（時刻をそのまま使う）。"""
     s = Series(body)
     out: dict[str, Any] = {"video_version": config.VIDEO_VERSION, "n_frames": s.n, "torso_px": round(s.L, 2), "swings": [], "excluded": []}
     if s.n < 3 or s.L <= 1:

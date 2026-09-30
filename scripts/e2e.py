@@ -629,7 +629,7 @@ def run_video_auto(base: str) -> None:
     se = call("POST", f"{base}/sessions", {"player_id": me["id"], "date": "2026-09-28"})
     body, truth = syn.motion("dtl", fps=60.0, n_swings=3, practice=(2,))
     r = call("POST", f"{base}/video/checkpoints", body)
-    assert r["video_version"] == "video/0.3" and len(r["swings"]) == 2 and len(r["excluded"]) == 1, (len(r["swings"]), len(r["excluded"]))
+    assert r["video_version"] == "video/0.4" and len(r["swings"]) == 2 and len(r["excluded"]) == 1, (len(r["swings"]), len(r["excluded"]))
     assert not call("GET", f"{base}/sessions/{se['id']}/swings"), "中継でスイングができた"
     for det in r["swings"]:
         m = syn.measure_input(body, det)

@@ -45,7 +45,7 @@ def near(sw: dict, truth: dict, fps: float, names=MAIN, frames: float = 2.0) -> 
 def test_合成の軌跡でPと始まりが当たる(view, fps):
     body, truth = syn.motion(view, fps=fps)
     r = video.detect(body)
-    assert r["video_version"] == "video/0.3"
+    assert r["video_version"] == "video/0.4"
     assert len(r["swings"]) == 1 and not r["excluded"]
     sw = r["swings"][0]
     near(sw, truth[0], fps)
@@ -539,3 +539,38 @@ def test_見つからないときは理由の材料を返す():
 def test_点が全く無ければ理由は体の点():
     r = video.detect({"view": "dtl", "handedness": "R", "fps": 60, "width": 1280, "height": 720, "frames": [{"t": 0.0, "lm": None}]})
     assert r["diag"]["reason"] == "no_pose"
+
+
+# ---- 本人の実際の動画（2026-09-15。練習場のモニターのスロー再生をスマホで手持ち撮影）から取った体の点 ----
+# 動画そのものは入れない（顔が写る）。本番で「スイングが見つかりませんでした」になった2本（2026-09-30）。
+# 原因は3つ: 正面のトップで右手首が体に隠れて手が全部欠けた／スロー再生で上げに3秒以上かかり時間の上限ではじかれた／
+# リプレイが構えの途中から始まり静かな構えが無かった。
+import json as _json
+import os as _os
+
+_REAL = _os.path.join(_os.path.dirname(__file__), "data")
+
+
+@pytest.mark.parametrize("tag", ["fo", "dtl"])
+@pytest.mark.parametrize("kind", ["coarse", "dense"])
+def test_本人のスロー再生の動画でスイングが見つかりP1からP7が順番に取れる(tag, kind):
+    body = _json.load(open(_os.path.join(_REAL, f"real_video_{tag}_{kind}.json")))
+    r = video.detect(body)
+    assert len(r["swings"]) == 1, r.get("diag")
+    sw = r["swings"][0]
+    assert r.get("slow_motion", 0) >= 2  # スロー再生として探し直した
+    assert "slow_motion" in sw["warnings"] and sw["tempo"] is None  # スローではテンポの比を出さない
+    ts = {p["p"]: p["t"] for p in sw["ps"]}
+    if kind == "dense":
+        req = ["P1", "P2", "P3", "P4", "P5", "P6", "P7"]
+        assert all(ts[p] is not None for p in req), ts
+        assert [ts[p] for p in req] == sorted(ts[p] for p in req)
+        # 時刻は動画の時刻に戻っている（スロー再生の上げは数秒かかる）
+        assert ts["P4"] - ts["P1"] > 3.0
+
+
+def test_片方の手首が隠れても手の位置は取れる():
+    body = _json.load(open(_os.path.join(_REAL, "real_video_fo_coarse.json")))
+    s = video.Series(body)
+    seen = sum(1 for i in range(s.n) if s.ok(i, "H"))
+    assert seen / s.n > 0.9  # 両手首が見えないと欠けにしていた頃は 55%

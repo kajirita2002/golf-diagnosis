@@ -275,7 +275,7 @@ PLAIN_LABEL_PATTERNS = {
 # ---- 動画のチェックポイント（docs/DESIGN_v2.md §5・§6）。どれも初期値・要較正 ----
 # 版（§13.4）。カタログの版はカタログの中（checkpoints/catalog.json の version）が持ち主。
 JUDGE_VERSION = "judge/1.2"
-VIDEO_VERSION = "video/0.3"
+VIDEO_VERSION = "video/0.4"
 # 初期の誤差（§5.5）。姿勢推定とタップの誤差の予算を実測するまで、画面の上の角度は ±5°、位置はボール ±0.5個。
 CP_ANGLE_ERR_DEG = 5.0
 CP_POS_ERR_BALL = 0.5
@@ -350,6 +350,11 @@ VIDEO_DIAG_MIN_POSE = 0.3
 VIDEO_T0_L = 0.08
 # 構えの静止の終わりからトップまでの上限（秒）。これより長いものはスイングにしない
 VIDEO_MAX_BACK_S = 3.0
+# スロー再生（モニターのリプレイをスマホで撮った動画など）: 手が腰の下から胸の上へ上がるのにかかった時間を、
+# 実際のスイングの目安（この秒数）で割った倍率だけ時間を縮めて探し直す。倍率は下限と上限で抑える
+VIDEO_SLOWMO_RISE_S = 0.5
+VIDEO_SLOWMO_MIN = 1.5
+VIDEO_SLOWMO_MAX = 12.0
 # 構えの最後から始動までがこれより長いときは、P1 を確かめてもらう
 VIDEO_P1_GAP_S = 0.6
 # P3 / P9: 腕（肩 → 手首）が画面の水平からこの角度以内
