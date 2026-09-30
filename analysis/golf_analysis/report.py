@@ -19,7 +19,7 @@ import logging
 from collections import defaultdict
 
 from . import band as band_mod
-from . import config, figures, gist, plan, video_candidates
+from . import config, diagnosis, figures, gist, plan, video_candidates
 from .claims import Claim, ClaimError, Facts, build_claim, dir_word
 from .profile import cross_units
 from .session import analyze_session
@@ -1001,7 +1001,10 @@ def _cross_claims(cross: dict, hand: str) -> list[dict]:
     return out
 
 
-def build_report(shots: list[dict], handedness: str = "R", experiments: list | None = None) -> dict:
+def build_report(shots: list[dict], handedness: str = "R", experiments: list | None = None,
+                 swings: list | None = None, checks: dict | None = None, n_videos: int = 0) -> dict:
+    """swings はそのセッションのスイングのチェック（Go が保存済みの判定を {swing_id, view, items} で渡す）。
+    checks はそれをまとめた結果（judge.aggregate の出力。テストや既にまとめてあるとき）。どちらも無ければ動画なし。"""
     hand = "L" if handedness == "L" else "R"
     an = analyze_session(shots)
     # 準備とドリルの球は解説にも入れない（analyze_session と同じ規則。外した数は n_practice_excluded）
@@ -1026,6 +1029,7 @@ def build_report(shots: list[dict], handedness: str = "R", experiments: list | N
     scopes_out = []
     plans = {}
     chosen_clubs = set()
+    diag_scopes = []  # 診断（diagnosis.py）の材料: 本体の範囲ごと
 
     order = [("group", g) for g in an["groups"]] + [("club", c) for c in an["clubs"]]
     # 1回目: 本体の範囲の候補（畳んだ1本に③を足すかを決めるため先に）
@@ -1099,6 +1103,9 @@ def build_report(shots: list[dict], handedness: str = "R", experiments: list | N
                 figs[fid]["desc"] = next((texts[k] for k in keys if k in texts), s5 if fid == "F7" else None)
                 figs[fid]["desc_claim"] = next((f"{p['scope_id']}/{k}" for k in keys if k in texts), None)
         g = _gist(p, cands, sections, hand, cross_claims, sh, figs.get("C1")) if sk == "main" and sections and sections[0]["id"] != "error" else None
+        if sk == "main" and sections and sections[0]["id"] != "error":
+            diag_scopes.append({"scope_id": p["scope_id"], "label": name, "kind": kind, "category": p["category"], "profile": p,
+                                "cands": cands, "sections": sections, "symptoms": symptoms, "shots": sh})
         if "C1" in figs:
             if g:  # 比べる図の読み上げは、要点の「理想との差」の文（数字も専門用語も無い）
                 gap = next((b for b in g["blocks"] if b["id"] == "gap"), None)
@@ -1133,6 +1140,7 @@ def build_report(shots: list[dict], handedness: str = "R", experiments: list | N
         build_claim(Claim(id=f"session/unknown.no_{key}", section="s8", layer="meta", template=text), Facts(), hand)
         for key, text in MISSING_TILES if key in session_missing
     ]
+    diag = _diagnosis(diag_scopes, hand, swings, checks, n_videos)
     all_facts = {k: v for s in scopes_out for k, v in s["facts"].items()}
     for c in cross_claims:
         all_facts.update(c["facts"])
@@ -1147,6 +1155,8 @@ def build_report(shots: list[dict], handedness: str = "R", experiments: list | N
         "n_excluded": an["n_excluded"],
         "n_practice_excluded": an["n_practice_excluded"],
         "scopes": scopes_out,
+        # 診断: 課題 → 原因の動き → 理想の動き → 直し方（アクションプラン）→ 確かめ方（diagnosis.py）
+        "diagnosis": diag,
         "session_unknowns": session_unknowns,
         "cross_club": {**cross, "claims": [c["claim"] for c in cross_claims]},
         "bands": {k: {kk: vv for kk, vv in v.items() if kk != "targets"} for k, v in an["bands"].items()},
@@ -1161,6 +1171,19 @@ def _gist(p: dict, cands, sections: list[dict], hand: str, cross_claims: list[di
         return gist.scope_gist(p, cands, sections, hand, cross_ids, shots, compare_fig)
     except Exception:  # noqa: BLE001  要点が作れなくても、解説そのものは出す
         log.exception("要点を作れませんでした: %s", p["scope_id"])
+        return None
+
+
+def _diagnosis(scopes: list[dict], hand: str, swings: list | None, checks: dict | None, n_videos: int) -> dict | None:
+    try:
+        if checks is None and swings:
+            from .checkpoints.judge import aggregate
+
+            checks = aggregate([sw for sw in swings if sw.get("items")], hand)
+        cats = {sw.get("club_class") for sw in swings or [] if sw.get("items") and sw.get("club_class")} or None
+        return diagnosis.build(scopes, hand, checks, n_videos or len(swings or []), cats)
+    except Exception:  # noqa: BLE001  診断が作れなくても、解説そのものは出す
+        log.exception("診断を作れませんでした")
         return None
 
 

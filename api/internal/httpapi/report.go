@@ -3,6 +3,7 @@ package httpapi
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -80,7 +81,13 @@ func (s *Server) sessionReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	raw, err := s.Analyzer.Report(r.Context(), analysis.ReportInput{Shots: ps, Handedness: pl.Handedness, Experiments: exps})
+	// 診断（diagnosis）の材料: 動画のスイングの保存済みの判定。読めなくても解説は出す（診断は「可能性」で書かれる）
+	swings, nVideos, serr := s.sessionSwingChecks(r.Context(), id)
+	if serr != nil {
+		s.Log.Warn("report swings failed", "session", id, "err", serr)
+		swings, nVideos = []json.RawMessage{}, 0
+	}
+	raw, err := s.Analyzer.Report(r.Context(), analysis.ReportInput{Shots: ps, Handedness: pl.Handedness, Experiments: exps, Swings: swings, NVideos: nVideos})
 	if err == nil {
 		raw, err = addBandShapes(raw)
 	}
@@ -101,6 +108,40 @@ func (s *Server) sessionReport(w http.ResponseWriter, r *http.Request) {
 		out.Reason = "分析サービスで解説を作れませんでした。1球ごとの分解は出せます"
 	}
 	writeJSONMaybeGzip(w, r, http.StatusOK, out)
+}
+
+// sessionSwingChecks は、記録のスイングのうち判定を保存してあるものを {swing_id, view, club_class, items} の形で返す
+// （まとめて課題を選ぶのは分析サービスの診断。checksData と違ってここでは測り直さない ―― 解説を開くたびに測ると遅いので、
+// 測るのはチェックの画面を開いたとき）。2つ目の返り値はスイングの本数（まだ測っていないものも含む）。
+func (s *Server) sessionSwingChecks(ctx context.Context, sessionID int64) ([]json.RawMessage, int, error) {
+	ss, err := s.Store.ListSwings(ctx, sessionID)
+	if err != nil {
+		return nil, 0, err
+	}
+	out := []json.RawMessage{}
+	for i := range ss {
+		sw := &ss[i]
+		if sw.CPCatalogVersion == "" {
+			continue
+		}
+		cs, err := s.Store.ListSwingChecks(ctx, sw.ID, sw.CPCatalogVersion)
+		if err != nil {
+			return nil, 0, err
+		}
+		if len(cs) == 0 {
+			continue
+		}
+		items := make([]json.RawMessage, 0, len(cs))
+		for _, c := range cs {
+			items = append(items, c.Evidence)
+		}
+		b, err := json.Marshal(map[string]any{"swing_id": sw.ID, "view": sw.View, "club_class": sw.ClubClass, "items": items})
+		if err != nil {
+			return nil, 0, err
+		}
+		out = append(out, b)
+	}
+	return out, len(ss), nil
 }
 
 // writeJSONMaybeGzip は、受け手が gzip を受け付けるなら gzip で返す（§10.2。解説は図の中身を含めて

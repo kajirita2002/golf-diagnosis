@@ -84,6 +84,11 @@ type ReportInput struct {
 	Shots       []ShotPayload      `json:"shots"`
 	Handedness  model.Handedness   `json:"handedness"`
 	Experiments []model.Experiment `json:"experiments"`
+	// Swings はそのセッションの動画のスイングの保存済みの判定（{swing_id, view, club_class, items}）。
+	// 診断（diagnosis）が原因の動きを「動画で測れた／見た目」に上げる材料。無ければ空で、診断は「可能性」で書く。
+	Swings []json.RawMessage `json:"swings"`
+	// NVideos はそのセッションの動画のスイングの本数（まだ測っていないものも含む）。
+	NVideos int `json:"n_videos"`
 }
 
 // Report は解説レポートを頼む。返り値は分析サービスの JSON をそのまま返す
@@ -94,6 +99,9 @@ func (c *Client) Report(ctx context.Context, in ReportInput) (json.RawMessage, e
 	}
 	if in.Experiments == nil {
 		in.Experiments = []model.Experiment{}
+	}
+	if in.Swings == nil {
+		in.Swings = []json.RawMessage{}
 	}
 	return c.post(ctx, "/v1/report", in)
 }

@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/kajirita2002/golf-diagnosis/api/internal/analysis"
+	"github.com/kajirita2002/golf-diagnosis/api/internal/model"
 	"github.com/kajirita2002/golf-diagnosis/api/internal/physics"
 )
 
@@ -221,5 +222,58 @@ func Testレポートはgzipを受け付ける相手にgzipで返す(t *testing.
 	}
 	if err := json.NewDecoder(plain.Body).Decode(&out); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// 診断（diagnosis）の材料: 記録の動画のスイングの保存済みの判定を、分析サービスへそのまま渡す。
+// 分析サービスが返した diagnosis は、そのまま応答の report に入る。
+func Testレポートは動画のスイングの判定を渡して診断をそのまま返す(t *testing.T) {
+	e := newEnv(t)
+	e.an.reportOut = `{"report_version":"report/0.1","scopes":[],"diagnosis":{"version":"diagnosis/1","summary":"まとめ","issues":[{"id":"strike_heel","rank":1}],"video_needed":false}}`
+	sid := e.setup("R")
+	e.importCSV(sid, dummyCSV(t), "", 201)
+
+	// 動画が無い: swings は空の配列で渡る（null にしない）
+	e.do("GET", fmt.Sprintf("/v1/sessions/%d/report", sid), nil, 200)
+	if in := e.an.reportIn; in == nil || in.Swings == nil || len(in.Swings) != 0 || in.NVideos != 0 {
+		t.Fatalf("動画が無いときの入力: %+v", in)
+	}
+
+	ctx := context.Background()
+	measured := &model.Swing{SessionID: int64(sid), View: "dtl", Club: "7 Iron", ClubClass: "iron", Width: 1280, Height: 720}
+	if err := e.st.CreateSwing(ctx, measured); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.st.PutSwingChecks(ctx, measured.ID, "checkpoints/1.0-pgag", nil, []model.SwingCheck{
+		{ItemID: "err.early_ext.dtl", State: "out_range", FaultID: "ext", Basis: "measured",
+			Evidence: json.RawMessage(`{"id":"err.early_ext.dtl","state":"out_range","fault":"ext","basis":"measured"}`)},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// まだ測っていないスイングは本数にだけ数える
+	if err := e.st.CreateSwing(ctx, &model.Swing{SessionID: int64(sid), View: "fo", Club: "7 Iron", ClubClass: "iron", Width: 1280, Height: 720}); err != nil {
+		t.Fatal(err)
+	}
+
+	out := e.do("GET", fmt.Sprintf("/v1/sessions/%d/report", sid), nil, 200)
+	in := e.an.reportIn
+	if in == nil || len(in.Swings) != 1 || in.NVideos != 2 {
+		t.Fatalf("動画のスイングの入力: %+v", in)
+	}
+	var sw struct {
+		SwingID   int64             `json:"swing_id"`
+		View      string            `json:"view"`
+		ClubClass string            `json:"club_class"`
+		Items     []json.RawMessage `json:"items"`
+	}
+	if err := json.Unmarshal(in.Swings[0], &sw); err != nil {
+		t.Fatal(err)
+	}
+	if sw.SwingID != measured.ID || sw.View != "dtl" || sw.ClubClass != "iron" || len(sw.Items) != 1 || !strings.Contains(string(sw.Items[0]), "err.early_ext.dtl") {
+		t.Fatalf("スイングの形: %+v", sw)
+	}
+	diag := out["report"].(map[string]any)["diagnosis"].(map[string]any)
+	if diag["version"] != "diagnosis/1" || diag["summary"] != "まとめ" || len(diag["issues"].([]any)) != 1 {
+		t.Fatalf("診断がそのまま入っていない: %v", diag)
 	}
 }

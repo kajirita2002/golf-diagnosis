@@ -39,6 +39,9 @@ class ReportIn(BaseModel):
     shots: list[dict[str, Any]] = Field(default_factory=list)
     handedness: str = "R"
     experiments: list[dict[str, Any]] = Field(default_factory=list)
+    # そのセッションの動画のスイングのチェック（{swing_id, view, items}）。診断の原因を measured / seen に上げる材料
+    swings: list[dict[str, Any]] = Field(default_factory=list)
+    n_videos: int = 0
 
 
 class NarrativeIn(BaseModel):
@@ -311,7 +314,7 @@ def report(body: ReportIn) -> dict:
     帯の形と窓の数字は Go が各範囲の band_request を見て band_shape を足す。"""
     if body.handedness not in ("R", "L"):
         raise HTTPException(400, "handedness は R か L です")
-    out = build_report(body.shots, body.handedness, body.experiments)
+    out = build_report(body.shots, body.handedness, body.experiments, swings=body.swings, n_videos=body.n_videos)
     # 本体の範囲ごとに、つなぎの文（1c）の入力と鍵を足す。Claude はここでは呼ばない
     narrative.attach_inputs(out)
     return out

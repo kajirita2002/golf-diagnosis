@@ -1,0 +1,1268 @@
+{
+  "version": "coaching_kb/1",
+  "about": "レポートの診断（diagnosis）の知識ベース。症状（球と動画）→ 原因の動きの候補 → 理想の動き → 直し方 → 確かめ方。ガイドの文章は写さず、自分の言葉の要約とページ（docs/PGA_GUIDE_NOTES.md の節の範囲）だけを持つ。ガイドに無い知見は source: general（一般的な見方）。動作と球筋のつながりはガイドの言うとおり確定ではなく可能性なので、動画で測れていない原因は画面で『可能性』と書く。文の左右は {lead}（目標側）/ {trail}（後ろ側）/ {dir:right} / {dir:left} で持ち、利き手で差し込む。数字は漢数字で書く（最初の面に算用数字を出さない）。",
+  "sources": {
+    "guide": "PGAガイド（本人が共有したスクショ。要点は docs/PGA_GUIDE_NOTES.md）",
+    "general": "一般的な見方（ガイドに無い、広く使われているコーチングの知見）"
+  },
+  "symptoms": [
+    {
+      "id": "strike_heel",
+      "from": "ball",
+      "title": "ネック寄りに当たる",
+      "plan_issues": ["strike_heel"],
+      "video_symptoms": ["S1", "S2"],
+      "club_state": "当たる瞬間、クラブの芯がボールより体から遠い側を通り、ボールはクラブの付け根（ネック）寄りに当たっています。ここまでは球のデータで確かな事実です。",
+      "impact": "ネック寄りに当たると、クラブの面が開く向きにねじれて、球は{dir:right}へ出て{dir:right}へ曲がりやすくなります。大きく外れると真{dir:right}へ飛ぶ当たりになり、一打を失います。",
+      "causes": [
+        {"id": "early_ext", "source": "general", "explain": "切り返しで腰がボールの方へ出ると、体とボールの距離が縮みます。腕とクラブの通り道が詰まり、手元が体から離れてクラブの付け根がボールへ押し出されるので、ネック寄りに当たります。"},
+        {"id": "setup_close", "source": "general", "explain": "構えのときにボールとの距離が近すぎたり、手元が体に寄りすぎていたりすると、振ったときに腕が伸びる分だけクラブの付け根がボールの位置に来ます。構えの時点でネック寄りに当たる準備ができてしまいます。"},
+        {"id": "hands_out", "source": "general", "explain": "下ろしで手元が体から離れて下りてくると、クラブ全体が体から遠い側へずれ、芯ではなく付け根がボールに当たります。当たる瞬間に手元が浮く動きも同じ向きに働きます。"}
+      ],
+      "ideal": {
+        "text": "構えのときに両手の中心が足の親指の付け根からつま先の真下にあり、切り返しから当たる瞬間まで、お尻の位置は構えの線から前に出ません。上体の前への傾きを保ったまま体を回し、手元は構えと同じ場所（体の近く）へ戻ってきます。",
+        "p": "P7",
+        "item_id": "iron.p7.dtl.hands",
+        "figure": {"kind": "strike", "now": "heel", "ideal": "center"}
+      },
+      "fix": {
+        "setup": [
+          "両手の中心が、足の親指の付け根からつま先の真下に来るように立つ",
+          "クラブを先に地面に置いてから足の位置を決め、ボールとの距離を毎回同じにする",
+          "体重は足の裏の真ん中に乗せ、つま先寄りにしない"
+        ],
+        "cue": "当たる瞬間、手元を構えたときと同じ場所（体の近く）へ低く戻すつもりで振る。",
+        "cue_why": "手元が体から離れるとクラブの付け根がボールへ出ていくので、手元の戻る場所を決めると当たる場所が芯へ寄ります。",
+        "drills": ["far_ball", "spray"]
+      },
+      "check": "本番の十球のうち八球で、当たった場所が芯の近く（クラブの面に貼るシールか粉のスプレーで確かめる）。別の日にもう一回同じようにできたら合格で、次の課題へ進みます。",
+      "video_view": "dtl",
+      "evidence_claims": ["miss.strike", "miss.extreme", "miss.budget", "summary.top_cell", "next.now", "unknown.strike_missing"]
+    },
+    {
+      "id": "strike_toe",
+      "from": "ball",
+      "title": "先寄りに当たる",
+      "plan_issues": ["strike_toe"],
+      "video_symptoms": [],
+      "club_state": "当たる瞬間、クラブの芯がボールより体に近い側を通り、ボールはクラブの先寄りに当たっています。ここまでは球のデータで確かな事実です。",
+      "impact": "先寄りに当たると、クラブの面が閉じる向きにねじれて球が{dir:left}へ出やすく、当たりも弱くなって距離が落ちます。",
+      "causes": [
+        {"id": "setup_far", "source": "general", "explain": "構えでボールから遠く立つと、腕を伸ばしきっても芯が届かず、先のほうでボールをとらえます。"},
+        {"id": "hands_in", "source": "general", "explain": "下ろしで手元が体に引きつけられたり、当たる瞬間に腕が縮んだりすると、クラブが体の近くを通り、先寄りに当たります。"},
+        {"id": "body_open_early", "source": "general", "explain": "下ろしで体が早く開くと、腕が体の回転に引っ張られて内側へ引き込まれ、クラブの先でボールをとらえやすくなります。"}
+      ],
+      "ideal": {
+        "text": "構えのときに両手の中心が足の親指の付け根からつま先の真下にあり、当たる瞬間も手元は構えと同じ場所に戻ります。腕は体に引きつけず、構えたときの長さのまま振り抜きます。",
+        "p": "P7",
+        "item_id": "iron.p7.dtl.hands",
+        "figure": {"kind": "strike", "now": "toe", "ideal": "center"}
+      },
+      "fix": {
+        "setup": [
+          "両手の中心が、足の親指の付け根からつま先の真下に来るように立つ",
+          "クラブを先に地面に置き、芯の後ろにボールを合わせてから足の位置を決める"
+        ],
+        "cue": "当たる瞬間、腕を縮めずに、構えたときの腕の長さのまま手元を体の前へ通す。",
+        "cue_why": "腕が縮むとクラブが体の近くを通って先寄りに当たるので、腕の長さを保つと芯がボールに届きます。",
+        "drills": ["near_ball", "spray"]
+      },
+      "check": "本番の十球のうち八球で、当たった場所が芯の近く（シールか粉のスプレーで確かめる）。別の日にもう一回できたら合格です。",
+      "video_view": "dtl",
+      "evidence_claims": ["miss.strike", "miss.extreme", "miss.budget", "summary.top_cell", "next.now", "unknown.strike_missing"]
+    },
+    {
+      "id": "strike_scatter",
+      "from": "ball",
+      "title": "当たる場所が毎回ばらつく",
+      "plan_issues": ["strike_scatter"],
+      "video_symptoms": [],
+      "club_state": "当たる瞬間のクラブの芯とボールの位置関係が毎回変わり、芯・ネック寄り・先寄りのどこに当たるかが決まっていません。ここまでは球のデータで確かな事実です。",
+      "impact": "当たる場所が変わると、同じように振っても面の向きと球の強さが毎回変わり、方向も距離もそろいません。面の向きの練習をしても結果が読めなくなります。",
+      "causes": [
+        {"id": "setup_varies", "source": "guide", "explain": "構えのボールとの距離や置き場所が毎回違うと、同じように振っても当たる場所が変わります。ガイドも、構えの手順を毎回同じにすること（毎回同じに握る・同じ手順で構える）を一貫性の土台に置いています。"},
+        {"id": "early_ext", "source": "general", "explain": "下ろしで上体が起きたり沈んだりすると、体とボールの距離が毎回変わり、当たる場所がその分だけ動きます。"},
+        {"id": "tempo_fast", "source": "guide", "explain": "切り返しが急で下ろしが速すぎると、体と腕の動く順番が毎回ずれ、クラブの戻る場所がそろいません。ガイドはリズムとテンポを一貫性の要素にしています。"}
+      ],
+      "ideal": {
+        "text": "毎回同じ手順で構え、同じリズムで振ります。上げと下ろしのリズムは上げのほうがゆったりで、切り返しで急がず、体の上下の動きが小さいまま当たる瞬間を迎えます。",
+        "p": "P1",
+        "item_id": "iron.p1.dtl.hands",
+        "figure": {"kind": "strike", "now": "scatter", "ideal": "center"}
+      },
+      "fix": {
+        "setup": [
+          "打つ前の手順を決めて毎回同じにする（後ろから目標を見る → クラブを置く → 足を決める → 握りを確かめる）",
+          "両手の中心が、足の親指の付け根からつま先の真下に来るように立つ"
+        ],
+        "cue": "上げはゆったり、切り返しで急がず、フィニッシュで止まれる速さで振る。",
+        "cue_why": "振る速さを少し落としてリズムをそろえると、体とクラブの戻る場所がそろい、当たる場所がまとまります。",
+        "drills": ["feet_together", "routine", "spray"]
+      },
+      "check": "本番の十球のうち八球で、当たった場所が芯の近くにまとまる（シールか粉のスプレーで確かめる）。別の日にもう一回できたら合格です。",
+      "video_view": "dtl",
+      "evidence_claims": ["miss.strike", "miss.budget", "next.now", "unknown.strike_missing"]
+    },
+    {
+      "id": "face_right",
+      "from": "ball",
+      "title": "当たる瞬間にクラブの面が{dir:right}を向く",
+      "plan_issues": ["start_right", "curve_right"],
+      "video_symptoms": ["S3", "S4"],
+      "club_state": "当たる瞬間、クラブの面が狙いより{dir:right}を向いています（面が開いている）。打ち出す向きは主に面の向きで決まるので、球は{dir:right}へ出て、振る方向より面が{dir:right}を向く分だけさらに{dir:right}へ曲がります。ここまでは球のデータで確かな事実です。",
+      "impact": "{dir:right}へ出て{dir:right}へ曲がる球が増え、狙いの{dir:right}側へ外れるミスになります。面の向きのずれは、左右のずれに一番大きく響きます。",
+      "causes": [
+        {"id": "face_open_wrist", "source": "guide", "explain": "トップから下ろしで{lead}手首が甲側に折れたままだと、面が開いたまま下りてきます。ガイドは、面を返すのは手首を手のひら側・甲側に折る動きが主で、ねじる動きが主だと面の開き閉じが大きくなるとしています。"},
+        {"id": "body_open_early", "source": "guide", "explain": "下ろしで腰と胸が早く開くと、腕とクラブが体の回転に遅れ、面が開いたまま当たります。ガイドも、体が早く開くことを{dir:right}へ曲がる球が出やすい特徴に挙げています。"},
+        {"id": "grip_weak", "source": "guide", "explain": "握ったときの手の向きは、当たる瞬間の面の向きに直結します（ガイド）。{lead}手の握りが浅いと、面が開いたまま戻りやすくなります。"},
+        {"id": "weight_back", "source": "guide", "explain": "下ろしで体重が{lead}足に乗りきらないと、体の回転が止まって腕が遅れ、面が開いたまま当たりやすくなります。ガイドも、体重移動が足りないことを{dir:right}へ曲がる球の特徴に挙げています。"},
+        {"id": "align_open", "source": "guide", "explain": "構えで足・腰・肩が目標より{dir:left}を向くと、振る方向が外から入りやすく、面が振る方向より{dir:right}を向いて{dir:right}へ曲がる球が出やすくなります（ガイドの構えの向きの傾向）。"}
+      ],
+      "ideal": {
+        "text": "トップでは{lead}手首が甲側に折れず、クラブは{lead}前腕の延長の近くにあります。下ろしでは体の回転と一緒に{lead}手首を手のひら側へ少し折りながら振り、当たる瞬間に面が狙いの方向を向きます。",
+        "p": "P7",
+        "item_id": null,
+        "figure": {"kind": "face", "now": "right", "ideal": "target"}
+      },
+      "fix": {
+        "setup": [
+          "{lead}手を先に握り、上から見て指の付け根の山がいくつ見えるかを決めて、毎回同じにする",
+          "足・腰・肩の線を目標と平行にそろえる（足元に棒を一本置いて確かめる）",
+          "握る強さは、手首が固まらない程よい強さにする"
+        ],
+        "cue": "下ろしで{lead}手首を手のひら側へ少し折りながら、{lead}手の甲を目標へ向けて振り抜く。",
+        "cue_why": "手首を手のひら側へ折ると面は閉じる向きに回るので、開いたまま当たるのを防げます。手首をねじって返すより、面の開き閉じが小さく済みます。",
+        "drills": ["start_line", "stick_a", "half_face_up"]
+      },
+      "check": "本番の十球のうち八球が、狙いの方向（目印の上）に打ち出される。別の日にもう一回できたら合格です。",
+      "video_view": "both",
+      "evidence_claims": ["impact.face", "impact.sensitivity", "summary.path_face", "next.next", "next.hypothesis", "impact.representative", "flight.counts"]
+    },
+    {
+      "id": "face_left",
+      "from": "ball",
+      "title": "当たる瞬間にクラブの面が{dir:left}を向く",
+      "plan_issues": ["start_left", "curve_left"],
+      "video_symptoms": [],
+      "club_state": "当たる瞬間、クラブの面が狙いより{dir:left}を向いています（面が閉じている）。球は{dir:left}へ出て、振る方向より面が{dir:left}を向く分だけさらに{dir:left}へ曲がります。ここまでは球のデータで確かな事実です。",
+      "impact": "{dir:left}へ出て{dir:left}へ曲がる球が増え、狙いの{dir:left}側へ外れるミスになります。強く曲がると距離の読めない球になります。",
+      "causes": [
+        {"id": "early_release", "source": "guide", "explain": "下ろしで手首の折れが早くほどけ、手で強く返すと、面が閉じた状態で当たります。ガイドは、早いほどけと強い手の動きを{dir:left}へ曲がる球の特徴に挙げています。"},
+        {"id": "body_stall", "source": "guide", "explain": "下ろしで体の回転が止まったり遅れたりすると、腕だけが先に振られて面が返りすぎます。ガイドも、回転が止まることと腕が先に出ることを{dir:left}へ曲がる球の特徴に挙げています。"},
+        {"id": "grip_strong", "source": "guide", "explain": "握ったときの手の向きは面の向きに直結します（ガイド）。{lead}手の握りが深すぎると、当たる瞬間に面が閉じやすくなります。"}
+      ],
+      "ideal": {
+        "text": "下ろしでは体の回転と腕の振りが一緒に進み、手首の折れは手元が{lead}太ももの前に来るまで残ります。当たる瞬間に面は狙いの方向を向き、振り抜きで急に返しません。",
+        "p": "P7",
+        "item_id": null,
+        "figure": {"kind": "face", "now": "left", "ideal": "target"}
+      },
+      "fix": {
+        "setup": [
+          "{lead}手を先に握り、上から見て指の付け根の山がいくつ見えるかを決めて、毎回同じにする",
+          "足・腰・肩の線を目標と平行にそろえる（足元に棒を一本置いて確かめる）"
+        ],
+        "cue": "下ろしで胸を目標へ回し続け、腕は体の回転についていかせる（手で返さない）。",
+        "cue_why": "体の回転が止まらなければ腕だけが先に振られることがなく、面が返りすぎるのを防げます。",
+        "drills": ["start_line", "hold_off"]
+      },
+      "check": "本番の十球のうち八球が、狙いの方向（目印の上）に打ち出される。別の日にもう一回できたら合格です。",
+      "video_view": "both",
+      "evidence_claims": ["impact.face", "impact.sensitivity", "summary.path_face", "next.now", "next.next", "flight.counts"]
+    },
+    {
+      "id": "face_var",
+      "from": "ball",
+      "title": "当たる瞬間の面の向きが毎回変わる",
+      "plan_issues": ["start_var", "curve_var"],
+      "video_symptoms": [],
+      "club_state": "当たる瞬間のクラブの面の向きが毎回変わり、{dir:right}を向く球も{dir:left}を向く球も出ています。ここまでは球のデータで確かな事実です。",
+      "impact": "打ち出す向きが毎回変わるので、{dir:right}にも{dir:left}にも外れます。狙いを決めにくく、コースでは両側のミスを考えなければなりません。",
+      "causes": [
+        {"id": "grip_varies", "source": "guide", "explain": "握る位置・手の向き・強さが毎回違うと、同じように振っても面の向きが変わります。ガイドは毎回同じに握ることを握りの要点の一つにしています。"},
+        {"id": "wrist_roll", "source": "guide", "explain": "手首をねじる動きで面を返していると、返す量が毎回変わります。ガイドは、手のひら側・甲側に折る動きを主にすると面の開き閉じが小さく済むとしています。"},
+        {"id": "tempo_fast", "source": "guide", "explain": "切り返しが急だと、手首の使い方のタイミングが毎回ずれ、面の向きがそろいません（ガイドのリズムとテンポ）。"}
+      ],
+      "ideal": {
+        "text": "毎回同じ握りで構え、手首はねじらず、手のひら側・甲側に折る動きで面を管理します。リズムは上げがゆったりで、切り返しで急ぎません。",
+        "p": "P7",
+        "item_id": null,
+        "figure": {"kind": "face", "now": "scatter", "ideal": "target"}
+      },
+      "fix": {
+        "setup": [
+          "握りの形と強さを決め、打つ前に毎回同じか確かめる",
+          "打つ前の手順を決めて毎回同じにする"
+        ],
+        "cue": "腰から腰の振り幅で、手首をねじらずに、体の回転で面を目標へ向けて運ぶ。",
+        "cue_why": "手首をねじらずに体で運ぶと、面を返す量が毎回そろい、打ち出す向きがまとまります。",
+        "drills": ["start_line", "wrist_ball", "metronome"]
+      },
+      "check": "本番の十球のうち八球が、狙いの方向（目印の上）に打ち出される。別の日にもう一回できたら合格です。",
+      "video_view": "both",
+      "evidence_claims": ["impact.face", "impact.sensitivity", "summary.path_face", "next.now", "next.next", "flight.counts"]
+    },
+    {
+      "id": "path_left",
+      "from": "ball",
+      "title": "振る方向が{dir:left}へ向く（外から入る）",
+      "plan_issues": [],
+      "video_symptoms": ["S6"],
+      "club_state": "当たる瞬間、クラブが体の外側から内側へ、狙いより{dir:left}へ向かって振られています。面がその向きより{dir:right}を向いていれば{dir:right}へ曲がり、そろっていれば{dir:left}へまっすぐ出ます。ここまでは球のデータで確かな事実です。",
+      "impact": "{dir:left}へ出る球や、{dir:right}へ大きく曲がる球が出やすくなります。上から鋭く当たるので、距離も落ちやすくなります。",
+      "causes": [
+        {"id": "path_over", "source": "guide", "explain": "切り返しで手元が高い所からそのままボールへ下りると、クラブが外から入り、振る方向が{dir:left}へ向きます。ガイドは、下ろしの手の通り道が上げより低い所を通るのを理想にしています。"},
+        {"id": "steep", "source": "guide", "explain": "下ろしでクラブが立ちすぎると、クラブの先が外に出て上から鋭く入ります。ガイドは、シャフトが立ちすぎることを{dir:right}へ曲がる球の特徴に挙げています。"},
+        {"id": "body_open_early", "source": "guide", "explain": "切り返しで上体から回ると、腕とクラブが外へ放り出されて外から入ります（ガイドの、切り返しで上体や腕が先に動く特徴）。"},
+        {"id": "align_open", "source": "guide", "explain": "構えで体が目標より{dir:left}を向くと、その向きに沿って振るので振る方向も{dir:left}へ向きます（ガイドの構えの向きの傾向）。"}
+      ],
+      "ideal": {
+        "text": "切り返しでは、手元を上げのときより少し低い所へ下ろし（上げより低い輪を描く）、クラブは立ちすぎず寝すぎない中間を通ります。腕が水平（下ろし）のとき、手の中心は胸の真ん中から{trail}胸の間にあります。",
+        "p": "P5",
+        "item_id": "path.loop",
+        "figure": {"kind": "path", "now": "left", "ideal": "target"}
+      },
+      "fix": {
+        "setup": [
+          "足・腰・肩の線を目標と平行にそろえる（足元に棒を一本置いて確かめる）",
+          "ボールの置き場所を番手に合わせる（前に置きすぎない）"
+        ],
+        "cue": "切り返しで、手元を{trail}の腰の前へ真下に下ろしてから体を回す。",
+        "cue_why": "手元が高い所から直接ボールへ向かわなければ、クラブが外から入らず、振る方向が狙いへ戻ります。",
+        "drills": ["cover_out", "pump"]
+      },
+      "check": "本番の十球のうち八球で、目印に触らずに打てて、{dir:right}へ大きく曲がる球が減る。別の日にもう一回できたら合格です。",
+      "video_view": "both",
+      "evidence_claims": ["impact.path", "summary.path_face", "next.now", "next.next"]
+    },
+    {
+      "id": "path_right",
+      "from": "ball",
+      "title": "振る方向が{dir:right}へ向く（内から入りすぎる）",
+      "plan_issues": [],
+      "video_symptoms": ["S5"],
+      "club_state": "当たる瞬間、クラブが体の内側から外側へ、狙いより{dir:right}へ向かって振られています。面がその向きより{dir:left}を向いていれば{dir:left}へ曲がり、そろっていれば{dir:right}へまっすぐ出ます。ここまでは球のデータで確かな事実です。",
+      "impact": "{dir:right}へ出る球や、{dir:left}へ大きく曲がる球が出やすくなります。手前を打つ当たりも出やすくなります。",
+      "causes": [
+        {"id": "shallow", "source": "guide", "explain": "下ろしでクラブが寝すぎ、手元が低く内側から入ると、振る方向が{dir:right}へ向きます。ガイドは、クラブが寝る方向に回ろうとする力を、下ろしの途中から手で支えて立てて相殺するとしています。"},
+        {"id": "p2_inside", "source": "guide", "explain": "上げ始めでクラブの先が内側へ回ると、そのまま内側から下りやすくなります。ガイドのケーススタディでは、上げ始めの手首の返しすぎが原因とされています。"},
+        {"id": "body_stall", "source": "guide", "explain": "下ろしで体の回転が止まると、腕だけが内側から外へ振り出されます（ガイドの、回転が遅れる・腕が先に出る特徴）。"},
+        {"id": "ball_pos", "source": "general", "explain": "ボールを番手の基準より後ろ（{trail}側）に置くと、クラブが内側から外へ向かう途中で当たり、振る方向が{dir:right}へ向きます。"}
+      ],
+      "ideal": {
+        "text": "腕が水平（下ろし）のあたりから、手でクラブを支えて少し立てるようにし、クラブの先が手の周りから大きく内側へ外れないようにします。手元は上げより少し低い所を通り、極端に低くは下りません。",
+        "p": "P6",
+        "item_id": "iron.p6.dtl.head_vs_hands",
+        "figure": {"kind": "path", "now": "right", "ideal": "target"}
+      },
+      "fix": {
+        "setup": [
+          "ボールの置き場所を番手に合わせる（後ろに置きすぎない）",
+          "足・腰・肩の線を目標と平行にそろえる"
+        ],
+        "cue": "下ろしで胸を目標へ回し続け、クラブの先を手元より外に保ったまま体の前へ運ぶ。",
+        "cue_why": "体の回転が続けば腕が内側から外へ放り出されず、クラブが寝すぎずに振る方向が狙いへ戻ります。",
+        "drills": ["cover_in", "stick_c"]
+      },
+      "check": "本番の十球のうち八球で、目印に触らずに打てて、{dir:left}へ大きく曲がる球が減る。別の日にもう一回できたら合格です。",
+      "video_view": "both",
+      "evidence_claims": ["impact.path", "summary.path_face", "next.now", "next.next"]
+    },
+    {
+      "id": "thin",
+      "from": "ball",
+      "title": "ボールの上側をたたく（薄い当たり）",
+      "plan_issues": ["top_extreme"],
+      "video_symptoms": [],
+      "club_state": "当たる瞬間、クラブの一番低い所がボールの赤道より上を通り、ボールの上側をたたいています。ここまでは球のデータで確かな事実です。",
+      "impact": "低く強い球が出て、距離も方向も読めなくなります。この当たりが混ざると、曲がった理由が分からなくなります。",
+      "causes": [
+        {"id": "early_ext", "source": "guide", "explain": "下ろしで腰が前に出て上体が起きると、クラブの一番低い所が上がり、ボールの上側をたたきます（ガイドの、体が起きる特徴）。"},
+        {"id": "weight_back", "source": "guide", "explain": "体重が{trail}足に残ったまま振ると、すくい上げる形になり、クラブが上がりながらボールに当たります（ガイドの、{trail}足体重のままの特徴）。"},
+        {"id": "early_release", "source": "general", "explain": "手首の折れが早くほどけると、クラブの一番低い所がボールより手前に来て、上がりながらボールの上側に当たります。"}
+      ],
+      "ideal": {
+        "text": "当たる瞬間まで上体の前への傾きを保ち、体重の多くが{lead}足に乗っています。手元がクラブの先より少し前にあり、クラブの一番低い所はボールより少し先です。",
+        "p": "P7",
+        "item_id": "iron.p7.dtl.hand_height",
+        "figure": {"kind": "low_point", "now": "high", "ideal": "after_ball"}
+      },
+      "fix": {
+        "setup": [
+          "体重は足の裏の真ん中、左右は同じくらいか少し{lead}足寄りにする",
+          "ボールの置き場所を番手に合わせる"
+        ],
+        "cue": "上体の傾きを保ったまま、{lead}足の上で胸を回して打つ。",
+        "cue_why": "上体が起きず体重が{lead}足に乗れば、クラブの一番低い所がボールの先へ動き、上側をたたかなくなります。",
+        "drills": ["towel", "chair"]
+      },
+      "check": "本番の十球のうち八球で、タオルに触らずに芯でとらえられる。別の日にもう一回できたら合格です。",
+      "video_view": "both",
+      "evidence_claims": ["miss.budget", "next.now", "summary.top_cell"]
+    },
+    {
+      "id": "fat",
+      "from": "ball",
+      "title": "ボールの手前を打つ（ダフり気味）",
+      "plan_issues": ["low_point"],
+      "video_symptoms": [],
+      "club_state": "当たる瞬間より前に、クラブの一番低い所が来ていて、ボールの手前の地面を打っています。ここまでは球のデータで確かな事実です。",
+      "impact": "距離が大きく落ち、グリーンに届かないミスになります。",
+      "causes": [
+        {"id": "weight_back", "source": "guide", "explain": "体重が{trail}足に残ると、クラブの一番低い所がボールの手前に来ます。ガイドは、下ろしで{lead}足へ体重を移すことを当たりの土台にしています。"},
+        {"id": "gaze", "source": "guide", "explain": "構えでボールの手前を見つめすぎたり、頭が{trail}へ傾いたりすると、当たる瞬間に体重が{trail}に残りやすく、手前を打ちます（ガイドの目線の注意）。"},
+        {"id": "early_release", "source": "general", "explain": "手首の折れが早くほどけると、クラブの先が手元を追い越して、ボールの手前で地面に届きます。"}
+      ],
+      "ideal": {
+        "text": "当たる瞬間、胸と骨盤は構えより少し{lead}側にあり、体重の多くが{lead}足に乗っています。手元がクラブの先より少し前にあり、クラブの一番低い所はボールより少し先です。",
+        "p": "P7",
+        "item_id": "err.sway.p7",
+        "figure": {"kind": "low_point", "now": "before_ball", "ideal": "after_ball"}
+      },
+      "fix": {
+        "setup": [
+          "顎を少し上げ、ボールの手前ではなくボール全体を見る",
+          "頭を{trail}へ傾けずに構える"
+        ],
+        "cue": "切り返しで{lead}足を踏み込み、{lead}足の上で回って打つ。",
+        "cue_why": "体重が{lead}足に移れば、クラブの一番低い所がボールの先へ動き、手前を打たなくなります。",
+        "drills": ["towel", "step_through"]
+      },
+      "check": "本番の十球のうち八球で、タオルに触らずに打てる。別の日にもう一回できたら合格です。",
+      "video_view": "fo",
+      "evidence_claims": ["miss.budget", "next.now"]
+    },
+    {
+      "id": "shallow_attack",
+      "from": "ball",
+      "title": "アイアンで上からとらえきれていない（すくい打ち気味）",
+      "plan_issues": [],
+      "video_symptoms": ["S7"],
+      "club_state": "アイアンなのに、当たる瞬間のクラブが上から下りてくる形になりきらず、横から払うか少し上がりながらボールに当たっています。ここまでは球のデータで確かな事実です。",
+      "impact": "球が上がりすぎたり、当たりが薄くなったりして、距離がそろいにくくなります。ボールの手前を打つミスも出やすくなります。",
+      "causes": [
+        {"id": "weight_back", "source": "guide", "explain": "体重が{trail}足に残ったまま振ると、クラブが上がりながら当たります。ガイドは、{trail}足体重のままを球が上がりやすい特徴に挙げています。"},
+        {"id": "early_release", "source": "guide", "explain": "手首の折れが早くほどけると、すくい上げる当たりになります。ガイドは、上から当てる動きが弱いすくい打ちを球が上がりやすい特徴に挙げています。"},
+        {"id": "early_ext", "source": "guide", "explain": "下ろしで上体が起きると、クラブが下りきる前に上がり始めます（ガイドの、体が起きる特徴）。"},
+        {"id": "ball_pos", "source": "guide", "explain": "ボールを前（{lead}側）に置きすぎると、クラブが一番低い所を過ぎて上がり始めてから当たります（ガイドのボールの置き場所）。"}
+      ],
+      "ideal": {
+        "text": "当たる瞬間、胸と骨盤は構えより少し{lead}側にあり、手元はクラブの先より少し前にあります。クラブは上から下りてきてボールをとらえ、一番低い所はボールより少し先です。",
+        "p": "P7",
+        "item_id": "err.sway.p7",
+        "figure": {"kind": "attack", "now": "level", "ideal": "down"}
+      },
+      "fix": {
+        "setup": [
+          "ボールの置き場所を番手に合わせる（真ん中のアイアンはスタンスの真ん中から少し{lead}側まで）",
+          "体重は左右同じくらいか少し{lead}足寄りにして構える"
+        ],
+        "cue": "手元を先に{lead}太ももの前まで運び、手首の折れはそこまで残して打つ。",
+        "cue_why": "手元が先に進めばクラブは上から下りてボールをとらえ、すくい上げる当たりが減ります。",
+        "drills": ["towel", "step_through"]
+      },
+      "check": "本番の十球のうち八球で、タオルに触らずに打てて、ボールの先の芝（マット）をこする。別の日にもう一回できたら合格です。",
+      "video_view": "fo",
+      "evidence_claims": []
+    },
+    {
+      "id": "height_low",
+      "from": "ball",
+      "title": "球が上がりにくい",
+      "plan_issues": [],
+      "video_symptoms": [],
+      "trigger": null,
+      "trigger_note": "判定の規則（何をもって上がりにくいとするか）を人が決めるまで出さない。",
+      "club_state": "当たる瞬間、クラブの面が立ちすぎた状態でボールに当たっています。",
+      "impact": "球が低く、グリーンで止まりにくくなります。",
+      "causes": [
+        {"id": "lunge", "source": "guide", "explain": "下ろしで上体が前や{lead}へ突っ込むと、手元が先に行きすぎ、面が立ちすぎて当たります（ガイドの、球が上がりにくい特徴）。"},
+        {"id": "steep", "source": "guide", "explain": "上から鋭く入りすぎると、押さえつける当たりになり球が上がりません（ガイドの、球が上がりにくい特徴）。"},
+        {"id": "tempo_fast", "source": "guide", "explain": "切り返しで勢いがつきすぎると、体が先に動きすぎて面が立ちます（ガイドの、球が上がりにくい特徴）。"}
+      ],
+      "ideal": {
+        "text": "当たる瞬間、手元はクラブの先より少し前ですが、行きすぎません。上体は突っ込まず、構えの傾きのまま回ります。",
+        "p": "P7",
+        "item_id": "iron.p7.fo.hands_ahead",
+        "figure": {"kind": "attack", "now": "steep", "ideal": "down"}
+      },
+      "fix": {
+        "setup": ["ボールの置き場所を番手に合わせる（後ろに置きすぎない）"],
+        "cue": "上体を突っ込ませず、頭をボールの後ろに残したまま胸を回す。",
+        "cue_why": "上体が突っ込まなければ手元が先に行きすぎず、面が立ちすぎずに当たります。",
+        "drills": ["metronome"]
+      },
+      "check": "本番の十球のうち八球で、いつもの高さの球が出る。別の日にもう一回できたら合格です。",
+      "video_view": "fo",
+      "evidence_claims": []
+    }
+  ],
+  "causes": [
+    {
+      "id": "early_ext",
+      "title": "切り返しから当たる瞬間にかけて、腰がボールの方へ出て上体が起きる",
+      "issue_title": "下ろしで腰が前に出て、上体が起きる",
+      "items": [{"id": "err.early_ext.dtl", "faults": ["ext"]}, {"id": "err.early_ext.fo", "faults": ["ext"]}],
+      "checkpoint": {"p": "P6", "item_id": "err.early_ext.dtl", "view": "dtl"},
+      "guide": {"pages": ["71-86"], "section": "05 よくあるミス（アーリーエクステンション）"},
+      "impact": "体とボールの距離が縮み、腕とクラブの通り道が詰まります。手元が浮いたり、ネック寄りに当たったり、面が開いたりしやすく、飛ぶ力も逃げます。",
+      "ideal": {"text": "切り返しから当たる瞬間まで、お尻の位置は構えたときの線から前に出さず、股関節から前に倒した上体の傾きを保ったまま体を回します。当たる瞬間も、{lead}側のお尻は構えの線の上か少し後ろにあります。", "p": "P6", "item_id": "err.early_ext.dtl"},
+      "fix": {
+        "setup": ["股関節から上体を前に倒し、お尻を少し後ろに引いて構える（背中は丸めない）", "体重は足の裏の真ん中に乗せ、つま先寄りにしない"],
+        "cue": "{lead}側のお尻を後ろの線に残したまま、胸を回して振る。",
+        "cue_why": "お尻が前に出なければ体とボールの距離が変わらず、クラブが構えた場所へ戻ってくるからです。",
+        "drills": ["chair", "stick_b"]
+      },
+      "check": "後ろから撮った動画で、クラブが水平（下ろし）の形のときに腰の曲がり具合が範囲の中。十回のうち八回でできたら合格です。"
+    },
+    {
+      "id": "setup_close",
+      "title": "構えでボールとの距離が近すぎる（手元が体に寄りすぎる）",
+      "issue_title": "構えでボールとの距離が近すぎる",
+      "items": [{"id": "iron.p1.dtl.hands", "faults": ["in"]}],
+      "checkpoint": {"p": "P1", "item_id": "iron.p1.dtl.hands", "view": "dtl"},
+      "guide": {"pages": ["38-52"], "section": "04 チェックポイント（アイアン・構え）"},
+      "impact": "振ったときに腕が伸びる分だけクラブの付け根がボールへ出て、ネック寄りに当たりやすくなります。",
+      "ideal": {"text": "構えたとき、両手の中心が足の親指の付け根からつま先の真下あたりに来ています。グリップの端はおへそから太ももの付け根のあたりを指しています。", "p": "P1", "item_id": "iron.p1.dtl.hands"},
+      "fix": {
+        "setup": ["両手の中心が、足の親指の付け根からつま先の真下に来るように立つ", "クラブを先に地面に置いてから足の位置を決める（毎回同じ手順で）"],
+        "cue": "構えた手元の位置を変えずに、そこへ戻すつもりで振る。",
+        "cue_why": "構えの手元の位置が決まっていれば、当たる瞬間に戻る場所もそろうからです。",
+        "drills": ["routine", "far_ball"]
+      },
+      "check": "後ろから撮った動画で、構えの手の位置が範囲の中。十回のうち八回でそろえば合格です。"
+    },
+    {
+      "id": "setup_far",
+      "title": "構えでボールから遠く立ちすぎる",
+      "issue_title": "構えでボールから遠く立ちすぎる",
+      "items": [{"id": "iron.p1.dtl.hands", "faults": ["out"]}],
+      "checkpoint": {"p": "P1", "item_id": "iron.p1.dtl.hands", "view": "dtl"},
+      "guide": {"pages": ["38-52"], "section": "04 チェックポイント（アイアン・構え）"},
+      "impact": "腕を伸ばしきっても芯が届かず、先寄りに当たりやすくなります。前へ倒れ込む構えになり、体重がつま先に寄ります。",
+      "ideal": {"text": "構えたとき、両手の中心が足の親指の付け根からつま先の真下あたりに来て、腕は肩から自然に垂れています。", "p": "P1", "item_id": "iron.p1.dtl.hands"},
+      "fix": {
+        "setup": ["腕を肩から自然に垂らし、その手の位置にクラブを合わせてから足を決める", "両手の中心が、足の親指の付け根からつま先の真下に来るように立つ"],
+        "cue": "腕を自然に垂らした位置のまま、力まずに振る。",
+        "cue_why": "腕を伸ばして届かせようとしなければ、当たる瞬間に芯がボールに戻るからです。",
+        "drills": ["routine", "near_ball"]
+      },
+      "check": "後ろから撮った動画で、構えの手の位置が範囲の中。十回のうち八回でそろえば合格です。"
+    },
+    {
+      "id": "setup_varies",
+      "title": "構えのボールとの距離や置き場所が毎回違う",
+      "issue_title": "構えのボールとの距離が毎回違う",
+      "items": [{"id": "iron.p1.dtl.hands", "faults": ["in", "out"]}],
+      "checkpoint": {"p": "P1", "item_id": "iron.p1.dtl.hands", "view": "dtl"},
+      "guide": {"pages": ["7-19", "102-118"], "section": "02 基礎（構え）・07 正確性と一貫性（打つ前の手順）"},
+      "impact": "同じように振っても、当たる場所と面の向きが毎回変わります。",
+      "ideal": {"text": "毎回同じ手順で構え、両手の中心が足の親指の付け根からつま先の真下に来ています。", "p": "P1", "item_id": "iron.p1.dtl.hands"},
+      "fix": {
+        "setup": ["打つ前の手順を決めて毎回同じにする（後ろから目標を見る → クラブを置く → 足を決める → 握りを確かめる）"],
+        "cue": "毎回同じ手順で構えてから、同じリズムで振る。",
+        "cue_why": "構えがそろえば、振った結果の違いが動きの違いだけになり、直すところがはっきりするからです。",
+        "drills": ["routine"]
+      },
+      "check": "後ろから撮った動画で、構えの手の位置が十回のうち八回で範囲の中にそろえば合格です。"
+    },
+    {
+      "id": "hands_out",
+      "title": "下ろしで手元が体から離れる・当たる瞬間に手元が浮く",
+      "issue_title": "当たる瞬間に手元が体から離れる",
+      "items": [{"id": "iron.p7.dtl.hands", "faults": ["out"]}, {"id": "iron.p7.dtl.hand_height", "faults": ["up"]}],
+      "checkpoint": {"p": "P7", "item_id": "iron.p7.dtl.hands", "view": "dtl"},
+      "guide": {"pages": ["38-52"], "section": "04 チェックポイント（アイアン・当たる瞬間と、そのコツ）"},
+      "impact": "クラブ全体が体から遠い側へずれ、ネック寄りに当たります。面も開きやすくなります。",
+      "ideal": {"text": "当たる瞬間、両手の中心は構えたときとほぼ同じ場所（足の親指の付け根からつま先の少し外まで）に戻り、手の高さも構えより浮いていません。", "p": "P7", "item_id": "iron.p7.dtl.hands"},
+      "fix": {
+        "setup": ["両手の中心が、足の親指の付け根からつま先の真下に来るように立つ"],
+        "cue": "当たる瞬間、手元を構えたときの場所（体の近く）へ低く戻す。",
+        "cue_why": "手元が構えの場所へ戻れば、クラブも構えた位置を通り、芯がボールに戻るからです。",
+        "drills": ["stick_b", "towel_arms"]
+      },
+      "check": "後ろから撮った動画で、当たる瞬間の手の位置が範囲の中。十回のうち八回でできたら合格です。"
+    },
+    {
+      "id": "hands_in",
+      "title": "当たる瞬間に手元が体に引きつけられる（腕が縮む）",
+      "issue_title": "当たる瞬間に手元が体に引きつけられる",
+      "items": [{"id": "iron.p7.dtl.hands", "faults": ["in"]}],
+      "checkpoint": {"p": "P7", "item_id": "iron.p7.dtl.hands", "view": "dtl"},
+      "guide": {"pages": ["38-52"], "section": "04 チェックポイント（アイアン・当たる瞬間）"},
+      "impact": "クラブが体の近くを通り、先寄りに当たります。当たりが弱くなり距離も落ちます。",
+      "ideal": {"text": "当たる瞬間、両手の中心は構えたときとほぼ同じ場所に戻り、腕は構えたときの長さを保っています。", "p": "P7", "item_id": "iron.p7.dtl.hands"},
+      "fix": {
+        "setup": ["腕を肩から自然に垂らして構える"],
+        "cue": "当たる瞬間、腕を縮めずに、構えたときの腕の長さのまま振り抜く。",
+        "cue_why": "腕の長さが変わらなければ、芯がボールに届くからです。",
+        "drills": ["near_ball", "wrist_ball"]
+      },
+      "check": "後ろから撮った動画で、当たる瞬間の手の位置が範囲の中。十回のうち八回でできたら合格です。"
+    },
+    {
+      "id": "face_open_wrist",
+      "title": "トップから下ろしで{lead}手首が甲側に折れ、面が開いたまま下りる",
+      "issue_title": "トップで{lead}手首が甲側に折れ、面が開く",
+      "items": [{"id": "iron.p4.dtl.shaft_vs_forearm", "faults": ["off"]}],
+      "checkpoint": {"p": "P4", "item_id": "iron.p4.dtl.shaft_vs_forearm", "view": "dtl"},
+      "guide": {"pages": ["38-52", "102-118"], "section": "04 チェックポイント（アイアン・トップ）・07 面の管理"},
+      "impact": "面が開いたまま当たり、{dir:right}へ出て{dir:right}へ曲がる球が出やすくなります。",
+      "ideal": {"text": "トップでは{lead}手首が甲側に折れず、クラブが{lead}前腕の延長の近くにあります。下ろしでは{lead}手首を手のひら側へ少し折りながら体を回し、当たる瞬間に面が狙いの方向を向きます。", "p": "P4", "item_id": "iron.p4.dtl.shaft_vs_forearm"},
+      "fix": {
+        "setup": ["{lead}手を先に握り、握りの形を毎回同じにする"],
+        "cue": "下ろしで{lead}手首を手のひら側へ少し折りながら、{lead}手の甲を目標へ向けて振り抜く。",
+        "cue_why": "手首を手のひら側へ折ると面は閉じる向きに回るので、開いたまま当たるのを防げます。手首をねじって返すより、面の開き閉じが小さく済みます。",
+        "drills": ["stick_a", "half_face_up", "wrist_ball"]
+      },
+      "check": "後ろから撮った動画で、トップのクラブと{lead}腕の並びが範囲の中。十回のうち八回でできたら合格です。"
+    },
+    {
+      "id": "grip_weak",
+      "title": "{lead}手の握りが浅く、面が開いたまま戻りやすい",
+      "issue_title": "握りの形で面が開きやすい",
+      "items": [{"id": "setup.grip", "faults": ["off"]}],
+      "checkpoint": {"p": "P1", "item_id": "setup.grip", "view": "fo"},
+      "guide": {"pages": ["7-19"], "section": "02 基礎（握り）"},
+      "impact": "当たる瞬間の面が開きやすく、{dir:right}へ出る球が増えます。",
+      "ideal": {"text": "握りの形と強さを毎回同じにし、構えたときに面が狙いの方向を向く握り方にそろえます（どの握りが良いかはガイドが決めていないので、毎回同じであることを優先します）。", "p": "P1", "item_id": "setup.grip"},
+      "fix": {
+        "setup": ["{lead}手を先に握り、上から見て指の付け根の山がいくつ見えるかを決めて、毎回同じにする", "握りを変えるときはコーチに見てもらう（変え方しだいで逆の向きにずれることがある）"],
+        "cue": "構えで握りの形を確かめてから、いつも通り振る。",
+        "cue_why": "握りが毎回同じなら、当たる瞬間の面の向きもそろいやすいからです。",
+        "drills": ["grip_check"]
+      },
+      "check": "打つ前に毎回握りを確かめ、十球のうち八球が狙いの方向に打ち出されたら合格です。"
+    },
+    {
+      "id": "grip_strong",
+      "title": "{lead}手の握りが深く、面が閉じやすい",
+      "issue_title": "握りの形で面が閉じやすい",
+      "items": [{"id": "setup.grip", "faults": ["off"]}],
+      "checkpoint": {"p": "P1", "item_id": "setup.grip", "view": "fo"},
+      "guide": {"pages": ["7-19"], "section": "02 基礎（握り）"},
+      "impact": "当たる瞬間の面が閉じやすく、{dir:left}へ出る球が増えます。",
+      "ideal": {"text": "握りの形と強さを毎回同じにし、構えたときに面が狙いの方向を向く握り方にそろえます。", "p": "P1", "item_id": "setup.grip"},
+      "fix": {
+        "setup": ["{lead}手を先に握り、上から見て指の付け根の山がいくつ見えるかを決めて、毎回同じにする", "握りを変えるときはコーチに見てもらう"],
+        "cue": "構えで握りの形を確かめてから、いつも通り振る。",
+        "cue_why": "握りが毎回同じなら、当たる瞬間の面の向きもそろいやすいからです。",
+        "drills": ["grip_check"]
+      },
+      "check": "打つ前に毎回握りを確かめ、十球のうち八球が狙いの方向に打ち出されたら合格です。"
+    },
+    {
+      "id": "grip_varies",
+      "title": "握る位置・手の向き・強さが毎回違う",
+      "issue_title": "握りが毎回違う",
+      "items": [{"id": "setup.grip", "faults": ["off"]}, {"id": "setup.grip_pressure", "faults": ["off"]}],
+      "checkpoint": {"p": "P1", "item_id": "setup.grip", "view": "fo"},
+      "guide": {"pages": ["7-19"], "section": "02 基礎（握りの四つの要点）"},
+      "impact": "当たる瞬間の面の向きが毎回変わり、打ち出す向きがそろいません。",
+      "ideal": {"text": "握る位置・手の向き・強さを決め、毎回同じに握ります。強すぎると手首が固まり、弱すぎると当たる瞬間にぶれます。", "p": "P1", "item_id": "setup.grip"},
+      "fix": {
+        "setup": ["握りの形と強さを決め、打つ前に毎回同じか確かめる"],
+        "cue": "握りを確かめてから構え、振っている間は握る強さを変えない。",
+        "cue_why": "握りと強さが変わらなければ、面の向きがそろいやすいからです。",
+        "drills": ["grip_check", "routine"]
+      },
+      "check": "打つ前に毎回握りを確かめ、十球のうち八球が狙いの方向に打ち出されたら合格です。"
+    },
+    {
+      "id": "body_open_early",
+      "title": "下ろしで腰と胸が早く開き、腕とクラブが遅れる",
+      "issue_title": "下ろしで腰が早く開く",
+      "items": [{"id": "err.early_rot.p5", "faults": ["early"]}, {"id": "err.early_rot.p6", "faults": ["early"]}, {"id": "err.early_rot.p7", "faults": ["early"]}, {"id": "iron.p6.dtl.hips", "faults": ["early"]}, {"id": "iron.p5.dtl.lead_knee", "faults": ["hidden"]}, {"id": "tip.halfway.arms_drop", "faults": ["open"]}],
+      "checkpoint": {"p": "P6", "item_id": "err.early_rot.p6", "view": "dtl"},
+      "guide": {"pages": ["71-86", "133-145"], "section": "05 よくあるミス（アーリーローテーション）・09 {dir:right}へ曲がる球の特徴"},
+      "impact": "腕とクラブが体の回転に遅れ、面が開いたまま当たったり、外から入ったりします。",
+      "ideal": {"text": "切り返しで腰は少しずつ回り始めますが、一気には開きません。クラブが水平（下ろし）のとき、後ろから見て{lead}足が{trail}足に隠れているくらいが目安です。腕が水平（下ろし）のときは、{lead}膝がまだ{trail}膝の向こうに見えています。", "p": "P6", "item_id": "err.early_rot.p6"},
+      "fix": {
+        "setup": ["足・腰・肩の線を目標と平行にそろえる"],
+        "cue": "切り返しは腕を下ろすのが先。腰は少しずつ回す。",
+        "cue_why": "腰と胸が一気に開かなければ、腕とクラブが遅れず、面が開いたまま当たるのを防げるからです。",
+        "drills": ["pump", "stick_b"]
+      },
+      "check": "後ろから撮った動画で、クラブが水平（下ろし）の形のときに{lead}足が{trail}足に隠れている。十回のうち八回でできたら合格です。"
+    },
+    {
+      "id": "body_stall",
+      "title": "下ろしで体の回転が止まり、腕だけが先に振られる",
+      "issue_title": "下ろしで体の回転が止まる",
+      "items": [],
+      "checkpoint": null,
+      "guide": {"pages": ["133-145"], "section": "09 {dir:left}へ曲がる球の特徴"},
+      "impact": "腕だけが先に振られて面が返りすぎたり、内側から外へ振り出されたりします。",
+      "ideal": {"text": "下ろしでは体の回転と腕の振りが一緒に進み、当たる瞬間には腰が少し開き、胸も目標へ向き始めています。振り抜きまで回転を止めません。", "p": "P7", "item_id": null},
+      "fix": {
+        "setup": ["足・腰・肩の線を目標と平行にそろえる"],
+        "cue": "下ろしで胸を目標へ回し続け、フィニッシュまで止めない。",
+        "cue_why": "体の回転が止まらなければ、腕だけが先に振られることがないからです。",
+        "drills": ["step_through", "half_face_up"]
+      },
+      "check": "正面から撮った動画で、振り抜きの胸が目標を向いている。十回のうち八回でできたら合格です。"
+    },
+    {
+      "id": "weight_back",
+      "title": "下ろしで体重が{lead}足に乗りきらず、{trail}足に残る",
+      "issue_title": "当たる瞬間に体が{trail}に残る",
+      "items": [{"id": "err.sway.p7", "faults": ["trail"]}, {"id": "err.sway.p5", "faults": ["trail"]}, {"id": "pow.finish_weight", "faults": ["back"]}],
+      "checkpoint": {"p": "P7", "item_id": "err.sway.p7", "view": "fo"},
+      "guide": {"pages": ["87-101", "133-145"], "section": "06 体重の移り方・09 球筋の特徴"},
+      "impact": "クラブの一番低い所がボールの手前に来て、すくい上げる当たりや手前を打つ当たりになります。面も開きやすくなります。",
+      "ideal": {"text": "当たる瞬間、胸と骨盤は構えた位置より少し{lead}側に動いていて、体重の多くが{lead}足に乗っています。フィニッシュでは{trail}足はつま先だけが地面についています。", "p": "P7", "item_id": "err.sway.p7"},
+      "fix": {
+        "setup": ["体重は左右同じくらいか少し{lead}足寄りにして構える"],
+        "cue": "切り返しで{lead}足を踏み込み、{lead}足の上で回る。",
+        "cue_why": "体重が{lead}足に移れば、クラブの一番低い所がボールの先へ動くからです。",
+        "drills": ["step_through", "towel"]
+      },
+      "check": "正面から撮った動画で、当たる瞬間の胸と骨盤の位置が範囲の中。十回のうち八回でできたら合格です。"
+    },
+    {
+      "id": "lunge",
+      "title": "下ろしで上体が前や{lead}へ突っ込む",
+      "issue_title": "下ろしで上体が{lead}へ突っ込む",
+      "items": [{"id": "err.sway.p7", "faults": ["lead"]}, {"id": "err.sway.p5", "faults": ["lead"]}],
+      "checkpoint": {"p": "P7", "item_id": "err.sway.p7", "view": "fo"},
+      "guide": {"pages": ["71-86", "133-145"], "section": "05 よくあるミス（横ずれ）・09 球が上がりにくい特徴"},
+      "impact": "手元が先に行きすぎて面が立ち、球が上がりにくくなります。当たる場所もずれやすくなります。",
+      "ideal": {"text": "当たる瞬間、胸は構えの線より少し{lead}側にありますが、行きすぎません。頭はボールの後ろに残っています。", "p": "P7", "item_id": "err.sway.p7"},
+      "fix": {
+        "setup": ["頭をボールの少し後ろに置いて構える"],
+        "cue": "頭をボールの後ろに残したまま、胸を回して打つ。",
+        "cue_why": "上体が突っ込まなければ、手元が先に行きすぎないからです。",
+        "drills": ["feet_together"]
+      },
+      "check": "正面から撮った動画で、当たる瞬間の胸と骨盤の位置が範囲の中。十回のうち八回でできたら合格です。"
+    },
+    {
+      "id": "sway_back",
+      "title": "上げで体が{trail}へ横に流れる",
+      "issue_title": "上げで体が{trail}へ流れる",
+      "items": [{"id": "err.sway.p4", "faults": ["trail"]}],
+      "checkpoint": {"p": "P4", "item_id": "err.sway.p4", "view": "fo"},
+      "guide": {"pages": ["71-86", "119-127"], "section": "05 よくあるミス（横ずれ）・08 練習器具のドリル"},
+      "impact": "戻ってくる場所が毎回ずれ、当たる場所や手前を打つ当たりにつながります。",
+      "ideal": {"text": "上げでは胸と骨盤が大きく横へ流れず、{trail}足の内側で体を支えたままトップを迎えます。", "p": "P4", "item_id": "err.sway.p4"},
+      "fix": {
+        "setup": ["{trail}足の内側に体重を感じて構える"],
+        "cue": "上げで{trail}足の内側で踏ん張り、体を横へ流さずに回す。",
+        "cue_why": "体が横へ流れなければ、戻ってくる場所がそろうからです。",
+        "drills": ["step"]
+      },
+      "check": "正面から撮った動画で、トップの骨盤の位置が範囲の中。十回のうち八回でできたら合格です。"
+    },
+    {
+      "id": "steep",
+      "title": "下ろしでクラブが立ちすぎて、上から鋭く下りる",
+      "issue_title": "下ろしでクラブが立ちすぎる",
+      "items": [{"id": "err.steep.p5", "faults": ["steep"]}, {"id": "err.steep.p5_5", "faults": ["steep"]}, {"id": "err.steep.p6", "faults": ["steep"]}, {"id": "err.steep.p6_5", "faults": ["steep"]}, {"id": "iron.p5.dtl.shaft", "faults": ["steep"]}, {"id": "iron.p3.dtl.shaft", "faults": ["steep"]}, {"id": "iron.p6.dtl.head_vs_hands", "faults": ["outside"]}, {"id": "tip.driver.shaft_on_arm", "faults": ["steep"]}],
+      "checkpoint": {"p": "P5", "item_id": "err.steep.p5", "view": "dtl"},
+      "guide": {"pages": ["20-31", "70", "71-86", "133-145"], "section": "03 スイング理論・04 使用例・05 よくあるミス（スティープ）・09 球筋の特徴"},
+      "impact": "クラブが外から鋭く入り、振る方向が{dir:left}へ向きます。{dir:right}へ大きく曲がる球や、上から押さえつける当たりが出やすくなります。",
+      "ideal": {"text": "トップから下ろしでは、クラブを少し寝かせる向きに保ちながら腕を下ろし、手は体の内側の低い所を通ります（上げより低い輪を描く）。腕が水平（下ろし）のとき、クラブは立ちすぎず寝すぎない中間にあります。", "p": "P5", "item_id": "err.steep.p5"},
+      "fix": {
+        "setup": ["足・腰・肩の線を目標と平行にそろえる"],
+        "cue": "切り返しで、手元を{trail}の腰の前へ真下に下ろしてから体を回す。",
+        "cue_why": "手元が高い所から直接ボールへ向かわなければ、クラブが外から鋭く下りることがないからです。",
+        "drills": ["pump", "cover_out", "stick_c"]
+      },
+      "check": "後ろから撮った動画で、腕が水平（下ろし）のときのクラブの傾きが範囲の中。十回のうち八回でできたら合格です。"
+    },
+    {
+      "id": "shallow",
+      "title": "下ろしでクラブが寝すぎて、手元が低く内側から入る",
+      "issue_title": "下ろしでクラブが寝すぎる",
+      "items": [{"id": "iron.p5.dtl.shaft", "faults": ["shallow"]}, {"id": "iron.p3.dtl.shaft", "faults": ["shallow"]}, {"id": "path.loop", "faults": ["under"]}, {"id": "iron.p6.dtl.head_vs_hands", "faults": ["inside"]}, {"id": "path.p6_arm_plane", "faults": ["inside"]}, {"id": "tip.driver.shaft_on_arm", "faults": ["flat"]}],
+      "checkpoint": {"p": "P5", "item_id": "iron.p5.dtl.shaft", "view": "dtl"},
+      "guide": {"pages": ["20-31", "70", "133-145"], "section": "03 スイング理論・04 使用例・09 球筋の特徴"},
+      "impact": "クラブが内側から入り、振る方向が{dir:right}へ向きます。面の管理が難しくなり、{dir:left}へ大きく曲がる球や手前を打つ当たりが出やすくなります。",
+      "ideal": {"text": "腕が水平（下ろし）のあたりから、手でクラブを支えて少し立てるようにし、クラブの先が手の周りから大きく内側へ外れないようにします。手元は上げより少し低い所を通りますが、極端に低くは下りません。", "p": "P5", "item_id": "iron.p5.dtl.shaft"},
+      "fix": {
+        "setup": ["ボールの置き場所を番手に合わせる（後ろに置きすぎない）"],
+        "cue": "下ろしで、クラブの先を手元より外に保つつもりで、手元を体の前へ運ぶ。",
+        "cue_why": "クラブの先が内側へ落ちなければ、寝すぎずに振る方向が狙いへ戻るからです。",
+        "drills": ["cover_in", "stick_c"]
+      },
+      "check": "後ろから撮った動画で、腕が水平（下ろし）のときのクラブの傾きが範囲の中。十回のうち八回でできたら合格です。"
+    },
+    {
+      "id": "path_over",
+      "title": "切り返しで手元が高い所からそのままボールへ下りる",
+      "issue_title": "切り返しで手元が外から下りる",
+      "items": [{"id": "path.loop", "faults": ["over"]}, {"id": "path.p4_p5_shaft_kept", "faults": ["changed"]}],
+      "checkpoint": {"p": "P5", "item_id": "path.loop", "view": "dtl"},
+      "guide": {"pages": ["20-31"], "section": "03 スイング理論（手の通り道）"},
+      "impact": "クラブが外から入り、振る方向が{dir:left}へ向きます。",
+      "ideal": {"text": "下ろしの手の通り道は、上げの通り道より少し低い所を通ります（後ろから見て、上げより低い輪を描く）。まず手の通り道を整え、次にクラブの傾きを整えるのがガイドの順番です。", "p": "P5", "item_id": "path.loop"},
+      "fix": {
+        "setup": ["足・腰・肩の線を目標と平行にそろえる"],
+        "cue": "切り返しで、手元を{trail}の腰の前へ真下に下ろしてから体を回す。",
+        "cue_why": "手元が上げより低い所を通れば、クラブが外から入らないからです。",
+        "drills": ["pump", "cover_out"]
+      },
+      "check": "後ろから撮った動画で、手の通り道の輪が範囲の中。十回のうち八回でできたら合格です。"
+    },
+    {
+      "id": "p2_inside",
+      "title": "上げ始めで{lead}手のひらが早く地面を向き、クラブの先が内側へ回る",
+      "issue_title": "上げ始めでクラブが内側に引かれる",
+      "items": [{"id": "iron.p2.dtl.head_vs_hands", "faults": ["inside"]}, {"id": "driver.p2.dtl.head_vs_hands", "faults": ["inside"]}],
+      "checkpoint": {"p": "P2", "item_id": "iron.p2.dtl.head_vs_hands", "view": "dtl"},
+      "guide": {"pages": ["158-183"], "section": "11 スタートガイド（ケーススタディ・上げ始めのクラブの先）"},
+      "impact": "上げ始めのずれは、そのあとのトップ・下ろし・当たる瞬間の全部に響きます（ガイドのドミノの考え方）。クラブが内側から入りやすく、振る方向と面の向きがばらつきます。",
+      "ideal": {"text": "上げ始めでクラブが地面と平行になったとき、クラブの先が手と重なっています（手の周りボール一個ぶんの内）。{lead}手首は平らなまま、手のひらを返しません。", "p": "P2", "item_id": "iron.p2.dtl.head_vs_hands"},
+      "fix": {
+        "setup": ["構えで{lead}手首の形を決め、上げ始めまでその形を変えない"],
+        "cue": "上げ始めは{lead}手のひらを返さず、手首を親指側へ少し折ってクラブの先を上げる。",
+        "cue_why": "手のひらを返す動きがクラブの先を内側へ回す原因なので、返さずに親指側へ折ると、先が手と重なったまま上がるからです（ガイドのケーススタディ）。",
+        "drills": ["case_p2_in", "stick_c"]
+      },
+      "check": "後ろから撮った動画で、クラブが水平（上げ）のときに先が手と重なる。十回のうち八回でできたら合格です（ガイドの十球テスト）。"
+    },
+    {
+      "id": "p2_outside",
+      "title": "上げ始めで{lead}手のひらが空を向くように開き、クラブの先が外へ上がる",
+      "issue_title": "上げ始めでクラブが外に上がる",
+      "items": [{"id": "iron.p2.dtl.head_vs_hands", "faults": ["outside"]}, {"id": "driver.p2.dtl.head_vs_hands", "faults": ["outside"]}],
+      "checkpoint": {"p": "P2", "item_id": "iron.p2.dtl.head_vs_hands", "view": "dtl"},
+      "guide": {"pages": ["158-183"], "section": "11 スタートガイド（ケーススタディ・上げ始めのクラブの先）"},
+      "impact": "上げ始めのずれは、そのあとの全部に響きます（ガイドのドミノの考え方）。クラブが外から入りやすく、振る方向が{dir:left}へ向きやすくなります。",
+      "ideal": {"text": "上げ始めでクラブが地面と平行になったとき、クラブの先が手と重なっています（手の周りボール一個ぶんの内）。{lead}手のひらの向きは構えのままです。", "p": "P2", "item_id": "iron.p2.dtl.head_vs_hands"},
+      "fix": {
+        "setup": ["構えで{lead}手首の形を決め、上げ始めまでその形を変えない"],
+        "cue": "上げ始めは{lead}手のひらの向きを構えのまま保ち、手首を折る量を足さない。",
+        "cue_why": "手のひらを開く動きがクラブの先を外へ上げる原因なので、向きを保つと先が手と重なるからです（ガイドのケーススタディ）。",
+        "drills": ["case_p2_out", "stick_c"]
+      },
+      "check": "後ろから撮った動画で、クラブが水平（上げ）のときに先が手と重なる。十回のうち八回でできたら合格です（ガイドの十球テスト）。"
+    },
+    {
+      "id": "early_release",
+      "title": "下ろしで手首の折れが早くほどけ、クラブの先が手元を追い越す",
+      "issue_title": "下ろしで手首の折れが早くほどける",
+      "items": [{"id": "err.early_release.p6", "faults": ["early"]}, {"id": "err.early_release.p6_5", "faults": ["early"]}, {"id": "iron.p5.fo.cock", "faults": ["early"]}],
+      "checkpoint": {"p": "P6", "item_id": "err.early_release.p6", "view": "fo"},
+      "guide": {"pages": ["71-86", "133-145"], "section": "05 よくあるミス（アーリーリリース）・09 球筋の特徴"},
+      "impact": "クラブの一番低い所がボールの手前に来て、すくい上げる当たりや手前を打つ当たりになります。面も閉じやすく、飛ぶ力も逃げます。",
+      "ideal": {"text": "クラブが水平（下ろし）のとき、正面から見てグリップの端が{lead}脚の内に収まり、手首の折れが残っています。当たる瞬間、手元はクラブの先より少し前にあります。", "p": "P6", "item_id": "err.early_release.p6"},
+      "fix": {
+        "setup": ["ボールの置き場所を番手に合わせる"],
+        "cue": "手元を先に{lead}太ももの前まで運び、手首の折れはそこまで残す。",
+        "cue_why": "手元が先に進むまで折れが残っていれば、クラブが上から下りてボールをとらえるからです。",
+        "drills": ["towel", "wrist_ball"]
+      },
+      "check": "正面から撮った動画で、クラブが水平（下ろし）のときにグリップの端が{lead}脚の内に収まる。十回のうち八回でできたら合格です。"
+    },
+    {
+      "id": "wrist_roll",
+      "title": "手首をねじる動きで面を返している",
+      "issue_title": "手首をねじって面を返している",
+      "items": [{"id": "acc.wrist_face_turn", "faults": ["roll"]}],
+      "checkpoint": null,
+      "guide": {"pages": ["102-118"], "section": "07 面の管理"},
+      "impact": "面を返す量が毎回変わり、打ち出す向きがそろいません。",
+      "ideal": {"text": "面は、手首を手のひら側・甲側に折る動きで管理し、ねじる動きは主にしません。体の回転で面を目標へ運びます。", "p": "P7", "item_id": null},
+      "fix": {
+        "setup": ["握る強さを強くしすぎない（手首が固まらない強さ）"],
+        "cue": "腰から腰の振り幅で、手首をねじらずに体の回転で面を運ぶ。",
+        "cue_why": "ねじる動きを減らすと、面を返す量が毎回そろうからです。",
+        "drills": ["wrist_ball", "half_face_up"]
+      },
+      "check": "十球のうち八球が狙いの方向に打ち出されたら合格です。"
+    },
+    {
+      "id": "tempo_fast",
+      "title": "切り返しが急で、下ろしが速すぎる",
+      "issue_title": "切り返しが急ぎすぎる",
+      "items": [],
+      "checkpoint": null,
+      "guide": {"pages": ["102-118", "133-145"], "section": "07 リズムとテンポ・09 球筋の特徴"},
+      "impact": "体と腕の動く順番が毎回ずれ、当たる場所と面の向きがそろいません。",
+      "ideal": {"text": "上げはゆったり、下ろしは上げのおよそ三分の一の時間で振ります（アイアンの目安）。切り返しで急がず、トップで一瞬の間があります。", "p": null, "item_id": null},
+      "fix": {
+        "setup": ["打つ前に一回、同じリズムで素振りをする"],
+        "cue": "上げで「いち、に、さん」、下ろしで「し」のリズムで振る。",
+        "cue_why": "リズムが決まると、体と腕の順番がそろい、クラブの戻る場所がそろうからです。",
+        "drills": ["metronome", "feet_together"]
+      },
+      "check": "十球のうち八球を同じリズムで振れて、当たる場所がまとまったら合格です。"
+    },
+    {
+      "id": "ball_pos",
+      "title": "ボールの置き場所が番手の基準からずれている",
+      "issue_title": "ボールの置き場所がずれている",
+      "items": [{"id": "setup.ball_pos.mid_iron", "faults": ["back", "forward"]}, {"id": "setup.ball_pos.short_iron", "faults": ["back", "forward"]}, {"id": "setup.ball_pos.long_iron", "faults": ["back", "forward"]}, {"id": "setup.ball_pos.wedge", "faults": ["back", "forward"]}, {"id": "setup.ball_pos.wood", "faults": ["back", "forward"]}, {"id": "setup.ball_pos.driver", "faults": ["back", "forward"]}],
+      "checkpoint": {"p": "P1", "item_id": "setup.ball_pos.mid_iron", "view": "fo"},
+      "guide": {"pages": ["7-19"], "section": "02 基礎（ボールの置き場所）"},
+      "impact": "ボールが後ろすぎると内側から当たって{dir:right}へ出やすく、前すぎると外から当たったりすくったりしやすくなります。",
+      "ideal": {"text": "ボールは番手に合わせた場所に置きます。真ん中のアイアンはスタンスの真ん中からボール一個ぶん{lead}側まで、短いアイアンは真ん中から少し{trail}側まで、ドライバーは{lead}足の内側です。", "p": "P1", "item_id": "setup.ball_pos.mid_iron"},
+      "fix": {
+        "setup": ["スタンスの真ん中を示す棒を一本、目標線と直角に地面に置き、ボールの位置を毎回そろえる"],
+        "cue": "棒で決めた場所にボールを置いてから、いつも通り振る。",
+        "cue_why": "ボールの位置がそろえば、クラブが一番低い所を通る位置との関係がそろうからです。",
+        "drills": ["ball_line"]
+      },
+      "check": "正面から撮った動画で、ボールの置き場所が範囲の中。十回のうち八回でそろえば合格です。"
+    },
+    {
+      "id": "align_open",
+      "title": "構えで足・腰・肩が目標より{dir:left}を向く",
+      "issue_title": "構えの向きが{dir:left}を向く",
+      "items": [{"id": "setup.alignment_dir", "faults": ["open"]}, {"id": "setup.alignment", "faults": ["off"]}],
+      "checkpoint": {"p": "P1", "item_id": "setup.alignment_dir", "view": "dtl"},
+      "guide": {"pages": ["7-19"], "section": "02 基礎（向きと足の開き）"},
+      "impact": "向いた方向に沿って振るので外から入りやすく、{dir:right}へ曲がる球が出やすくなります（ガイドの傾向）。",
+      "ideal": {"text": "足・腰・肩の線が目標線と平行にそろっています。", "p": "P1", "item_id": "setup.alignment_dir"},
+      "fix": {
+        "setup": ["足元に棒を一本、目標線と平行に置き、つま先・膝・腰・肩の線をそろえる"],
+        "cue": "向きをそろえてから、いつも通り振る。",
+        "cue_why": "向きがそろえば、振る方向も狙いに向きやすいからです。",
+        "drills": ["align_sticks"]
+      },
+      "check": "後ろから撮った動画で、構えの向きがそろっている。十回のうち八回でそろえば合格です。"
+    },
+    {
+      "id": "align_closed",
+      "title": "構えで足・腰・肩が目標より{dir:right}を向く",
+      "issue_title": "構えの向きが{dir:right}を向く",
+      "items": [{"id": "setup.alignment_dir", "faults": ["closed"]}],
+      "checkpoint": {"p": "P1", "item_id": "setup.alignment_dir", "view": "dtl"},
+      "guide": {"pages": ["7-19"], "section": "02 基礎（向きと足の開き）"},
+      "impact": "向いた方向に沿って振るので内から入りやすく、{dir:left}へ曲がる球が出やすくなります（ガイドの傾向）。",
+      "ideal": {"text": "足・腰・肩の線が目標線と平行にそろっています。", "p": "P1", "item_id": "setup.alignment_dir"},
+      "fix": {
+        "setup": ["足元に棒を一本、目標線と平行に置き、つま先・膝・腰・肩の線をそろえる"],
+        "cue": "向きをそろえてから、いつも通り振る。",
+        "cue_why": "向きがそろえば、振る方向も狙いに向きやすいからです。",
+        "drills": ["align_sticks"]
+      },
+      "check": "後ろから撮った動画で、構えの向きがそろっている。十回のうち八回でそろえば合格です。"
+    },
+    {
+      "id": "gaze",
+      "title": "構えでボールの手前を見つめすぎる・頭が{trail}へ傾く",
+      "issue_title": "構えで頭が{trail}へ傾く",
+      "items": [{"id": "setup.gaze", "faults": ["tilt"]}],
+      "checkpoint": {"p": "P1", "item_id": "setup.gaze", "view": "dtl"},
+      "guide": {"pages": ["7-19"], "section": "02 基礎（目線と首の向き）"},
+      "impact": "当たる瞬間に体重が{trail}に残りやすく、手前を打ったり{trail}肩が下がったりします。",
+      "ideal": {"text": "顎を少し上げ、首が背骨と一直線になっています。頭は{trail}へ傾けず、ボール全体を見ています。", "p": "P1", "item_id": "setup.gaze"},
+      "fix": {
+        "setup": ["顎を少し上げ、首を背骨と一直線にして構える", "ボールの手前ではなくボール全体を見る"],
+        "cue": "構えの頭の向きのまま、胸を回して振る。",
+        "cue_why": "頭が傾かなければ、体重が{trail}に残りにくいからです。",
+        "drills": ["routine"]
+      },
+      "check": "後ろから撮った動画で、構えの頭と目線が範囲の中。十回のうち八回でそろえば合格です。"
+    },
+    {
+      "id": "trail_elbow",
+      "title": "トップで{trail}肘をたたみすぎる・開きすぎる",
+      "issue_title": "トップの{trail}肘の形が崩れる",
+      "items": [{"id": "iron.p4.fo.trail_elbow", "faults": ["folded", "open"]}, {"id": "err.trail_elbow.p4", "faults": ["off"]}, {"id": "pow.trail_elbow_front", "faults": ["side"]}],
+      "checkpoint": {"p": "P4", "item_id": "iron.p4.fo.trail_elbow", "view": "fo"},
+      "guide": {"pages": ["38-52", "71-86"], "section": "04 チェックポイント（トップ）・05 よくあるミス（{trail}肘）"},
+      "impact": "腕の輪が小さくなったり崩れたりして、クラブの通り道と面の向きがばらつき、飛ぶ力も落ちます。",
+      "ideal": {"text": "トップで{trail}肘は直角より深くたたまず（直角よりやや開いた形）、体の横ではなく正面に収まっています。", "p": "P4", "item_id": "iron.p4.fo.trail_elbow"},
+      "fix": {
+        "setup": ["腕の力を抜き、肩から自然に垂らして構える"],
+        "cue": "トップで{trail}肘を体の正面に向け、たたみすぎない。",
+        "cue_why": "肘の形が保たれれば、腕の輪が崩れずクラブの通り道がそろうからです。",
+        "drills": ["towel_arms", "wrist_ball"]
+      },
+      "check": "正面から撮った動画で、トップの{trail}肘が範囲の中。十回のうち八回でできたら合格です。"
+    },
+    {
+      "id": "lead_arm_bent",
+      "title": "上げで{lead}腕が曲がり、腕の輪が小さくなる",
+      "issue_title": "上げで{lead}腕が曲がる",
+      "items": [{"id": "iron.p3.fo.lead_arm", "faults": ["bent"]}, {"id": "iron.p4.fo.lead_arm", "faults": ["bent"]}, {"id": "pow.width", "faults": ["narrow"]}],
+      "checkpoint": {"p": "P4", "item_id": "iron.p4.fo.lead_arm", "view": "fo"},
+      "guide": {"pages": ["38-52", "87-101"], "section": "04 チェックポイント（腕の伸び）・06 パワーと飛距離"},
+      "impact": "腕の輪が小さくなって飛ぶ力が落ち、戻ってくる場所もずれやすくなります。",
+      "ideal": {"text": "上げでは{lead}腕を長く保ち、腕が水平（上げ）とトップで大きく曲げません。{trail}肘もたたみすぎず、大きな輪で上げます。", "p": "P4", "item_id": "iron.p4.fo.lead_arm"},
+      "fix": {
+        "setup": ["腕の力を抜き、{lead}腕を自然に伸ばして構える"],
+        "cue": "上げで{lead}腕を長く保ち、胸を回して大きな輪で上げる。",
+        "cue_why": "腕の輪が大きいまま上がれば、飛ぶ力が出て、戻る場所もそろうからです。",
+        "drills": ["half_swing"]
+      },
+      "check": "正面から撮った動画で、トップの{lead}腕の伸びが範囲の中。十回のうち八回でできたら合格です。"
+    },
+    {
+      "id": "takeaway_hands",
+      "title": "手だけで上げ始める（体と一緒に動かない）",
+      "issue_title": "手だけで上げ始める",
+      "items": [{"id": "tip.takeaway.one_piece", "faults": ["hands"]}],
+      "checkpoint": {"p": "P2", "item_id": "tip.takeaway.one_piece", "view": "dtl"},
+      "guide": {"pages": ["38-52"], "section": "04 チェックポイント（上げ始めのコツ）"},
+      "impact": "上げ始めのずれがそのあと全部に響き、クラブの通り道がばらつきます。",
+      "ideal": {"text": "上げ始めは、クラブ・手・腕・肩をひとかたまりにして動かし、手と体の距離を変えずに上げます。", "p": "P2", "item_id": "tip.takeaway.one_piece"},
+      "fix": {
+        "setup": ["腕と胸でつくる三角形を意識して構える"],
+        "cue": "上げ始めは胸を回して、腕とクラブをひとかたまりで動かす。",
+        "cue_why": "手だけで上げなければ、上げ始めの形がそろい、あとの動きもそろうからです。",
+        "drills": ["half_swing"]
+      },
+      "check": "後ろから撮った動画で、上げ始めの形がそろう。十回のうち八回でできたら合格です。"
+    },
+    {
+      "id": "posture",
+      "title": "構えの背中や膝の形が崩れている（猫背・反り腰・膝の伸ばしすぎ／曲げすぎ）",
+      "issue_title": "構えの姿勢が崩れている",
+      "items": [{"id": "setup.spine", "faults": ["round", "arch"]}, {"id": "setup.knees", "faults": ["straight", "deep"]}, {"id": "iron.p1.dtl.knees", "faults": ["deep", "straight"]}],
+      "checkpoint": {"p": "P1", "item_id": "setup.spine", "view": "dtl"},
+      "guide": {"pages": ["7-19"], "section": "02 基礎（姿勢）"},
+      "impact": "回る軸がぶれ、体の上下の動きが大きくなって、当たる場所がそろいません。",
+      "ideal": {"text": "股関節から上体を前に倒し、背中はまっすぐです。膝は軽く曲げますが、腰を落としすぎません。", "p": "P1", "item_id": "setup.spine"},
+      "fix": {
+        "setup": ["まっすぐ立ち、クラブを腰に当てて股関節から上体を前に倒す", "膝は軽く曲げる（深く曲げすぎない）"],
+        "cue": "構えの背中の形を保ったまま回る。",
+        "cue_why": "背中の形が崩れなければ、回る軸がぶれないからです。",
+        "drills": ["routine"]
+      },
+      "check": "後ろから撮った動画で、構えの背中と膝が範囲の中。十回のうち八回でそろえば合格です。"
+    }
+  ],
+  "drills": [
+    {
+      "id": "far_ball",
+      "name": "ボールの向こうにもう一個（ネック寄りを減らす）",
+      "source": {"kind": "general"},
+      "equipment": "ボール二個",
+      "place": "打つボールの向こう側（体から遠い側）に、指二本ぶんあけてもう一個ボールを置く",
+      "steps": ["打つボールの向こう側にもう一個ボールを置く", "手前のボールだけを打ち、向こうのボールに触らない", "七割の振り幅から始め、触らなくなったら振り幅を戻す"],
+      "reps": 10,
+      "why": "クラブが体から遠い側へ出ていくと向こうのボールに触るので、手元が体から離れる動きに自分で気づけます。触らずに打てれば、当たる場所がネックから離れています。",
+      "safety": "置くのはボールだけ。硬い物・立てた物は置かない",
+      "catalog_drill": "strike.two_balls"
+    },
+    {
+      "id": "near_ball",
+      "name": "ボールの手前にもう一個（先寄りを減らす）",
+      "source": {"kind": "general"},
+      "equipment": "ボール二個",
+      "place": "打つボールの手前側（体に近い側）に、指二本ぶんあけてもう一個ボールを置く",
+      "steps": ["打つボールの手前側にもう一個ボールを置く", "向こう側のボールだけを打ち、手前のボールに触らない", "七割の振り幅から始め、触らなくなったら振り幅を戻す"],
+      "reps": 10,
+      "why": "クラブが体の近くを通ると手前のボールに触るので、腕が縮む動きに自分で気づけます。",
+      "safety": "置くのはボールだけ。硬い物・立てた物は置かない",
+      "catalog_drill": "strike.two_balls_in"
+    },
+    {
+      "id": "spray",
+      "name": "当たった場所を一球ずつ確かめる",
+      "role": "check",
+      "source": {"kind": "general"},
+      "equipment": "クラブの面に貼るシール、または足用の粉のスプレー",
+      "place": "クラブの面にシールを貼るか、粉のスプレーを軽く吹く",
+      "steps": ["クラブの面にシールを貼るか、粉のスプレーを吹く", "一球ごとに跡を見て、ネック寄り・芯・先寄りのどこだったかを確かめる", "外れた向きを覚えておき、次の一球で意識する動きを一つだけ試す"],
+      "reps": 10,
+      "why": "感覚と実際の当たる場所のずれに気づけます。練習が効いたかを、その場で確かめる物差しにもなります。",
+      "safety": "スプレーは練習場の決まりを確かめてから使う。マットやボールには吹きかけない",
+      "catalog_drill": "strike.spray"
+    },
+    {
+      "id": "chair",
+      "name": "お尻の後ろに椅子（腰を前に出さない）",
+      "source": {"kind": "general"},
+      "equipment": "椅子（背もたれのある物）かゴルフバッグ。壁でもよい",
+      "place": "構えたときのお尻のすぐ後ろに、背もたれが軽く触れる位置で置く（打ち出しの方向ではなく自分の後ろ）",
+      "steps": ["構えて、お尻が椅子の背もたれに軽く触れる位置に立つ", "ゆっくりの素振りで、当たる瞬間まで{lead}側のお尻が背もたれに触れたままか確かめる（{trail}側は回って離れてよい）", "できたらハーフスイングで打ち、慣れたらいつもの振り幅にする"],
+      "reps": 10,
+      "why": "切り返しで腰がボールの方へ出る動きを抑え、体とボールの距離と前への傾きを保つ感覚がつかめます。",
+      "safety": "椅子はクラブの通り道に入らない位置に置く。倒れにくい物を使い、まず素振りで確かめる",
+      "catalog_drill": "video.butt_line"
+    },
+    {
+      "id": "towel",
+      "name": "ボールの後ろにタオル（一番低い所をボールの先へ）",
+      "source": {"kind": "general"},
+      "equipment": "薄いタオル一枚",
+      "place": "ボールの手のひら一つぶん後ろ（目標と反対側）に、タオルを平らに置く",
+      "steps": ["ボールの後ろにタオルを平らに置く", "タオルに触らないようにボールを打つ", "七割の振り幅から始め、触らなくなったら振り幅を戻す"],
+      "reps": 10,
+      "why": "クラブの一番低い所がボールより手前に来るとタオルに触るので、体重が{trail}に残る動きや手首が早くほどける動きに気づけます。",
+      "safety": "タオルは平らに置く。硬い物は置かない",
+      "catalog_drill": "lowpoint.towel"
+    },
+    {
+      "id": "feet_together",
+      "name": "両足をそろえて打つ（リズムと当たる場所）",
+      "source": {"kind": "general"},
+      "equipment": "なし",
+      "place": "両足のかかとをそろえて立つ",
+      "steps": ["両足のかかとをそろえて立つ", "七割の速さで、腰から肩の振り幅で打つ", "フィニッシュで三つ数える間止まれなければ、振り幅を小さくする"],
+      "reps": 10,
+      "why": "体が横に流れたり急いだりするとふらつくので、体の真ん中で回るリズムがつかめ、当たる場所がまとまります。",
+      "safety": "足場の悪い所ではしない。ふらついたら足幅を少し開く",
+      "catalog_drill": "tempo.feet_together"
+    },
+    {
+      "id": "step_through",
+      "name": "打ったら{trail}足を踏み出す（体重を{lead}足へ）",
+      "source": {"kind": "general"},
+      "equipment": "なし",
+      "place": "いつもの構えで立つ",
+      "steps": ["いつも通り構えて、七割の振り幅で打つ", "振り抜いたら、そのまま{trail}足を目標の方へ一歩踏み出す", "踏み出せないときは、当たる瞬間に体重が{trail}に残っているので、切り返しで{lead}足を先に踏み込む"],
+      "reps": 10,
+      "why": "打ったあとに歩き出せるのは体重が{lead}足に移ったときだけなので、体重の移り方が体で分かります。",
+      "safety": "前後に人や物がないことを確かめる。踏み出すのは打ったあと",
+      "catalog_drill": null
+    },
+    {
+      "id": "pump",
+      "name": "切り返しで腕を下ろす練習（下ろして止める）",
+      "source": {"kind": "general"},
+      "equipment": "なし",
+      "place": "いつもの構えで立つ",
+      "steps": ["トップまで上げる", "腰を開かずに、腕だけを{trail}の腰の高さまで下ろして止め、もう一回トップへ戻す", "これを二回くり返し、三回目はそのまま振り抜いて打つ"],
+      "reps": 10,
+      "why": "体を開かずに腕を下ろす感覚がつかめ、手元が高い所から外へ下りる動きや腰が早く開く動きが減ります（ガイドのコツ『切り返しで体を開かずに腕を下ろす』を体で覚える練習）。",
+      "safety": "ゆっくり行う。周りに人がいないことを確かめる",
+      "catalog_drill": null
+    },
+    {
+      "id": "cover_out",
+      "name": "ヘッドカバーをボールの後ろ・向こう側に（外から入るのを防ぐ）",
+      "source": {"kind": "general"},
+      "equipment": "柔らかいヘッドカバー一個",
+      "place": "ボールの後ろ（目標と反対側）で、目標線より少し向こう側（体から遠い側）に置く",
+      "steps": ["ボールの後ろ・向こう側にヘッドカバーを置く", "ヘッドカバーに触らないように打つ", "七割の振り幅から始め、触らなくなったら振り幅を戻す"],
+      "reps": 10,
+      "why": "クラブが外から入るとヘッドカバーに触るので、内側から下ろす感覚がつかめます。",
+      "safety": "置くのは柔らかいヘッドカバーだけ。ボールの先（打ち出しの先）には何も置かない",
+      "catalog_drill": "path.outside_cover"
+    },
+    {
+      "id": "cover_in",
+      "name": "ヘッドカバーをボールの後ろ・手前側に（内から入りすぎるのを防ぐ）",
+      "source": {"kind": "general"},
+      "equipment": "柔らかいヘッドカバー一個",
+      "place": "ボールの後ろ（目標と反対側）で、目標線より少し手前側（体に近い側）に置く",
+      "steps": ["ボールの後ろ・手前側にヘッドカバーを置く", "ヘッドカバーに触らないように打つ", "七割の振り幅から始め、触らなくなったら振り幅を戻す"],
+      "reps": 10,
+      "why": "クラブが内側から低く入りすぎるとヘッドカバーに触るので、寝すぎない下ろし方がつかめます。",
+      "safety": "置くのは柔らかいヘッドカバーだけ。ボールの先（打ち出しの先）には何も置かない",
+      "catalog_drill": "path.inside_cover"
+    },
+    {
+      "id": "half_face_up",
+      "name": "腰から腰の小さな振りで、クラブの先を空へ向ける",
+      "source": {"kind": "general"},
+      "equipment": "なし",
+      "place": "いつもの構えで立つ",
+      "steps": ["腰から腰までの小さな振り幅で打つ", "振り抜いてクラブが地面と平行になったところで止め、クラブの先が真上を向いているか確かめる", "できたら振り幅を少しずつ大きくする"],
+      "reps": 10,
+      "why": "面が開いたまま当たるとクラブの先が真上を向かないので、面が閉じる向きに回る感覚がつかめます。",
+      "safety": "小さな振り幅から始める。周りに人がいないことを確かめる",
+      "catalog_drill": "face.half_toe_up"
+    },
+    {
+      "id": "hold_off",
+      "name": "腰から腰の小さな振りで、振り抜きの面を空へ向ける",
+      "source": {"kind": "general"},
+      "equipment": "なし",
+      "place": "いつもの構えで立つ",
+      "steps": ["腰から腰までの小さな振り幅で打つ", "振り抜いてクラブが地面と平行になったところで止め、クラブの面が空を向いているか確かめる", "できたら振り幅を少しずつ大きくする"],
+      "reps": 10,
+      "why": "面を返しすぎていると面が地面を向くので、返しすぎない感覚がつかめます。",
+      "safety": "小さな振り幅から始める。周りに人がいないことを確かめる",
+      "catalog_drill": "face.hold_off"
+    },
+    {
+      "id": "grip_check",
+      "name": "握りを毎回確かめる（指の付け根の山を数える）",
+      "source": {"kind": "general"},
+      "equipment": "なし",
+      "place": "構えたところで上から{lead}手を見る",
+      "steps": ["構えたとき、{lead}手の指の付け根の山が上からいくつ見えるかを数える", "毎球、打つ前に同じ数になっているか確かめる", "数を変えるときはコーチに見てもらう（変え方しだいで逆の向きにずれることがある）"],
+      "reps": 10,
+      "why": "握りがそろうと、当たる瞬間の面の向きがそろいやすくなります。",
+      "safety": "道具は使わない",
+      "catalog_drill": "face.grip_check"
+    },
+    {
+      "id": "towel_arms",
+      "name": "両脇にタオルをはさんで振る（腕と体を一緒に）",
+      "source": {"kind": "general"},
+      "equipment": "フェイスタオル一枚",
+      "place": "タオルを胸の前で横にして、両脇ではさむ",
+      "steps": ["タオルを両脇ではさんで構える", "腰から腰の振り幅で、タオルを落とさずに打つ", "慣れたら肩から肩の振り幅にする"],
+      "reps": 10,
+      "why": "手元が体から離れるとタオルが落ちるので、腕と体が一緒に動き、手元が体の近くを通る感覚がつかめます。",
+      "safety": "小さな振り幅から始める",
+      "catalog_drill": null
+    },
+    {
+      "id": "align_sticks",
+      "name": "足元に棒を置いて向きをそろえる",
+      "source": {"kind": "general"},
+      "equipment": "アライメントスティック二本（無ければクラブ二本）",
+      "place": "一本は目標線の上（ボールの向こう）に、もう一本はつま先の前に、目標線と平行に地面に置く",
+      "steps": ["二本の棒を目標線と平行に地面に置く", "つま先・膝・腰・肩の線を、つま先の前の棒と平行にそろえる", "そのまま打ち、毎回同じ向きで構えられているか確かめる"],
+      "reps": 10,
+      "why": "自分では気づきにくい構えの向きのずれがなくなり、振る方向が狙いに向きやすくなります。",
+      "safety": "棒は地面に平らに置く。立てない",
+      "catalog_drill": null
+    },
+    {
+      "id": "ball_line",
+      "name": "棒でボールの置き場所をそろえる",
+      "source": {"kind": "general"},
+      "equipment": "アライメントスティック一本（無ければクラブ一本）",
+      "place": "スタンスの真ん中を示すように、目標線と直角に地面に置く",
+      "steps": ["棒を目標線と直角に、両足の真ん中に来るように地面に置く", "番手に合わせて、棒からボールをどれだけ{lead}側か{trail}側に置くかを決める", "毎球その場所に置いて打つ"],
+      "reps": 10,
+      "why": "ボールの置き場所が毎回同じになり、当たり方がそろいます。",
+      "safety": "棒は地面に平らに置く。立てない",
+      "catalog_drill": null
+    },
+    {
+      "id": "stick_a",
+      "name": "握りの延長に棒をつけて振る（面の向きと手首）",
+      "source": {"kind": "guide", "pages": ["119-127"]},
+      "equipment": "アライメントスティック一本",
+      "place": "棒を握りの端に沿わせ、握りの先へ長く出るようにクラブと一緒に握る",
+      "steps": ["棒を握りの延長に沿わせてクラブと一緒に握る", "腰から腰の振り幅で、ゆっくり振る", "振り抜いた腰の高さで、棒が{lead}の腰から脇腹のあたりに来ているかを確かめる（ガイドの見方）"],
+      "reps": 10,
+      "why": "振り抜きの棒の位置で、手首の使い方と面の向きが分かります（ガイドの練習器具のドリル）。",
+      "safety": "ゆっくり振る。棒の先が体に当たるので強く振らない。周りに人がいないことを確かめる",
+      "catalog_drill": null
+    },
+    {
+      "id": "stick_b",
+      "name": "ベルトの輪に棒を通して振る（腰と腕をそろえる）",
+      "source": {"kind": "guide", "pages": ["119-127"]},
+      "equipment": "アライメントスティック一本",
+      "place": "棒をベルトの輪に通し、体の前に横向きに出す",
+      "steps": ["棒をベルトの輪に通して構える", "腰から腰の振り幅で、ゆっくり振る", "下ろしでクラブが水平になるあたりで、手元が棒に当たらないように、腰の回転と腕を一緒に動かす"],
+      "reps": 10,
+      "why": "腰が先に開きすぎたり手元が体から離れたりすると棒に当たるので、腰と腕がそろって動く感覚がつかめます（ガイドの練習器具のドリル）。",
+      "safety": "ゆっくり振る。棒が長く出すぎないように通す",
+      "catalog_drill": null
+    },
+    {
+      "id": "stick_c",
+      "name": "握りの延長に棒をつけて上げる（クラブの傾き）",
+      "source": {"kind": "guide", "pages": ["119-127"]},
+      "equipment": "アライメントスティック一本",
+      "place": "棒を握りの端に沿わせ、握りの先へ長く出るようにクラブと一緒に握る",
+      "steps": ["棒を握りの延長につけて構える", "上げて{lead}腕が地面と平行になったところで止める", "棒の先がボールより体側（ボールと足の間）を指しているかを確かめ、指していなければクラブの傾きを直してからもう一回上げる"],
+      "reps": 10,
+      "why": "上げの途中でクラブが立ちすぎ・寝すぎていないかが分かり、下ろしの通り道も整います（ガイドの練習器具のドリル）。",
+      "safety": "止めて確かめる練習なので、球を打つのは確かめたあと。棒の先が体に当たらないようにゆっくり行う",
+      "catalog_drill": null
+    },
+    {
+      "id": "wrist_ball",
+      "name": "柔らかいボールを両腕にはさんで振る（手首の使い方）",
+      "source": {"kind": "guide", "pages": ["119-127"]},
+      "equipment": "柔らかいゴムボール一個（こぶしくらいの大きさ）",
+      "place": "両方の前腕の間にボールをはさむ",
+      "steps": ["両方の前腕の間にボールをはさんで構える", "腰から腰の振り幅で、ボールを落とさずに振る", "慣れたら球を打つ"],
+      "reps": 10,
+      "why": "腕が離れず、手首だけで面をこねる動きが減ります（ガイドの練習器具のドリル）。",
+      "safety": "硬いボールは使わない。小さな振り幅で行う",
+      "catalog_drill": null
+    },
+    {
+      "id": "step",
+      "name": "{trail}足の外側を少し高くして打つ（体が流れるのを防ぐ）",
+      "source": {"kind": "guide", "pages": ["119-127"]},
+      "equipment": "滑らない薄い板か、畳んだタオル",
+      "place": "{trail}足の外側の下に置き、足の外側を少し高くする",
+      "steps": ["{trail}足の外側を少し高くして構える", "上げで{trail}足の内側で体を支え、体が{trail}へ流れないようにする", "七割の振り幅から始める"],
+      "reps": 10,
+      "why": "上げで体が{trail}へ横に流れる動きを抑えます（ガイドの練習器具のドリル）。",
+      "safety": "滑らない物を使う。ふらついたらやめる",
+      "catalog_drill": null
+    },
+    {
+      "id": "case_p2_in",
+      "name": "上げ始めで手のひらを返さない（クラブが内側に引かれるとき）",
+      "source": {"kind": "guide", "pages": ["158-183"]},
+      "equipment": "なし（後ろから撮れるとよい）",
+      "place": "いつもの構えで立つ",
+      "steps": ["構えたまま、{lead}手首の形を変えずにクラブを腰の高さまでゆっくり上げる", "{lead}手のひらを返す感じを『ない』くらいにし、代わりに手首を親指側へ少し折ってクラブの先を上げる", "後ろから撮り、クラブが地面と平行のところで先が手と重なっているかを見る。やり過ぎて外に上がったら感覚を少し減らし、まだ内側ならもっと大胆にする"],
+      "reps": 10,
+      "why": "上げ始めでクラブの先が内側へ回る原因（手のひらの返しすぎ）を直します（ガイドのケーススタディ）。",
+      "safety": "ゆっくり行う。周りに人がいないことを確かめる",
+      "catalog_drill": null
+    },
+    {
+      "id": "case_p2_out",
+      "name": "上げ始めで手のひらを開かない（クラブが外に上がるとき）",
+      "source": {"kind": "guide", "pages": ["158-183"]},
+      "equipment": "なし（後ろから撮れるとよい）",
+      "place": "いつもの構えで立つ",
+      "steps": ["構えたまま、{lead}手のひらの向きを変えずにクラブを腰の高さまでゆっくり上げる", "手首を親指側へ折る量は、構えのときから足さない", "後ろから撮り、クラブが地面と平行のところで先が手と重なっているかを見る。やり過ぎて内側に回ったら感覚を少し減らし、まだ外なら大胆にする"],
+      "reps": 10,
+      "why": "上げ始めでクラブの先が外へ上がる原因（手のひらの開きすぎ）を直します（ガイドのケーススタディ）。",
+      "safety": "ゆっくり行う。周りに人がいないことを確かめる",
+      "catalog_drill": null
+    },
+    {
+      "id": "start_line",
+      "name": "打ち出しの目印の上を通す（打ち出す向き）",
+      "source": {"kind": "guide", "pages": ["146-155"]},
+      "equipment": "タオルか平らな目印一つ",
+      "place": "ボールから四メートルほど先の目標線の上に、目印を平らに置く",
+      "steps": ["目標線の上、四メートルほど先に目印を平らに置く", "目印の真上を通るように打ち出す", "一球ごとに、目印の{dir:right}に出たか{dir:left}に出たかを見る"],
+      "reps": 10,
+      "why": "打ち出す向きは主に当たる瞬間の面の向きで決まるので、目印の上に出せれば面が狙いを向いています（ガイドのスタートライン練習）。",
+      "safety": "目印は地面に平らに置く。立てた物は跳ね返るので打ち出しの先に置かない",
+      "catalog_drill": "face.start_spot"
+    },
+    {
+      "id": "metronome",
+      "name": "数えて振る（上げ三つ・下ろし一つのリズム）",
+      "source": {"kind": "guide", "pages": ["102-118"]},
+      "equipment": "なし（リズムを刻む音が出る物があればよい）",
+      "place": "いつもの構えで立つ",
+      "steps": ["声に出して『いち、に、さん』でトップまで上げる", "『し』で下ろして打つ", "素振りで二回リズムを確かめてから、同じリズムで打つ"],
+      "reps": 10,
+      "why": "上げと下ろしのリズムがそろうと、体と腕の順番がそろい、当たる場所と面の向きがまとまります（ガイドのリズムとテンポ）。",
+      "safety": "周りに人がいないことを確かめる",
+      "catalog_drill": null
+    },
+    {
+      "id": "half_swing",
+      "name": "腰から腰のハーフスイング（形とリズム）",
+      "source": {"kind": "guide", "pages": ["102-118"]},
+      "equipment": "なし",
+      "place": "いつもの構えで立つ",
+      "steps": ["腰から腰までの振り幅で、ゆっくり打つ", "体の回転と腕をひとかたまりで動かすことだけに集中する", "できたら肩から肩の振り幅に広げる"],
+      "reps": 10,
+      "why": "振り幅を小さくすると、形とリズムを確かめながら打てます（ガイドのテンポの練習）。",
+      "safety": "周りに人がいないことを確かめる",
+      "catalog_drill": null
+    },
+    {
+      "id": "routine",
+      "name": "打つ前の手順を毎回同じにする",
+      "source": {"kind": "guide", "pages": ["102-118"]},
+      "equipment": "なし",
+      "place": "打席の後ろから始める",
+      "steps": ["ボールの後ろに立って目標を見る", "クラブを先に地面に置いて面を目標に合わせ、そのあと足の位置を決める", "握りと体の向きを確かめ、素振り一回のあと、決めた時間の中で打つ"],
+      "reps": 10,
+      "why": "構えが毎回そろい、ボールとの距離や向きのずれが減ります（ガイドのプレショットルーティン）。",
+      "safety": "道具は使わない",
+      "catalog_drill": null
+    },
+    {
+      "id": "copy_swing",
+      "name": "素振りをそのまま打つ（意識する動きを本番へ移す）",
+      "source": {"kind": "guide", "pages": ["146-155"]},
+      "equipment": "なし",
+      "place": "打席で、ボールの少し後ろで素振りをする",
+      "steps": ["意識する動きだけを考えて、素振りを三回する", "素振りと全く同じ動きで一球打つ", "打ったあと、素振りと同じだったかを自分で振り返る"],
+      "reps": 8,
+      "why": "ドリルで覚えた動きを、本番のスイングへ移す練習です（ガイドのコピペ練習）。",
+      "safety": "周りに人がいないことを確かめる",
+      "catalog_drill": null
+    }
+  ]
+}

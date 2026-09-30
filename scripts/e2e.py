@@ -342,6 +342,18 @@ def run_real(base: str) -> None:
             errors.append(f"{x['scope_id']}: 理想との差の比べる図（C1）が無い")
     if iron and (iron.get("gist") or {}).get("headline") != "まず取り組むのは「ネック寄りの当たりを減らす」です。":
         errors.append(f"アイアンの要点の見出しが違う: {(iron.get('gist') or {}).get('headline')}")
+    # 診断（課題 → 原因の動き → 理想 → 直し方 → 確かめ方）。Go を通っても落ちない・動画が無ければ原因は可能性
+    diag = (rep.get("report") or {}).get("diagnosis") or {}
+    iss = diag.get("issues") or []
+    print("診断の課題:", [(x.get("rank"), x.get("title")) for x in iss])
+    if [x.get("id") for x in iss[:2]] != ["strike_heel", "face_right"]:
+        errors.append(f"診断の課題の順が違う: {[x.get('id') for x in iss]}")
+    if not diag.get("video_needed") or any(c.get("basis") != "likely" for x in iss for c in x.get("causes") or []):
+        errors.append("動画が無いのに原因が可能性になっていない")
+    for x in iss:
+        fx = x.get("fix") or {}
+        if not (x.get("causes") and (x.get("ideal") or {}).get("text") and fx.get("drills") and fx.get("setup") and fx.get("menu") and x.get("check")):
+            errors.append(f"診断の課題 {x.get('id')} の段が欠けている")
     if errors:
         sys.exit("失敗（実データ）: " + " / ".join(errors))
     print("OK（実データ）")
