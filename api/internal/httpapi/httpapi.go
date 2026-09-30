@@ -48,6 +48,8 @@ type Analyzer interface {
 	CheckpointsVisionStatus(ctx context.Context) (*analysis.VisionStatus, error)
 	CheckpointsVision(ctx context.Context, swings []analysis.VisionSwing) (json.RawMessage, error)
 	CheckpointsSymptoms(ctx context.Context, in analysis.SymptomsInput) (json.RawMessage, error)
+	// 別の日の再確認（recheck.go）: /v1/focus-test/judge・/v1/plan/motion-progress・/v1/checkup
+	Call(ctx context.Context, path string, body any) (json.RawMessage, error)
 }
 
 // Server は API のハンドラをまとめる。
@@ -195,6 +197,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/swings/checks", s.startSwingChecks)
 	mux.HandleFunc("POST /v1/sessions/{id}/swings/match-suggest", s.matchSuggest)
 	mux.HandleFunc("PUT /v1/swings/{id}/match", s.putSwingMatch)
+	// 別の日の再確認（段4）
+	mux.HandleFunc("POST /v1/focus-tests", s.createFocusTest)
+	mux.HandleFunc("GET /v1/focus-tests/{id}", s.getFocusTest)
+	mux.HandleFunc("GET /v1/players/{id}/focus-tests", s.listFocusTests)
+	mux.HandleFunc("GET /v1/checks/compare", s.compareChecks)
+	mux.HandleFunc("POST /v1/players/{id}/checkups", s.createCheckup)
+	mux.HandleFunc("GET /v1/checkups/{id}", s.getCheckup)
 	if s.Static != nil {
 		mux.Handle("GET /", vendorCache(s.Static))
 	}

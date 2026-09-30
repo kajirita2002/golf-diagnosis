@@ -100,6 +100,11 @@ func (s *Store) CreatePlan(ctx context.Context, p *model.Plan, replace bool) err
 		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id`,
 		p.PlayerID, p.Issue, nullString(p.Lever), p.DrillID, p.CatalogVersion, p.Club, p.TargetMetric, string(p.Goal), p.Hypothesis, p.Cue,
 		string(tpl), rawOrEmpty(p.Params), rawOrEmpty(p.Trigger), rawOrEmpty(p.Rationale), string(p.Status), p.EngineVersion, ts).Scan(&p.ID)
+	if err == nil && p.Motion != nil {
+		m := p.Motion
+		_, err = tx.ExecContext(ctx, `INSERT INTO {s}motion_plans(plan_id, cp_item_id, cp_catalog_version, view, checkpoint, created_at) VALUES(?,?,?,?,?,?)`,
+			p.ID, m.ItemID, m.CatalogVersion, m.View, m.Checkpoint, ts)
+	}
 	if err == nil {
 		err = tx.Commit()
 	}
@@ -112,20 +117,31 @@ func (s *Store) CreatePlan(ctx context.Context, p *model.Plan, replace bool) err
 		return err
 	}
 	p.CreatedAt = parseTS(ts)
+	p.Kind = "ball"
+	if p.Motion != nil {
+		p.Kind = "motion"
+	}
 	p.Params, p.Trigger, p.Rationale = json.RawMessage(rawOrEmpty(p.Params)), json.RawMessage(rawOrEmpty(p.Trigger)), json.RawMessage(rawOrEmpty(p.Rationale))
 	return nil
 }
 
 const planCols = `id, player_id, issue, lever, drill_id, catalog_version, club, target_metric, goal, hypothesis, cue,
-	template_json, params_json, trigger_json, rationale_json, status, engine_version, created_at, closed_at, close_reason`
+	template_json, params_json, trigger_json, rationale_json, status, engine_version, created_at, closed_at, close_reason,
+	(SELECT cp_item_id FROM {s}motion_plans m WHERE m.plan_id = {s}plans.id), (SELECT cp_catalog_version FROM {s}motion_plans m WHERE m.plan_id = {s}plans.id),
+	(SELECT view FROM {s}motion_plans m WHERE m.plan_id = {s}plans.id), (SELECT checkpoint FROM {s}motion_plans m WHERE m.plan_id = {s}plans.id)`
 
 func scanPlan(sc interface{ Scan(...any) error }) (model.Plan, error) {
 	var p model.Plan
-	var lever, closed, reason sql.NullString
+	var lever, closed, reason, mItem, mVer, mView, mP sql.NullString
 	var tpl, params, trig, rat, ts string
 	if err := sc.Scan(&p.ID, &p.PlayerID, &p.Issue, &lever, &p.DrillID, &p.CatalogVersion, &p.Club, &p.TargetMetric, &p.Goal, &p.Hypothesis, &p.Cue,
-		&tpl, &params, &trig, &rat, &p.Status, &p.EngineVersion, &ts, &closed, &reason); err != nil {
+		&tpl, &params, &trig, &rat, &p.Status, &p.EngineVersion, &ts, &closed, &reason, &mItem, &mVer, &mView, &mP); err != nil {
 		return p, err
+	}
+	p.Kind = "ball"
+	if mItem.Valid {
+		p.Kind = "motion"
+		p.Motion = &model.MotionPlan{ItemID: mItem.String, CatalogVersion: mVer.String, View: mView.String, Checkpoint: mP.String}
 	}
 	p.Lever, p.CloseReason = lever.String, reason.String
 	if err := json.Unmarshal([]byte(tpl), &p.Template); err != nil {

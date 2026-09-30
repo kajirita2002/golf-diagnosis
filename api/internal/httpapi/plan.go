@@ -149,6 +149,13 @@ type planIn struct {
 	Window      map[string]any `json:"window"` // 解説の band_shape.window（{face_min, face_max, path}・右打ちの座標）
 	// Variant は型（standard / alternate）。alternate は「移せていない」の次の型（ドリルと本番を1球ずつ交互。§8.6）
 	Variant string `json:"variant"`
+	// 動きのプラン（kind=motion。docs/DESIGN_v2.md §8.3）: カタログの項目・10球テストで取り出す向きと P・外れの向き・見出し
+	Kind       string `json:"kind"`
+	CPItemID   string `json:"cp_item_id"`
+	View       string `json:"view"`
+	Checkpoint string `json:"checkpoint"`
+	Fault      string `json:"fault"`
+	Title      string `json:"title"`
 }
 
 // buildOut は分析サービスの /v1/plan/build の応答のうち、Go が読むところ。
@@ -349,6 +356,15 @@ func (s *Server) createPlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in.Issue, in.Club, in.DrillID, in.Cue = strings.TrimSpace(in.Issue), strings.TrimSpace(in.Club), strings.TrimSpace(in.DrillID), strings.TrimSpace(in.Cue)
+	switch in.Kind {
+	case "", "ball":
+	case "motion":
+		s.createMotionPlan(w, r, pid, &in)
+		return
+	default:
+		s.fail(w, bad("kind は ball か motion です"))
+		return
+	}
 	var extra map[string]any
 	if in.ScopeID != "" {
 		// 型・params は分析サービスが作る（本線）。確かめていないドリルは下でもう一度断る
@@ -591,6 +607,11 @@ func (s *Server) createPlanRun(w http.ResponseWriter, r *http.Request) {
 	}
 	if p.Status != model.PlanActive {
 		s.fail(w, conflict("このプランは動いていません（状態 "+string(p.Status)+"）。練習を足せるのは動いているプランだけです"))
+		return
+	}
+	if p.Motion != nil {
+		// 動きのプランは Python の evaluate が cp: の指標を知らないので、練習は10球テストで記録する
+		s.fail(w, bad("動きのプランの練習は10球テスト（POST /v1/focus-tests）で記録します"))
 		return
 	}
 	se, err := s.Store.GetSession(r.Context(), in.SessionID)
@@ -1319,6 +1340,20 @@ func (s *Server) planProgress(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	if p.Motion != nil {
+		prog, err := s.motionProgress(r.Context(), p)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		tests, err := s.Store.ListFocusTests(r.Context(), p.PlayerID, p.Motion.ItemID, p.ID)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"plan": p, "runs": []any{}, "latest": nil, "motion": prog, "tests": tests})
+		return
+	}
 	evs := []runEval{}
 	if len(runs) > 0 {
 		if evs, err = s.evaluateChain(r.Context(), p, runs, len(runs)-1, r.URL.Query().Get("refresh") == "1", true); err != nil {
@@ -1390,6 +1425,20 @@ func (s *Server) today(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	out["plan"], out["runs"], out["next_index"], out["next_counts"] = p, rs, len(runs), templateCounts(p.Template)
+	if p.Motion != nil {
+		// 動きのプラン: 状態と10球テストの記録（分析サービスが寝ていても、記録だけは出す）
+		m := map[string]any{"test_block": motionTestBlock}
+		if tests, err := s.Store.ListFocusTests(r.Context(), pid, p.Motion.ItemID, p.ID); err == nil {
+			for i := range tests {
+				tests[i].Result = nil
+			}
+			m["tests"] = tests
+		}
+		if prog, err := s.motionProgress(r.Context(), p); err == nil {
+			m["progress"] = prog
+		}
+		out["motion"] = m
+	}
 	if last != nil {
 		out["last_evaluation"] = last
 		// 「足りない」のとき分析サービスが出した次の型の球数（§8.6「次の型の球数を増やす」）。型と同じ段の数のときだけ
