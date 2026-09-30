@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 import sys
 
@@ -44,7 +45,7 @@ def near(sw: dict, truth: dict, fps: float, names=MAIN, frames: float = 2.0) -> 
 def test_合成の軌跡でPと始まりが当たる(view, fps):
     body, truth = syn.motion(view, fps=fps)
     r = video.detect(body)
-    assert r["video_version"] == "video/0.2"
+    assert r["video_version"] == "video/0.3"
     assert len(r["swings"]) == 1 and not r["excluded"]
     sw = r["swings"][0]
     near(sw, truth[0], fps)
@@ -412,3 +413,129 @@ def test_組に分けて送るときは全部素振りでも外したまま返�
     c = TestClient(app)
     j = c.post("/v1/video/checkpoints", json=body).json()
     assert not j["swings"] and len(j["excluded"]) == 1
+
+
+# ------------------------------------------------------------ video/0.3: 手持ち・画面越し・小さく写った人（本番で止まった撮り方）
+# 本番で、練習場のシミュレーターのモニターに映った正面寄りの動画をスマホで手持ち撮影したものが「スイングが見つかりませんでした」で止まった。
+# 前の条件（構えの静止＝胴の長さの 0.04 以内に 0.2秒）は、手持ちの揺れ・画面越しのちらつき・小さく写った人の点の揺れで満たせなかった。
+# 合成の時系列を荒らして（synthetic_swing.rough）、1秒に10コマの粗い走査でもスイングが見つかることを固定する。
+
+
+def _tops(r: dict) -> list[float]:
+    return [ps_of(sw)["P4"]["t"] for sw in r["swings"]]
+
+
+def _coarse(view: str, n: int = 3, **kw) -> tuple[dict, list[dict]]:
+    body, truth = syn.motion(view, fps=60, n_swings=n)
+    # 粗い走査はボールのまわりを取らない（画面の段2b の最初の送信と同じ）
+    body.pop("roi", None)
+    body.pop("ball_seen", None)
+    return syn.rough(body, **kw), truth
+
+
+@pytest.mark.parametrize("view", ["dtl", "fo"])
+@pytest.mark.parametrize("seed", range(5))
+def test_手持ちの揺れと画面のちらつきがあっても粗い走査でスイングが見つかる(view, seed):
+    body, truth = _coarse(view, shake=0.05, flicker=0.03, hz=10, seed=seed)
+    r = video.detect(body)
+    assert len(r["swings"]) == 3, r.get("diag")
+    # トップは本当のトップから粗い走査の1コマ（0.1秒）＋余裕の中
+    for got, t in zip(_tops(r), truth):
+        assert got is not None and abs(got - t["P4"]) <= 0.15, (got, t["P4"])
+
+
+@pytest.mark.parametrize("view", ["dtl", "fo"])
+@pytest.mark.parametrize("seed", range(5))
+def test_小さく写った人でも見つかる(view, seed):
+    # 人が画面の縦の約4分の1（胴の長さ 約60画素）。点の揺れは小さい体に対して大きくなる
+    body, truth = _coarse(view, scale=0.4, flicker=0.04, shake=0.03, hz=10, drop=0.1, seed=seed)
+    r = video.detect(body)
+    assert r["torso_px"] < 70
+    assert len(r["swings"]) == 3, r.get("diag")
+
+
+@pytest.mark.parametrize("seed", range(5))
+def test_粗い走査で体の点が欠けても見つかる(seed):
+    # 1秒に10コマで、4コマに1コマは体の点が取れない（画面越しのちらつきで人を見失う）
+    body, truth = _coarse("fo", hz=10, drop=0.25, flicker=0.02, seed=seed)
+    r = video.detect(body)
+    assert len(r["swings"]) >= 2, r.get("diag")
+    for got in _tops(r):
+        assert got is None or min(abs(got - t["P4"]) for t in truth) <= 0.15
+
+
+def test_揺れのある細かい走査でもPの順番と始まりが崩れない():
+    body, truth = syn.motion("fo", fps=60)
+    r = video.detect(syn.rough(body, shake=0.03, flicker=0.01, seed=3))
+    assert len(r["swings"]) == 1
+    sw = r["swings"][0]
+    got = ps_of(sw)
+    assert abs(got["P4"]["t"] - truth[0]["P4"]) <= 3 / 60
+    assert got["P1"]["t"] < sw["t0"] < got["P2"]["t"]
+    ts = [got[p]["t"] for p in ("P1", "P2", "P3", "P4", "P5", "P6") if got[p]["t"] is not None]
+    assert ts == sorted(ts)
+
+
+def test_区間を探す手は腰からの相対なので揺れが消える():
+    # 全部の点が同じだけ動く揺れ（手持ち）は、腰との差では消える。測る項目の値に使う元の点は変えない
+    body, _ = syn.motion("dtl", fps=60)
+    s0 = video.Series(body)
+    s1 = video.Series(syn.rough(body, shake=0.08, seed=1))
+    k = next(i for i in range(s0.n) if s0.t[i] >= 0.5)  # 構えの途中
+    d_abs = math.hypot(s1.pts["H"][k][0] - s0.pts["H"][k][0], s1.pts["H"][k][1] - s0.pts["H"][k][1])
+    d_rel = math.hypot(s1.Hr[k][0] - s0.Hr[k][0], s1.Hr[k][1] - s0.Hr[k][1])
+    assert d_rel < d_abs / 3 or d_abs < 1.0
+
+
+def test_構えで手が止まらなくても一番静かな所を構え推定にしてP1を確かめる():
+    body, truth = syn.motion("dtl", fps=60)
+    # 構えのあいだ手が1秒に2回、胴の長さの 0.2 だけ揺れ続ける（静止が一度も無い）
+    r = video.detect(syn.rough(body, sway=0.2, sway_hz=2.0, seed=2))
+    assert len(r["swings"]) == 1, r.get("diag")
+    sw = r["swings"][0]
+    p1 = ps_of(sw)["P1"]
+    assert p1["status"] == "estimated" and p1["reason"] == "addr_guess" and p1["confidence"] == "low"
+    assert "P1" in sw["check"] and p1["reason_text"]
+    assert abs(ps_of(sw)["P4"]["t"] - truth[0]["P4"]) <= 2 / 60
+    # 粗い走査（1秒に10コマ）でも行き止まりにしない
+    bc, _ = _coarse("dtl", n=2, sway=0.2, sway_hz=2.0, hz=10, seed=2)
+    rc = video.detect(bc)
+    assert len(rc["swings"]) == 2 and all(ps_of(x)["P1"]["reason"] == "addr_guess" for x in rc["swings"])
+
+
+def test_フィニッシュだけの動画をスイングにしない():
+    body, _ = syn.motion("dtl", fps=60)
+    body["frames"] = [f for f in body["frames"] if f["t"] >= 1.95]
+    body.pop("roi", None)
+    body.pop("ball_seen", None)
+    r = video.detect(body)
+    assert r["swings"] == [] and r["diag"]["raised"] and r["diag"]["reason"] == "no_address"
+
+
+def test_見つからないときは理由の材料を返す():
+    # 体の点がほとんど取れない（暗い・小さい・画面越し）
+    body, _ = syn.motion("fo", fps=60)
+    for i, f in enumerate(body["frames"]):
+        if i >= 20:
+            f["lm"] = None
+    r = video.detect(body)
+    assert r["swings"] == [] and r["diag"]["reason"] == "no_pose" and r["diag"]["pose_ratio"] < 0.3
+    # 構えたまま振らない（手が胸より上に上がらない）
+    body2, _ = syn.motion("fo", fps=30)
+    body2["frames"] = [f for f in body2["frames"] if f["t"] < 0.95]
+    body2.pop("roi", None)
+    r2 = video.detect(body2)
+    assert r2["swings"] == [] and r2["diag"]["reason"] == "no_raise" and r2["diag"]["pose_ratio"] > 0.9
+    # 見つかったときは diag を付けない
+    body3, _ = syn.motion("fo")
+    assert "diag" not in video.detect(body3)
+    # 口からも同じ
+    c = TestClient(app)
+    res = c.post("/v1/video/checkpoints", json=body2)
+    assert res.status_code == 200, res.text
+    assert res.json()["diag"]["reason"] == "no_raise"
+
+
+def test_点が全く無ければ理由は体の点():
+    r = video.detect({"view": "dtl", "handedness": "R", "fps": 60, "width": 1280, "height": 720, "frames": [{"t": 0.0, "lm": None}]})
+    assert r["diag"]["reason"] == "no_pose"

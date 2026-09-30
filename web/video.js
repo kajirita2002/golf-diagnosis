@@ -13,7 +13,10 @@
   - 送り直しは同じスイングへ（作れた記録とスイングの id を覚え、コマの送信だけをやり直す。同じスイングを二本作らない＝R11）。
   - fps は ①ファイルの中の記録（mp4 / mov。mp4box.js）②再生して測る（requestVideoFrameCallback）の順。分からなければ 0（不明）。
   - 体の点は MediaPipe Pose Landmarker（lite・同梱）。window.__FAKE_POSE があればそれを使う（画面の確認で棒人間を使うため）。
-  - 自動（段2b）: ① 粗い走査（1秒に10コマ）で体の点を取り、サーバー（video.py）がスイングの区間を返す
+  - 自動（段2b）: ⓪ 数コマを高めの解像度で見て人の範囲（体の点の外枠を、クラブが伸びるぶん上下左右に広げた枠）を決め、
+            以降の体の点はその枠を切り出して拡大して取る（人が小さく写った動画のため。点は元のコマの座標に戻して送る）
+          ① 粗い走査（1秒に10コマ）で体の点を取り、サーバー（video.py）がスイングの区間を返す
+            （見つからなければ、サーバーが返す diag で「体の点が取れない」「振り上げが無い」などの理由と次の手を出す）
           → ② 最初のスイングの構えでボールの両端を押す（当たる瞬間の挟み込みと物差し）
           → ③ スイングの区間だけ細かく（最大1秒に120コマ）体の点とボールのまわりの変化を取り、P1〜P10 と中間を返してもらう
           → ④ 確かめるところ（自信の低いコマ・見つからなかった P）だけ本人が直す → ⑤ 代表の P2 のクラブ → 送って測る。
@@ -162,7 +165,13 @@ const Video = (() => {
   // ---- 体の点（MediaPipe・同梱。無ければ棒人間の偽物） ----
   let detector = null;
   async function poseDetector() {
-    if (typeof window.__FAKE_POSE === "function") return { backend: "fake", detect: (_c, meta) => window.__FAKE_POSE(meta) };
+    // 偽物は元のコマの座標で点を返すので、切り出した枠があれば枠の中の座標に直して返す（本物と同じく、渡した絵の中の座標）
+    if (typeof window.__FAKE_POSE === "function") return { backend: "fake", detect: (_c, meta) => {
+      const r = window.__FAKE_POSE(meta);
+      const b = meta && meta.box;
+      if (!r || !b) return r;
+      return r.map((q) => ({ ...q, x: (q.x * meta.width - b.x) / b.w, y: (q.y * meta.height - b.y) / b.h }));
+    } };
     if (detector) return detector;
     const vision = await import("./" + V_MP + "/vision_bundle.mjs");
     const fileset = await vision.FilesetResolver.forVisionTasks(new URL(V_MP + "/wasm", location.href).href);
@@ -371,7 +380,7 @@ const Video = (() => {
       $("[data-err]", body).innerHTML = `<p class="loading-text" role="status">動画を読み込んでいます…</p>`;
       try {
         if (st.url) URL.revokeObjectURL(st.url);
-        Object.assign(st, { frames: {}, missing: new Set(), ball: null, taps: {}, cur: "P1", swingId: null, payload: null, auto: null, autoIds: {} });
+        Object.assign(st, { frames: {}, missing: new Set(), ball: null, taps: {}, cur: "P1", swingId: null, payload: null, auto: null, autoIds: {}, box: undefined });
         await loadVideo(st, f);
         if (st.mode === "auto") stepAuto(el, st, cat); else stepChoose(el, st, cat);
       } catch (e) {
@@ -948,6 +957,88 @@ const Video = (() => {
     return Math.min(Math.max(w, h), Math.round((POSE_SHORT * Math.max(w, h)) / Math.max(1, Math.min(w, h))));
   };
 
+  // ---- 人の範囲（§6.3-4）: 人が小さく写った動画（練習場のモニターを離れて撮った、など）は、枠を切り出して拡大してから体の点を取る ----
+  const BOX_SAMPLES = 6;      // 人の範囲を決めるのに見るコマの数（動画の頭から終わりまで等間隔）
+  const BOX_SHORT = 720;      // そのとき見るコマの短辺（粗い走査より高めの解像度）
+  const BOX_VIS = 0.5;        // 外枠に入れる点の visibility の下限
+  const BOX_MAX_AREA = 0.7;   // 枠がコマのこの割合より大きければ切り出さない（拡大にならない）
+  const POSE_CACHE_V = 2;     // 端末に残す体の点の版。枠を入れる前（版なし）に取った点は使い回さない（前の失敗の結果を引きずらない）
+  // 取れた体の点（元のコマの 0〜1）の外枠 → クラブが伸びるぶんを広げた枠（元のコマの画素・整数）。取れなければ null
+  function boxFrom(sets, W, H) {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const lms of sets) {
+      if (!lms || lms.length !== 33) continue;
+      for (const q of lms) {
+        if (!q || (q.visibility !== undefined && q.visibility < BOX_VIS)) continue;
+        const x = q.x * W, y = q.y * H;
+        if (!isFinite(x) || !isFinite(y)) continue;
+        x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+      }
+    }
+    if (!(x1 > x0) || !(y1 > y0)) return null;
+    const h = y1 - y0; // 体の高さ（頭〜足）
+    // 上: 振り上げた手とクラブ（体の高さの約6割）。横: クラブが体の外へ伸びる（約7.5割）。下: 足元のボールと地面
+    const bx0 = Math.max(0, Math.floor(x0 - 0.75 * h)), bx1 = Math.min(W, Math.ceil(x1 + 0.75 * h));
+    const by0 = Math.max(0, Math.floor(y0 - 0.6 * h)), by1 = Math.min(H, Math.ceil(y1 + 0.2 * h));
+    const w = bx1 - bx0, hh = by1 - by0;
+    if (w < 16 || hh < 16 || w * hh > BOX_MAX_AREA * W * H) return null;
+    return { x: bx0, y: by0, w, h: hh };
+  }
+  // 枠の中の 0〜1 → 元のコマの 0〜1（分析サービスには元のコマの座標で送るので、サービス側は変えずに済む）
+  function fromBox(lms, box, W, H) {
+    return lms.map((q) => {
+      const o = { x: +((box.x + q.x * box.w) / W).toFixed(5), y: +((box.y + q.y * box.h) / H).toFixed(5) };
+      if (q.visibility !== undefined) o.visibility = q.visibility;
+      return o;
+    });
+  }
+  const sameBox = (a, b) => (!a && !b) || (!!a && !!b && a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h);
+  // 1コマの体の点（元のコマの 0〜1）。src は <video> か、そのコマを絵にした canvas。box があれば切り出して拡大してから取る
+  function detectFrame(det, src, meta, box, edge = 0) {
+    const isVideo = typeof HTMLVideoElement !== "undefined" && src instanceof HTMLVideoElement;
+    if (!box) return det.detect(isVideo ? frameCanvas(src, edge) : src, meta);
+    const k = (isVideo ? src.videoWidth : src.width) / meta.width; // src の画素 ÷ 元のコマの画素
+    const z = Math.min(POSE_SHORT / Math.min(box.w, box.h), 1280 / Math.max(box.w, box.h));
+    const c = document.createElement("canvas");
+    c.width = Math.max(1, Math.round(box.w * z)); c.height = Math.max(1, Math.round(box.h * z));
+    c.getContext("2d").drawImage(src, box.x * k, box.y * k, box.w * k, box.h * k, 0, 0, c.width, c.height);
+    const r = det.detect(c, { ...meta, box });
+    return r && r.length === 33 ? fromBox(r, box, meta.width, meta.height) : r;
+  }
+  // 数コマを高めの解像度で見て、人の範囲を決める
+  async function personBox(st, det) {
+    const W = st.video.videoWidth, H = st.video.videoHeight;
+    const edge = Math.round(Math.max(W, H) * Math.min(1, BOX_SHORT / Math.max(1, Math.min(W, H))));
+    const d = st.duration || 0;
+    const sets = [];
+    for (let i = 0; i < BOX_SAMPLES; i++) {
+      if (st.abort) throw new Stopped();
+      const t = d * (0.05 + (0.9 * (i + 0.5)) / BOX_SAMPLES);
+      await seekTo(st.video, t);
+      let r = null;
+      try { r = det.detect(frameCanvas(st.video, edge), { t, view: st.view, width: W, height: H }); } catch { r = null; }
+      if (r && r.length === 33) sets.push(r);
+    }
+    return { box: boxFrom(sets, W, H), found: sets.length, looked: BOX_SAMPLES };
+  }
+
+  // スイングが見つからなかった理由（分析サービスの diag）→ 何が起きたか・次に何をするか（行き止まりにしない）
+  const NO_SWING = {
+    no_pose: { what: "体の点がほとんど取れませんでした",
+      next: "暗い・人が小さく写っている・画面越しに撮った動画は、体の点が取りにくくなります。明るい所で、人が画面の縦の半分ほどの大きさに写るまで近づいて撮り直すと見つかりやすくなります。シミュレーターの画面を撮った動画なら、シミュレーターから動画のファイルを書き出せると確実です。" },
+    no_raise: { what: "振り上げ（手が胸より上に上がるところ）が見つかりませんでした",
+      next: "頭の上からクラブの先まで画面に入っているか、スイングの途中で切れていないかを確かめてください。撮った向き（後ろから／正面から）の選び方も確かめてください。" },
+    no_address: { what: "振り上げの前の構えが見つかりませんでした",
+      next: "構えて少し止まるところから写っている動画にしてください（打つ直前から撮り始めると構えが写りません）。" },
+    no_down: { what: "振り上げのあと、振り下ろすところが見つかりませんでした",
+      next: "振り終わるまで写っている動画を選んでください。" },
+  };
+  function noSwingHtml(diag) {
+    const d = (diag && NO_SWING[diag.reason]) || { what: "頭の上からクラブの先まで写ったスイングが見つかりませんでした", next: "撮った向きの選び方が合っているかを確かめてください。" };
+    return App.errorHtml({ what: d.what, saved: "体の点を調べるために一度送りました（保存していません）。",
+      next: `${d.next}［手で選ぶ］で、コマを自分で選ぶこともできます。` });
+  }
+
   // ---- 端末の置き場（pose ストア）: 取った体の点を残し、閉じても続きから処理できるようにする ----
   async function idbGet(store, key) {
     try {
@@ -1082,9 +1173,8 @@ const Video = (() => {
       if (lm === undefined || needRoi) {
         await seekTo(st.video, t);
         if (lm === undefined) {
-          const c = frameCanvas(st.video, edge);
           let r = null;
-          try { r = det.detect(c, { t, view: st.view, width: st.video.videoWidth, height: st.video.videoHeight }); } catch { r = null; }
+          try { r = detectFrame(det, st.video, { t, view: st.view, width: st.video.videoWidth, height: st.video.videoHeight }, st.box, edge); } catch { r = null; }
           lm = compact(r);
           cache[key] = lm;
           fresh += 1;
@@ -1174,14 +1264,27 @@ const Video = (() => {
       const sig = sigOf(st);
       const saved = (await idbGet("pose", sig)) || {};
       if (st.reball) { saved.roi = {}; saved.ball = null; st.ball = null; st.reball = false; } // ボールを押し直す
-      const cache = saved.lm || {};
+      // 版の違う点（人の範囲を入れる前に取った点）は使い回さない。前に「見つかりませんでした」になった点を引きずらない
+      const fresh = saved.v === POSE_CACHE_V && "box" in saved;
+      let cache = fresh ? saved.lm || {} : {};
       const roi = saved.roi || {};
       if (saved.ball && !st.ball) st.ball = saved.ball;
-      st.perf.resumed = Object.keys(cache).length > 0;
       setPending(st);
-      keep = () => idbPut("pose", sig, { lm: cache, roi, ball: st.ball || null, at: Date.now() });
-      // ② スイングを探す（粗い走査）
+      keep = () => idbPut("pose", sig, { v: POSE_CACHE_V, box: st.box || null, lm: cache, roi, ball: st.ball || null, at: Date.now() });
+      // ② スイングを探す。まず人の範囲（続きから処理するときは、前に決めた枠をそのまま使う＝取ってある点と同じ枠）
       autoStage(body, 1);
+      if (fresh) st.box = saved.box || null;
+      else {
+        prog(body, "人の写っている範囲を探しています");
+        const pb = await personBox(st, det);
+        if (!sameBox(pb.box, saved.box)) cache = {}; // 枠が変われば点を取り直す
+        st.box = pb.box;
+        st.perf.box_found = pb.found; st.perf.box_looked = pb.looked;
+      }
+      const vw = st.video.videoWidth, vh = st.video.videoHeight;
+      st.perf.crop = st.box ? [Math.round((st.box.w / vw) * 1000) / 1000, Math.round((st.box.h / vh) * 1000) / 1000] : null;
+      st.perf.resumed = Object.keys(cache).length > 0;
+      await keep();
       const tc = performance.now();
       const coarseT = frameTimes(st, 0, st.duration, COARSE_HZ);
       if (coarseT.length > COARSE_MAX) throw Object.assign(new Error("動画が長すぎます"), { status: 400, long: true });
@@ -1196,10 +1299,11 @@ const Video = (() => {
       if (!r1.swings.length) {
         endRun(st);
         await clearPendingFor(st);
+        st.perf.no_swing = r1.diag || null;
         autoHalt(body, "スイングが見つかりませんでした");
-        body.querySelector("[data-err]").innerHTML = App.errorHtml({ what: "頭の上からクラブの先まで写ったスイングが見つかりませんでした",
-          saved: "体の点を調べるために一度送りました（保存していません）。",
-          next: "向きの選び方が合っているかを確かめてください。［手で選ぶ］で、コマを自分で選ぶこともできます。" });
+        const box = body.querySelector("[data-err]");
+        box.innerHTML = noSwingHtml(r1.diag);
+        box.dataset.noSwing = (r1.diag && r1.diag.reason) || "";
         $("[data-manual]", body).focus();
         return;
       }
@@ -1272,6 +1376,7 @@ const Video = (() => {
       if (cur.length) batches.push(cur);
       st.perf.batches = batches.length;
       const found = [], excluded = [];
+      let lastDiag = null;
       const td = performance.now();
       for (const [bi, b] of batches.entries()) {
         if (st.abort) throw new Stopped();
@@ -1285,6 +1390,7 @@ const Video = (() => {
         const req = { ...head, frames, practice_fallback: batches.length === 1 };
         if (st.ball) { req.roi = frames.map((f) => { const v = roi[f.t.toFixed(4)]; return v === undefined ? null : v; }); req.ball_seen = ballSeen; }
         const r2 = await api("POST", "/v1/video/checkpoints", req);
+        if (r2.diag) lastDiag = r2.diag;
         const mine = (s) => inWin(s.t0, ws);
         for (const s of r2.swings) if (mine(s)) found.push({ s, fr: frames });
         for (const s of r2.excluded || []) if (mine(s)) excluded.push({ s, fr: frames });
@@ -1297,7 +1403,7 @@ const Video = (() => {
           found.push(x);
         }
       }
-      if (!found.length) throw Object.assign(new Error("細かく見たらスイングが見つかりませんでした"), { status: 422 });
+      if (!found.length) throw Object.assign(new Error("細かく見たらスイングが見つかりませんでした"), { status: 422, diag: lastDiag || { reason: "" } });
       found.sort((x, y) => x.s.t0 - y.s.t0);
       found.forEach((x, k) => { x.s.index = k + 1; });
       const auto = [];
@@ -1326,6 +1432,12 @@ const Video = (() => {
     } else if (e && e.long) {
       autoHalt(body, "動画が長すぎます");
       box.innerHTML = App.errorHtml({ what: "この動画は長すぎて、一度に処理できません", saved: "まだ何も送っていません。", next: "写真アプリで十五分ほどまでに切ってから、もう一度選んでください。［手で選ぶ］もできます。" });
+      $("[data-manual]", body).focus();
+      return;
+    } else if (e && e.diag) {
+      // 同じ点で探し直しても同じ結果になるので「もう一度」は置かない。撮り直すか、手で選ぶ
+      autoHalt(body, "スイングが見つかりませんでした");
+      box.innerHTML = noSwingHtml(e.diag);
       $("[data-manual]", body).focus();
       return;
     } else {
@@ -1556,7 +1668,7 @@ const Video = (() => {
           const shot = await blobCanvas(f.blob);
           let lms = f.lm ? expand(f.lm) : null;
           if (!lms) {
-            try { const r = det.detect(shot, { t: f.t, frame: f.frame, p: pp, view: st.view, width: st.video.videoWidth, height: st.video.videoHeight }); lms = r && r.length === 33 ? r : []; } catch { lms = []; }
+            try { const r = detectFrame(det, shot, { t: f.t, frame: f.frame, p: pp, view: st.view, width: st.video.videoWidth, height: st.video.videoHeight }, st.box); lms = r && r.length === 33 ? r : []; } catch { lms = []; }
           }
           const thumb = await b64(await toBlob(scaled(shot, shot.width, shot.height, THUMB_EDGE), 0.8));
           const auto = f.source === "auto";
@@ -1593,5 +1705,5 @@ const Video = (() => {
 
   App.route("/video", render, { tab: "record", noTabbar: true });
   App.route("/video/:date", render, { tab: "record", noTabbar: true });
-  return { catalog, containerInfo, selfTest, poseDetector, keptFrame, keepFrame };
+  return { catalog, containerInfo, selfTest, poseDetector, keptFrame, keepFrame, _crop: { boxFrom, fromBox, noSwingHtml } };
 })();

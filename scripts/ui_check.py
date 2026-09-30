@@ -1540,6 +1540,62 @@ FAKE_MOTION_JS = """(() => {
 })();"""
 
 
+def check_video_no_swing(browser, root: str, pid: int, shots_dir: str, errors: list[str]) -> None:
+    """スイングが見つからないとき、分析サービスの diag に合わせた理由と次の手が出る（行き止まりにしない）。
+    人の範囲の切り出し（小さく写った人を拡大してから点を取る）の枠の計算と、点を元のコマの座標に戻す計算も確かめる。"""
+    tag = "video-noswing"
+    MSV = SYNTH
+    body, _ = SYNTH.motion(MSV.MOTION["view"], fps=MSV.MOTION["fps"], n_swings=MSV.MOTION["n_swings"], practice=MSV.MOTION["practice"])
+    ctx, page = new_page(browser, 390, 844, errors, tag, pid)
+    ctx.add_init_script(FAKE_MOTION_JS % json.dumps({"fps": body["fps"], "lm": [f["lm"] for f in body["frames"]]}))
+    goto(page, root, "/video/2026-09-23", "[data-file]")
+    # 枠: 画面の縦の約4分の1に写った人（1920×1080 の真ん中）→ クラブのぶん広げても画面より小さく、元の座標に戻すと同じ点
+    got = page.evaluate("""() => {
+      const W = 1920, H = 1080, lm = [];
+      for (let i = 0; i < 33; i++) lm.push({ x: (900 + (i % 5) * 30) / W, y: (400 + i * 8) / H, visibility: 0.9 });
+      const b = Video._crop.boxFrom([lm], W, H);
+      if (!b) return { b: null };
+      const inBox = lm.map((q) => ({ x: (q.x * W - b.x) / b.w, y: (q.y * H - b.y) / b.h, visibility: q.visibility }));
+      const back = Video._crop.fromBox(inBox, b, W, H);
+      const err = Math.max(...back.map((q, i) => Math.max(Math.abs(q.x - lm[i].x) * W, Math.abs(q.y - lm[i].y) * H)));
+      const big = Video._crop.boxFrom([lm.map((q) => ({ ...q, y: q.y * 3.5 - 1.1 }))], W, H);
+      return { b, err, big };
+    }""")
+    b = got.get("b")
+    if not b or not (b["h"] < 1080 * 0.7 and b["y"] < 400 and b["y"] + b["h"] > 400 + 32 * 8 and b["x"] < 900 and b["x"] + b["w"] > 1020):
+        errors.append(f"[{tag}] 人の範囲の枠が体とクラブを囲っていない: {got}")
+    elif got["err"] > 0.6:
+        errors.append(f"[{tag}] 枠の中の点を元のコマの座標に戻すとずれる: {got['err']}px")
+    if got.get("big") is not None:
+        errors.append(f"[{tag}] 画面いっぱいに写った人でも切り出している（拡大にならない）: {got['big']}")
+    # 分析サービスが「体の点がほとんど取れない」を返したとき
+    for day, reason, want in (("21", "no_pose", "体の点がほとんど取れませんでした"), ("22", "no_raise", "振り上げ")):
+        page.unroute("**/v1/video/checkpoints")
+        answer = json.dumps({"video_version": "video/0.3", "n_frames": 10, "torso_px": 50, "swings": [], "excluded": [],
+                             "diag": {"reason": reason, "pose_ratio": 0.1, "raised": False, "address": False, "static": False, "down": False, "n_frames": 10}})
+        page.route("**/v1/video/checkpoints", lambda r, _req=None, a=answer: r.fulfill(status=200, content_type="application/json", body=a))
+        goto(page, root, f"/video/2026-09-{day}", "[data-file]")
+        if page.get_attribute("[data-md=auto]", "aria-pressed") != "true":
+            page.click("[data-md=auto]")
+        page.set_input_files("[data-file]", os.path.join(SYN, "stick_motion_dtl.webm"))
+        try:
+            page.wait_for_selector(f"[data-err][data-no-swing='{reason}']", timeout=90000)
+        except Exception:  # noqa: BLE001
+            errors.append(f"[{tag}] 見つからない理由（{reason}）が出ない: {page.inner_text('#view')[:300]!r}")
+            continue
+        txt = page.inner_text("[data-err]")
+        if want not in txt or "手で選ぶ" not in txt:
+            errors.append(f"[{tag}] 見つからない理由（{reason}）の文と次の手: {txt[:200]!r}")
+        if not page.locator("[data-manual]:visible").count():
+            errors.append(f"[{tag}] 見つからないときに［手で選ぶ］が無い（行き止まり）")
+        no_overflow(page, tag, f"見つからない（{reason}）", errors)
+        shot(page, shots_dir, f"{tag}-{reason}")
+        # 同じ動画を選び直すと、同じ失敗をくり返さないように点を取り直す印（途中の印）は消えている
+        if LS_get(page, "golf.videoPending"):
+            errors.append(f"[{tag}] 見つからなかったのに途中の印が残っている")
+    ctx.close()
+
+
 def check_video_auto(browser, root: str, base: str, pid: int, shots_dir: str, errors: list[str]) -> None:
     """合成の動画（スイング3本・2本目は素振り）で: 自動で取り出す → 止める → ホームの「続きから処理する」→ 同じ動画で続き
     → ボールの両端 → 確かめるところ → P2 のクラブ → チェック一覧（手の通り道の輪・テンポが出る）。"""
@@ -2295,6 +2351,7 @@ def main() -> None:
         check_video(browser, sv.root, sv.base, me["id"], shots_dir, errors)
         check_video_portrait(browser, sv.root, me["id"], shots_dir, errors)
         check_video_auto(browser, sv.root, sv.base, me["id"], shots_dir, errors)
+        check_video_no_swing(browser, sv.root, me["id"], shots_dir, errors)
         check_routes(browser, sv.root, me["id"], real_id, shots_dir, errors)
         check_vision_off(browser, sv.root, sv.base, me["id"], shots_dir, errors)
         check_narrative(browser, shots_dir, errors)
