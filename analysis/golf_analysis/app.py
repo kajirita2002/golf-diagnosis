@@ -132,7 +132,10 @@ class VideoCheckpointsIn(BaseModel):
     height: float
     frames: list[dict[str, Any]] = Field(default_factory=list)
     roi: list[Any] | None = None
+    ball_seen: list[dict[str, Any]] = Field(default_factory=list)
     club_taps: list[dict[str, Any]] = Field(default_factory=list)
+    # 全部が素振りに見えたとき外さずに返すか（端末がスイングの組に分けて送るときは、端末がまとめてから決めるので false）
+    practice_fallback: bool = True
 
 
 class CheckpointFocusIn(BaseModel):

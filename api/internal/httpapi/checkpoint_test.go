@@ -446,8 +446,8 @@ func Test姿勢の時系列は中継するだけで保存しない(t *testing.T)
 func Test自動で取り出した時系列をスイングに残して測る(t *testing.T) {
 	c := newCPEnv(t, "R")
 	id := c.swing("dtl")
-	frames := []map[string]any{{"checkpoint": "P1", "t": 1.0, "frame": 60, "source": "auto", "landmarks": lm33(), "thumb": jpegB64(t, 360, 202)},
-		{"checkpoint": "P4", "t": 1.8, "frame": 108, "source": "manual", "landmarks": lm33()}}
+	frames := []map[string]any{{"checkpoint": "P1", "t": 1.0, "frame": 60, "source": "auto", "method": "rule", "status": "estimated", "landmarks": lm33(), "thumb": jpegB64(t, 360, 202)},
+		{"checkpoint": "P4", "t": 1.8, "frame": 108, "source": "manual", "method": "rule", "status": "estimated", "landmarks": lm33()}}
 	out := c.do("PUT", "/v1/swings/"+jsonNum(id)+"/frames", map[string]any{"frames": frames, "series": seriesOf(120)}, 200)
 	sw := out["swing"].(map[string]any)
 	if sw["has_series"] != true {
@@ -461,6 +461,20 @@ func Test自動で取り出した時系列をスイングに残して測る(t *t
 	fs := out["frames"].([]any)
 	if fs[0].(map[string]any)["source"] != "auto" || fs[1].(map[string]any)["source"] != "manual" {
 		t.Fatalf("source: %v", fs)
+	}
+	// 自動のコマは決め方と状態（目安）を残す。手で選んだコマは持たない（手で選んだものを「目安」と出さない）
+	if f0 := fs[0].(map[string]any); f0["status"] != "estimated" || f0["method"] != "rule" {
+		t.Fatalf("自動のコマの状態: %v", f0)
+	}
+	if f1 := fs[1].(map[string]any); f1["status"] != "" || f1["method"] != "" {
+		t.Fatalf("手で選んだコマに状態が残った: %v", f1)
+	}
+	for _, bad := range []map[string]any{{"status": "failed"}, {"method": "claude"}} {
+		f := map[string]any{"checkpoint": "P1", "t": 1.0, "frame": 60, "source": "auto", "landmarks": lm33()}
+		for k, v := range bad {
+			f[k] = v
+		}
+		c.do("PUT", "/v1/swings/"+jsonNum(id)+"/frames", map[string]any{"frames": []map[string]any{f}}, 400)
 	}
 	// 時系列を渡さずにコマだけ直しても、時系列は残る
 	c.do("PUT", "/v1/swings/"+jsonNum(id)+"/frames", map[string]any{"frames": frames[:1]}, 200)

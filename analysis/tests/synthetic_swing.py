@@ -279,13 +279,16 @@ def _lerp_pose(a: dict, b: dict, s: float) -> dict:
 
 
 def motion(view: str = "dtl", hand: str = "R", fps: float = 60.0, n_swings: int = 1, faults=(), waggle: bool = False,
-           practice: tuple = (), gaps: tuple = (), roi: bool = True, lead_in: float = 0.0) -> tuple[dict, list[dict]]:
+           practice: tuple = (), gaps: tuple = (), roi: bool = True, lead_in: float = 0.0,
+           ball_away: tuple = ()) -> tuple[dict, list[dict]]:
     """動画ぜんたいの姿勢の時系列（POST /v1/video/checkpoints の入力）と、スイングごとの本当の時刻。
 
     - practice にスイングの番号（1から）を入れると、そのスイングは素振り（ボールのまわりが変わらない）。
     - gaps: [(始まりの秒, 長さ)] の間は体の点が無い（欠け）。
     - waggle: 最初のスイングの前に、手を小さく揺らしてから静かに構え直す。
-    - lead_in: 最初のスイングの前に足す時間（ワッグルの場所）。"""
+    - lead_in: 最初のスイングの前に足す時間（ワッグルの場所）。
+    - ball_away にスイングの番号を入れると、その構えでは丸の中にボールが無い（新しいボールが丸から横に置かれた）。
+      丸の中は打っても変わらず、構えの丸の中は最初のボールの絵と似ていない（ball_seen の d が大きい）。"""
     fs = set(faults)
     keys = {p: _key_pose(view, p, fs) for p in P_ORDER}
     if waggle:
@@ -327,7 +330,7 @@ def motion(view: str = "dtl", hand: str = "R", fps: float = 60.0, n_swings: int 
             pose, _ = _mirror(pose, {})
         missing = any(g0 <= t < g0 + gl for g0, gl in gaps)
         frames.append({"t": round(t, 5), "lm": None if missing else [[round(q["x"], 5), round(q["y"], 5), q["visibility"]] for q in landmarks(pose)]})
-        hit = idx >= 0 and r is not None and r >= KEY_T["P7"] - 1e-9 and (idx + 1) not in practice
+        hit = idx >= 0 and r is not None and r >= KEY_T["P7"] - 1e-9 and (idx + 1) not in practice and (idx + 1) not in ball_away
         rois.append(0.5 if hit else 0.0)
     for i in range(n_swings):
         s0 = lead_in + i * SWING_LEN
@@ -335,6 +338,8 @@ def motion(view: str = "dtl", hand: str = "R", fps: float = 60.0, n_swings: int 
     body = {"view": view, "handedness": hand, "fps": fps, "width": W, "height": H, "frames": frames}
     if roi:
         body["roi"] = rois
+        # 各スイングの構え（P1）で、丸の中が最初にタップしたボールの絵とどれだけ違うか
+        body["ball_seen"] = [{"t": round(lead_in + i * SWING_LEN + KEY_T["P1"], 4), "d": 0.4 if (i + 1) in ball_away else 0.02} for i in range(n_swings)]
     return body, truths
 
 

@@ -26,6 +26,10 @@ type addedColumn struct {
 var addedColumns = []addedColumn{
 	// 設定（距離の単位など。docs/DESIGN_v2.md §10 S）。中身は httpapi が形を決めて検査する
 	{Table: "players", Name: "prefs_json", DDL: "TEXT NOT NULL DEFAULT '{}'"},
+	// 自動で選んだコマの決め方と状態（docs/DESIGN_v2.md §6.4 の method / status）。
+	// status が estimated のコマは「目安」（代わりの規則で決めた）と R2・C-1 に出す。手で選んだコマは空
+	{Table: "swing_frames", Name: "method", DDL: "TEXT NOT NULL DEFAULT ''"},
+	{Table: "swing_frames", Name: "status", DDL: "TEXT NOT NULL DEFAULT ''"},
 }
 
 // ensureColumns は足りない列を足す。

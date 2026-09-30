@@ -16,7 +16,8 @@ const Home = (() => {
       // 途中の動画の記録へ（同じ動画を選び直すと、取ってある体の点で続きから処理する）
       const vp = typeof local.videoPending === "object" ? local.videoPending : {};
       const href = vp.date ? `#/video/${vp.date}${vp.session ? `?session=${vp.session}` : ""}` : "#/record";
-      return { key: "video_resume", heading: "動画の処理が途中です", primary: { label: "続きから処理する", href } };
+      // 押した先で同じ動画を選び直す（動画は端末に置かないので、ファイルを選ぶのは本人）。名前もそう言う
+      return { key: "video_resume", heading: "動画の処理が途中です", primary: { label: "同じ動画を選んで続ける", href } };
     }
     if (local.setupMismatch) return { key: "setup", heading: "撮り方を確かめたい", primary: { label: "撮り方を合わせる", href: "#/record" } };
     // 球は無く、動画のチェックだけがある（段2a）: 「ようこそ」のままにせず、動画のチェックへ
@@ -96,12 +97,21 @@ const Home = (() => {
     });
   }
 
+  // 動画の途中の印。古い印（7日より前）は捨てる（ホームの主ボタンを「続き」に固定し続けない。video.js の pending と同じ日数）
+  function freshPending() {
+    const vp = LS.get("golf.videoPending");
+    if (vp && typeof vp === "object" && vp.at && Date.now() - vp.at > 7 * 86400000) { LS.del("golf.videoPending"); return null; }
+    return vp || null;
+  }
+
   // 並び: 状態 → 今日の一点／いまの課題 → （合格の条件・前回）→ 主ボタン → 次に見る → 理想との差（小さな図）。
   // 主ボタンは320px でもスクロールせずに見える位置に置く（図が大きく、ボタンを画面の外へ押し出していた）。
   function draw(el, h, fromCopy) {
-    const st = homeState(h, { videoPending: LS.get("golf.videoPending") || null });
+    const st = homeState(h, { videoPending: freshPending() });
     const f = h && h.focus, p = h && h.plan;
     let body = `${appbar()}<h1 class="visually-hidden">ホーム</h1>${headHtml(st)}`;
+    // 動画の続きは、見出しのすぐ下に主ボタンを置く（間に課題のカードを挟むと、練習のボタンに見える）
+    if (st.key === "video_resume") body += `<div class="block">${primaryHtml(st)}</div>`;
     if (st.key === "first") {
       body += `<div class="empty">${ART}
         <p class="t-headline">スイングの記録から、いま一番の課題を一つ見つけ、直ったかを別の日に確かめます。</p>
@@ -123,7 +133,7 @@ const Home = (() => {
     if (st.key === "video") {
       const need = Math.max(0, 3 - (st.video.n_same_view || 0));
       body += `<section class="block" aria-labelledby="h-issue"><h2 id="h-issue" class="label">いまの課題</h2>
-        <p class="t-headline" data-home="first" data-video-focus style="margin:var(--s1) 0 var(--s2)">${need ? `同じ向きで、もう${["", "一本", "二本"][need]}選ぶと課題が決まります` : "チェックで「まずここ」を見られます"}</p>
+        <p class="t-headline" data-home="first" data-video-focus style="margin:var(--s1) 0 var(--s2)">${need ? `同じ向きのスイングがあと${["", "一本", "二本"][need]}あると、課題が決まります` : "チェックで「まずここ」を見られます"}</p>
         <p class="sub">球の記録（計測器の表）を入れると、球の結果も並べて見られます。</p></section>`;
     }
     if (st.key === "measure") {
@@ -131,7 +141,7 @@ const Home = (() => {
     } else if (st.key === "finding") {
       body += `<p class="sub" data-home="finding">${h.focus_state === "unavailable" ? "分析のサービスに届かないので、まだ課題を出せません。記録と練習は使えます。" : "いまの記録からは、課題をまだ一つに決められません。診断で様子を見られます。"}</p>`;
     }
-    body += `<div class="block">${primaryHtml(st)}</div>`;
+    if (st.key !== "video_resume") body += `<div class="block">${primaryHtml(st)}</div>`;
     const next = f && f.next_title;
     if (next && st.key !== "first") body += `<p class="sub" data-home="next">次に見る: ${esc(next)}</p>`;
     if (f && (f.gap || f.figure)) {

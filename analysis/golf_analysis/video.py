@@ -16,7 +16,11 @@ L＝胴の長さ（両肩の中点〜両腰の中点の、全コマの中央値�
   {view: dtl|fo, handedness: R|L, fps: 動画の fps（分からなければ 0）, width, height,
    frames: [{t, lm: [[x, y, v] × 33] | null}],   ← 0〜1 の割合。lm の代わりに landmarks: [{x, y, visibility}] でもよい
    roi: [0〜1 | null]（任意。frames と同じ並び。構えのボールのまわりが構えのコマからどれだけ変わったか）,
-   club_taps: [{t, grip: [x, y], head: [x, y]}]（任意。正面の P2・P6 の寄せ直しに使う。画素）}
+   ball_seen: [{t, d}]（任意。各スイングの構えのコマで、丸の中が最初にタップしたボールの絵とどれだけ違うか 0〜1。
+              似ていなければ、そのスイングの素振りの判定をしない＝新しいボールが丸から横に置かれたかもしれない）,
+   club_taps: [{t, grip: [x, y], head: [x, y]}]（任意。正面の P2・P6 の寄せ直しに使う。画素）,
+   practice_fallback: 全部が素振りに見えたら外さずに返すか（既定は真）}
+- 点の値が数でないコマは、そのコマの点の欠けとして扱う（落ちない）。
 """
 
 from __future__ import annotations
@@ -95,6 +99,12 @@ class Series:
         self.L = self._torso()
         # 平滑化した手（粗い走査の揺れと、姿勢推定の小さな揺れを消す）
         self.Hs = self._smooth(self.pts["H"], config.VIDEO_SMOOTH_S)
+        self.ball_seen: list[tuple[float, float]] = []
+        for b in body.get("ball_seen") or []:
+            try:
+                self.ball_seen.append((float(b["t"]), float(b["d"])))
+            except (KeyError, TypeError, ValueError):
+                continue
         self.taps = []
         for c in body.get("club_taps") or []:
             try:
@@ -117,8 +127,13 @@ class Series:
             q = lm[i]
             if not isinstance(q, (list, tuple)) or len(q) < 2 or q[0] is None or q[1] is None:
                 return None
-            x, y = float(q[0]) * self.w, float(q[1]) * self.h
-            v = float(q[2]) if len(q) > 2 and q[2] is not None else 1.0
+            try:
+                x, y = float(q[0]) * self.w, float(q[1]) * self.h
+                v = float(q[2]) if len(q) > 2 and q[2] is not None else 1.0
+            except (TypeError, ValueError):
+                return None  # 数でない値はそのコマの欠け（500 にしない）
+            if not all(math.isfinite(z) for z in (x, y, v)):
+                return None
             if self.hand == "L":
                 x = self.w - x
             P[name] = (x, y, v)
@@ -199,6 +214,10 @@ class Series:
 
     def ok(self, i: int, *names: str) -> bool:
         return all(not _isnan(self.pts[k][i][0]) for k in names)
+
+    def gap_at(self, i: int) -> float:
+        """コマ i のまわりの、実際に取ったコマの間隔（前後の広いほう）。走査の間引き（240fps を 120Hz で取る）も入る。"""
+        return max(self.t[i] - self.t[i - 1] if i > 0 else 0.0, self.t[i + 1] - self.t[i] if i + 1 < self.n else 0.0) or self.dt()
 
     def dt(self) -> float:
         """コマの間隔（動画の fps が分かればその間隔。無ければ送られた時刻の間隔の中央値）。"""
@@ -348,14 +367,21 @@ def _p(s: Series, name: str, i: int | None, method: str, status: str, reason: st
 
 
 def _club_snap(s: Series, p: dict) -> dict:
-    """正面でクラブをタップしたコマが P2・P6 の前後3コマにあれば、シャフトが水平に一番近いコマへ寄せ直す（§6.4）。"""
+    """正面でクラブをタップしたコマが P2・P6 の前後3コマにあれば、シャフトが水平に一番近いコマへ寄せ直す（§6.4）。
+
+    寄せ直して「ok」と言うのは、一番水平に近いタップが VIDEO_SNAP_LEVEL_DEG 以内で、その前と後のコマにもタップがあるときだけ
+    （前後がそろっていないと「一番近い」とは言えない。斜めのタップ一つで目安が ok に化けない）。それ以外は目安のまま。"""
     if s.view != "fo" or p["t"] is None or not s.taps:
         return p
-    tol = config.VIDEO_SNAP_FRAMES * s.dt() + 1e-6
+    tol = (config.VIDEO_SNAP_FRAMES + 0.5) * s.dt()  # 半コマの余裕（時刻の丸めで端のコマを落とさない）
     near = [c for c in s.taps if abs(c["t"] - p["t"]) <= tol]
-    if not near:
+    if len(near) < 2:
         return p
     best = min(near, key=_shaft_level)
+    if _shaft_level(best) > config.VIDEO_SNAP_LEVEL_DEG + 1e-9:
+        return p
+    if not (any(c["t"] < best["t"] - 1e-6 for c in near) and any(c["t"] > best["t"] + 1e-6 for c in near)):
+        return p
     i = _nearest(s, best["t"])
     return {**p, "t": round(s.t[i], 4), "frame": i, "method": "club_tap", "status": "ok", "reason": ""}
 
@@ -448,7 +474,12 @@ def detect_one(s: Series, sw: dict) -> dict:
                 if ok:
                     i7 = i
                     break
-            practice = i7 is None
+            # 丸の中が変わらない＝素振り、と言えるのは、この構えで丸の中にボールが写っていたときだけ
+            # （ボールの丸は最初のスイングで一回タップした位置。新しいボールが丸から横に置かれると、打っても丸の中は変わらない）
+            if i7 is None and _ball_in_circle(s, s.t[a], s.t[t0i]):
+                practice = True
+            elif i7 is not None:
+                practice = False
         if i7 is None:
             method7, st7, why7 = "rule", "estimated", "proxy"
             h1 = s.Hs[ps["P1"]["frame"]][1] if ps["P1"]["frame"] is not None and s.ok(ps["P1"]["frame"], "H") else None
@@ -557,44 +588,61 @@ def detect_one(s: Series, sw: dict) -> dict:
         p = ps[name]
         p["reason_text"] = REASONS.get(p["reason"], p["reason"]) if p["reason"] else ""
     last_i = next((ps[k]["frame"] for k in ("P10", "P9", "P8", "P7", "P6") if ps[k]["frame"] is not None), top0)
+    # 細かく取る区間の頭は P1 の VIDEO_HEAD_S 秒前まで（構えが長くても、細かく取るコマが増えない）
+    t_p1 = ps["P1"]["t"] if ps["P1"]["t"] is not None else s.t[b]
+    head = max(s.t[a] - 0.3, t_p1 - config.VIDEO_HEAD_S)
+    f4, f7 = ps["P4"]["frame"], ps["P7"]["frame"]
     return {
         "t0": round(t0, 4), "t0_frame": t0i, "ps": [ps[k] for k in PS_ALL], "warnings": warnings,
         "kind": "practice" if practice else "swing", "practice_known": practice is not None,
-        "window": [round(max(0.0, s.t[a] - 0.3), 3), round(s.t[last_i] + config.VIDEO_TAIL_S, 3)],
-        "tempo": tempo(t0, ps["P4"]["t"], ps["P7"]["t"], s.dt()),
+        "window": [round(max(0.0, head), 3), round(s.t[last_i] + config.VIDEO_TAIL_S, 3)],
+        "tempo": tempo(t0, ps["P4"]["t"], ps["P7"]["t"], (s.gap_at(t0i), s.gap_at(f4) if f4 is not None else s.dt(), s.gap_at(f7) if f7 is not None else s.dt())),
     }
+
+
+def _ball_in_circle(s: Series, ta: float, tb: float) -> bool:
+    """構えの区間 [ta, tb] に、丸の中が最初にタップしたボールの絵と似ていた、という印（ball_seen）があるか。"""
+    ds = [d for t, d in s.ball_seen if ta - 0.05 <= t <= tb + 0.05]
+    return bool(ds) and min(ds) <= config.VIDEO_BALL_SAME + 1e-9
 
 
 # ------------------------------------------------------------ テンポ（§5.3 G）
 
 
-def tempo(t0: float | None, t4: float | None, t7: float | None, dt: float) -> dict | None:
-    """上げ（t₀→P4）と下ろし（P4→P7）の時間の比と、時刻それぞれに ±1コマを足した比の幅。"""
+def tempo(t0: float | None, t4: float | None, t7: float | None, dt) -> dict | None:
+    """上げ（t₀→P4）と下ろし（P4→P7）の時間の比と、時刻それぞれに ±1コマを足した比の幅。
+
+    dt は1つの数か、t₀・P4・P7 それぞれの実際のコマの間隔（間引いて取ったコマは、間引いた間隔で幅を作る）。"""
     if t0 is None or t4 is None or t7 is None or not (t0 < t4 < t7):
         return None
+    d0, d4, d7 = dt if isinstance(dt, (tuple, list)) else (dt, dt, dt)
     back, down = t4 - t0, t7 - t4
     rs = []
-    for a in (-dt, 0.0, dt):
-        for b in (-dt, 0.0, dt):
-            for c in (-dt, 0.0, dt):
+    for a in (-d0, 0.0, d0):
+        for b in (-d4, 0.0, d4):
+            for c in (-d7, 0.0, d7):
                 bk, dn = (t4 + b) - (t0 + a), (t7 + c) - (t4 + b)
                 if bk > 0 and dn > 0:
                     rs.append(bk / dn)
     return {"back_s": round(back, 4), "down_s": round(down, 4), "ratio": round(back / down, 3),
-            "lo": round(min(rs), 3), "hi": round(max(rs), 3), "dt_s": round(dt, 5)}
+            "lo": round(min(rs), 3), "hi": round(max(rs), 3), "dt_s": round(max(d0, d4, d7), 5)}
 
 
-def tempo_word(tp: dict | None, club_class: str) -> tuple[str | None, float | None]:
-    """比の幅が、ガイドの目安 ± 人が決めた余白（CP_TEMPO_MARGIN）を丸ごと外れたときだけ言葉にする（fast / slow）。"""
+def tempo_word(tp: dict | None, club_class: str) -> tuple[str | None, float | None, bool]:
+    """(言葉, 目安, 近いと言えるか)。
+
+    - 比の幅が、ガイドの目安 ± 人が決めた余白（CP_TEMPO_MARGIN）を丸ごと外れたときだけ言葉にする（fast / slow）。
+      言葉は「上げに比べて下ろしが短め／長め」の中立の言い方（比からは、上げと下ろしのどちらのせいかは分からない）。
+    - 「目安の近く」と言えるのは、幅が丸ごと目安 ± 余白の中に収まるときだけ。それ以外は言い切れない（近いとも外れたとも言わない）。"""
     g = config.CP_TEMPO_GUIDE.get(club_class)
     if not tp or g is None:
-        return None, g
+        return None, g, False
     m = config.CP_TEMPO_MARGIN
     if tp["lo"] > g + m:
-        return "fast", g  # 上げに比べて下ろしが短い＝切り返しが急ぎ気味
+        return "fast", g, False  # 上げに比べて下ろしが短め
     if tp["hi"] < g - m:
-        return "slow", g
-    return None, g
+        return "slow", g, False  # 上げに比べて下ろしが長め
+    return None, g, (g - m <= tp["lo"] and tp["hi"] <= g + m)
 
 
 # ------------------------------------------------------------ 保存する時系列（swings.series_gz）
@@ -644,4 +692,16 @@ def detect(body: dict) -> dict:
         k += 1
         one["index"] = k
         out["swings"].append(one)
+    # 全部が素振りに見えたときは、素振りの判定をやめて返す（丸がずれた・ボールが小さく写った、のほうがありそう。
+    # 全部外すと先へ進めず、同じ結果をくり返す＝行き止まり。§6.4）
+    if not out["swings"] and out["excluded"] and body.get("practice_fallback", True) is not False:
+        for one in out["excluded"]:
+            k += 1
+            one.update(index=k, kind="swing", practice_known=False)
+            one["warnings"].append("practice_unsure")
+            for p in one["ps"]:
+                if p["p"] == "P7" and p["reason"] == "no_ball_change":
+                    p.update(reason="proxy", reason_text=REASONS["proxy"])
+            out["swings"].append(one)
+        out["excluded"] = []
     return out

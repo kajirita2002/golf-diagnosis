@@ -356,10 +356,18 @@ type frameIn struct {
 	T          float64         `json:"t"`
 	Frame      int             `json:"frame"`
 	Source     string          `json:"source"`
+	Method     string          `json:"method"` // 自動で決めたときの決め方（§6.4）
+	Status     string          `json:"status"` // 自動で決めたときの状態。estimated は「目安」
 	Landmarks  json.RawMessage `json:"landmarks"`
 	Taps       json.RawMessage `json:"taps"`
 	Thumb      string          `json:"thumb"` // 長辺 360px までの JPEG（base64）。全解像度のコマは受けない
 }
+
+// 自動で決めたコマの決め方と状態（video.py の _p。failed のコマは送られない＝コマが無い）
+var (
+	frameMethods  = map[string]bool{"": true, "rule": true, "ball_roi": true, "club_tap": true, "midpoint": true}
+	frameStatuses = map[string]bool{"": true, "ok": true, "estimated": true}
+)
 
 // validLandmarks は 33点 [{x, y, visibility}]（0〜1 の割合）か空。
 func validLandmarks(raw json.RawMessage) error {
@@ -469,6 +477,14 @@ func (s *Server) putSwingFrames(w http.ResponseWriter, r *http.Request) {
 			s.fail(w, bad("source は manual か auto"))
 			return
 		}
+		// 決め方と状態は自動のコマだけが持つ（手で選んだ・直したコマは空。手で選んだものを「目安」と出さない）
+		if f.Source == "manual" {
+			f.Method, f.Status = "", ""
+		}
+		if !frameMethods[f.Method] || !frameStatuses[f.Status] {
+			s.fail(w, bad("method は rule / ball_roi / club_tap / midpoint、status は ok / estimated"))
+			return
+		}
 		if err := validLandmarks(f.Landmarks); err != nil {
 			s.fail(w, err)
 			return
@@ -482,7 +498,7 @@ func (s *Server) putSwingFrames(w http.ResponseWriter, r *http.Request) {
 			s.fail(w, err)
 			return
 		}
-		frames = append(frames, model.SwingFrame{Checkpoint: f.Checkpoint, T: f.T, Frame: f.Frame, Source: f.Source, Landmarks: f.Landmarks, Taps: f.Taps, Thumb: th})
+		frames = append(frames, model.SwingFrame{Checkpoint: f.Checkpoint, T: f.T, Frame: f.Frame, Source: f.Source, Method: f.Method, Status: f.Status, Landmarks: f.Landmarks, Taps: f.Taps, Thumb: th})
 	}
 	for _, p := range in.Missing {
 		if !model.IsCheckpoint(p) {

@@ -263,7 +263,7 @@ def check_home_states(page, errors: list[str]) -> None:
         ("video", {"sessions_with_shots": 0, "latest_video": {"session_id": 4, "n_swings": 1, "n_same_view": 1}}, {}),
     ]
     want_label = {"first": "最初の記録を入れる", "finding": "診断を見る", "measure": "診断を見る", "found": "この一点で練習を組む", "plan": "練習を始める",
-                  "stop": "続けるか選ぶ", "passed": "次の項目を見る", "video_resume": "続きから処理する", "setup": "撮り方を合わせる", "video": "チェックを見る"}
+                  "stop": "続けるか選ぶ", "passed": "次の項目を見る", "video_resume": "同じ動画を選んで続ける", "setup": "撮り方を合わせる", "video": "チェックを見る"}
     for key, h, local in cases:
         st = page.evaluate("([h, l]) => App.homeState(h, l)", [h, local])
         if st["key"] != key or st["primary"]["label"] != want_label[key]:
@@ -896,7 +896,8 @@ def check_plan(browser, root: str, base: str, shots_dir: str, tag: str, w: int, 
     page.wait_for_selector("[data-route='/practice'] #tBlocks")
 
     # 取り込み（作った球・型どおり）→ 練習を記録 → 球の帯 → 境目 → 判定
-    # 日付は「プランを作った日より後・今日ではない」日（今日にすると下の「今日の記録を作る」が出ない）
+    # 日付は「プランを作った日より後・今日ではない」日（今日にすると下の「今日の記録を作る」が出ない。
+    # 過去の日にするとサーバーが「プランを作る前の球」として断るので、明日にするしかない）
     s2_date = (datetime.date.today() + datetime.timedelta(days=1)).isoformat()
     s2 = call("POST", f"{base}/sessions", {"player_id": who["id"], "date": s2_date, "location": "練習場"})
     import_practice(base, s2["id"], practice_tsv(tpl, seed=21))
@@ -1485,7 +1486,18 @@ def check_video_auto(browser, root: str, base: str, pid: int, shots_dir: str, er
         page.wait_for_selector("[data-stopped]", timeout=30000)
     except Exception:  # noqa: BLE001
         errors.append(f"[{tag}] 止めたのに止まった知らせが出ない: {page.inner_text('#view')[:200]!r}")
+    # 止めたあとは見出しも止まった状態になり、「閉じないで」は隠れる（進行中の表示を残さない）
+    if "止めました" not in page.inner_text("[data-ahead]") or page.locator("[data-keepopen]:visible").count() or page.locator("[data-abar]:visible").count():
+        errors.append(f"[{tag}] 止めたのに見出し・閉じないでの注記・棒が進行中のまま: {page.inner_text('[data-body]')[:200]!r}")
+    if not page.locator("[data-astages] li.stopped").count():
+        errors.append(f"[{tag}] 止まった段に印が無い")
     shot(page, shots_dir, f"{tag}-2-stopped")
+    # 止めたあとの［手で選ぶ］は、押すとすぐ手で選ぶ画面へ（処理の繰り返しはもう終わっている）
+    page.click("[data-manual]")
+    try:
+        page.wait_for_selector("[data-scrub]", timeout=10000)
+    except Exception:  # noqa: BLE001
+        errors.append(f"[{tag}] 止めたあとの［手で選ぶ］を押しても手で選ぶ画面に移らない: {page.inner_text('[data-body]')[:200]!r}")
     goto(page, root, "/home", "[data-home-state]")
     if page.get_attribute("[data-home-state]", "data-home-state") != "video_resume":
         errors.append(f"[{tag}] 止めたあとのホームが「動画の処理が途中です」にならない: {page.get_attribute('[data-home-state]', 'data-home-state')}")
@@ -1493,8 +1505,20 @@ def check_video_auto(browser, root: str, base: str, pid: int, shots_dir: str, er
     if "/video/2026-09-24" not in href:
         errors.append(f"[{tag}] 続きから処理するの行き先が途中の記録でない: {href}")
     shot(page, shots_dir, f"{tag}-3-home-resume")
+    if (page.inner_text("[data-primary]") or "").strip() != "同じ動画を選んで続ける":
+        errors.append(f"[{tag}] ホームの続きのボタンの名前: {page.inner_text('[data-primary]')!r}")
     page.click("[data-primary]")
-    page.wait_for_selector("[data-pending]", timeout=15000)
+    page.wait_for_selector("[data-pending] [data-pick-same]", timeout=15000)
+    # 途中の知らせは画面の一番上（撮った向きのカードより上）
+    if page.evaluate("(() => { const a = document.querySelector('[data-pending]'), b = document.querySelector('[data-view]'); return !!(a && b && (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING)); })()") is not True:
+        errors.append(f"[{tag}] 途中の知らせが画面の上にない")
+    # ［途中の分を消す］は確かめてから消す（元に戻せない）
+    page.click("[data-drop-pending]")
+    page.wait_for_selector("[data-sheet=confirm]", timeout=5000)
+    page.click("[data-sheet=confirm] [data-cancel]")
+    page.wait_for_selector("[data-sheet=confirm]", state="detached")
+    if not LS_get(page, "golf.videoPending"):
+        errors.append(f"[{tag}] 途中の分を消すを取り消したのに、途中の印が消えた")
     page.set_input_files("[data-file]", video)
     # ボールの両端（最初のスイングの構え）
     try:
@@ -1522,6 +1546,16 @@ def check_video_auto(browser, root: str, base: str, pid: int, shots_dir: str, er
     no_overflow(page, tag, "確かめるところ", errors)
     targets(page, tag, "確かめるところ", errors)
     shot(page, shots_dir, f"{tag}-4-review")
+    # 確かめる画面で「<」を押すと、確かめてから戻る（取り出した形を黙って消さない）
+    page.click("[data-back]")
+    try:
+        page.wait_for_selector("[data-sheet=confirm]", timeout=5000)
+        page.click("[data-sheet=confirm] [data-cancel]")
+        page.wait_for_selector("[data-sheet=confirm]", state="detached")
+    except Exception:  # noqa: BLE001
+        errors.append(f"[{tag}] 確かめる画面の「<」が、確かめずに記録へ戻った")
+    if "/video/" not in page.evaluate("location.hash"):
+        errors.append(f"[{tag}] 「<」を取り消したのに動画の画面から離れた")
     if page.locator("[data-review-go]").count():
         page.click("[data-review-go]")
         for _ in range(20):
@@ -1533,6 +1567,10 @@ def check_video_auto(browser, root: str, base: str, pid: int, shots_dir: str, er
         # 全部のコマを見る道: 一コマ直して「手で直した」を残す
         page.click("[data-review-all]")
         page.wait_for_selector("[data-review-p='P1']", timeout=15000)
+        if page.locator("[data-rstrip] .pchip").count() != 7 or not page.locator("[data-rprev]").count() or not page.locator("[data-reset]").count():
+            errors.append(f"[{tag}] 一つずつの画面に P の帯・前へ・自動の位置に戻すが無い")
+        no_overflow(page, tag, "一つずつ確かめる", errors)
+        targets(page, tag, "一つずつ確かめる", errors)
         shot(page, shots_dir, f"{tag}-5-review-one")
         page.click("[data-ok]")
         page.wait_for_selector("[data-review-p='P2']", timeout=15000)
@@ -1589,10 +1627,14 @@ def check_video_auto(browser, root: str, base: str, pid: int, shots_dir: str, er
     by = {x["id"]: x for x in chk["items"]}
     if by.get("path.loop", {}).get("state") != "in_range" or by["path.loop"].get("n_judged") != 2:
         errors.append(f"[{tag}] 手の通り道の輪が2本とも測れていない: {by.get('path.loop', {}).get('state')} {by.get('path.loop', {}).get('reason')}")
-    if by.get("tempo.ratio", {}).get("n_ref") != 2:
-        errors.append(f"[{tag}] テンポが数えられていない: {by.get('tempo.ratio')}")
-    if page.locator("details[data-fold=tempo]").count() != 1 or "まだ" in page.inner_text("details[data-fold=tempo] > summary"):
-        errors.append(f"[{tag}] テンポの畳みが出ない・数えられていない")
+    # 合成の動画は 30fps。コマの少ない動画はテンポを判断しない（§6.2・§12。「目安の近く」と言わない）
+    tp = by.get("tempo.ratio", {})
+    if tp.get("n_ref") != 0 or tp.get("ref_reason") != "fps":
+        errors.append(f"[{tag}] 30fps の動画でテンポを数えている: {tp}")
+    if page.locator("details[data-fold=tempo]").count() != 1 or "コマの少ない動画" not in page.inner_text("details[data-fold=tempo] > summary"):
+        errors.append(f"[{tag}] テンポの畳みが「コマの少ない動画では判断できません」になっていない")
+    if page.locator("#toast:not([hidden])").count():
+        errors.append(f"[{tag}] チェックの画面にトーストが出て、下の案内を隠している")
     page.click("[data-counts] > summary")
     if not page.locator("[data-frames-src]").count():
         errors.append(f"[{tag}] 件数を見るに、自動で選んだコマと手で直したコマの数が無い")

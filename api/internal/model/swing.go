@@ -54,6 +54,8 @@ type SwingFrame struct {
 	T          float64         `json:"t"`     // 動画の中の時刻（秒）
 	Frame      int             `json:"frame"` // コマの番号（fps から）
 	Source     string          `json:"source"`
+	Method     string          `json:"method"` // 自動のとき: rule / ball_roi / club_tap / midpoint（手で選んだコマは空）
+	Status     string          `json:"status"` // 自動のとき: ok / estimated（estimated は「目安」。手で選んだコマは空）
 	Landmarks  json.RawMessage `json:"landmarks"` // 33点 [{x,y,visibility}]（0〜1 の割合）
 	Taps       json.RawMessage `json:"taps"`      // {grip:[x,y], head:[x,y], heel?, toe?}（画素）
 	HasThumb   bool            `json:"has_thumb"`

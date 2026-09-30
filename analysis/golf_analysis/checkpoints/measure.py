@@ -279,6 +279,14 @@ def _at(series: dict, key: str, t: float):
     return best if bd <= 0.1 else None
 
 
+def _gap_near(ts: list[float], t: float) -> float:
+    """時刻 t に一番近いコマの、前後の広いほうの間隔（時系列に残した実際の走査の間隔）。"""
+    if len(ts) < 2:
+        return 0.0
+    i = min(range(len(ts)), key=lambda k: abs(ts[k] - t))
+    return max(ts[i] - ts[i - 1] if i > 0 else 0.0, ts[i + 1] - ts[i] if i + 1 < len(ts) else 0.0)
+
+
 def _cross_x(path: list[tuple[float, float]], y: float, rising: bool) -> float | None:
     """手の通り道が高さ y を（rising なら上向きに）最初に越える所の x（線でつなぐ）。"""
     for (x1, y1), (x2, y2) in zip(path, path[1:]):
@@ -337,12 +345,20 @@ def _traj(ctx: "Ctx", spec: dict) -> dict:
         fps = ctx.fps or se["fps"]
         if not fps:
             raise Invalid("fps_unknown")
-        tp = video.tempo(se["t0"], t4, t7, 1.0 / float(fps))
+        # コマの少ない動画（30fps）はテンポを判断しない（§6.2・§12。下ろしが数コマしか無く、1コマで比が大きく動く）
+        if float(fps) < config.CP_MIN_FPS_CLUB:
+            raise Invalid("fps")
+        if not isinstance(t4, (int, float)) or not isinstance(t7, (int, float)):
+            raise Invalid("no_frame")
+        # 幅は実際に取ったコマの間隔で作る（240fps を 120Hz で取ったなら 1/120。1/fps だと幅が狭くなり、言葉が出やすくなる）
+        gaps = [_gap_near(se["t"], t) for t in (se["t0"], t4, t7)]
+        tp = video.tempo(se["t0"], t4, t7, tuple(max(g, 1.0 / float(fps)) for g in gaps))
         if not tp:
             raise Invalid("no_frame", "始まり・トップ・当たる瞬間の順番が合わない")
-        word, guide = video.tempo_word(tp, ctx.club_class)
+        word, guide, near = video.tempo_word(tp, ctx.club_class)
         return {"v": tp["ratio"], "err": round((tp["hi"] - tp["lo"]) / 2, 3), "unit": "ratio",
-                "extra": {"band_lo": tp["lo"], "band_hi": tp["hi"], "guide": guide, "word": word, "back_s": tp["back_s"], "down_s": tp["down_s"]}}
+                "extra": {"band_lo": tp["lo"], "band_hi": tp["hi"], "guide": guide, "word": word, "near": near, "back_s": tp["back_s"], "down_s": tp["down_s"],
+                          "dt_ms": [round(g * 1000, 1) for g in gaps]}}
     raise Invalid("not_built", k)
 
 

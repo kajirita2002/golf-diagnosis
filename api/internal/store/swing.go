@@ -206,8 +206,8 @@ func (s *Store) PutSwingFrames(ctx context.Context, swingID int64, frames []mode
 		if len(thumb) > 0 {
 			th = thumb
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO {s}swing_frames(swing_id, checkpoint, t, frame, source, landmarks_json, taps_json, thumb) VALUES(?,?,?,?,?,?,?,?)`,
-			swingID, f.Checkpoint, f.T, f.Frame, f.Source, rawOr(f.Landmarks, "[]"), rawOr(f.Taps, "{}"), th); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO {s}swing_frames(swing_id, checkpoint, t, frame, source, method, status, landmarks_json, taps_json, thumb) VALUES(?,?,?,?,?,?,?,?,?,?)`,
+			swingID, f.Checkpoint, f.T, f.Frame, f.Source, f.Method, f.Status, rawOr(f.Landmarks, "[]"), rawOr(f.Taps, "{}"), th); err != nil {
 			return err
 		}
 	}
@@ -220,7 +220,7 @@ func (s *Store) PutSwingFrames(ctx context.Context, swingID int64, frames []mode
 
 // ListSwingFrames はスイングの P のコマ（サムネイルの中身は入れない。有るかだけ）。
 func (s *Store) ListSwingFrames(ctx context.Context, swingID int64) ([]model.SwingFrame, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT checkpoint, t, frame, source, landmarks_json, taps_json, thumb IS NOT NULL FROM {s}swing_frames WHERE swing_id=?`, swingID)
+	rows, err := s.db.QueryContext(ctx, `SELECT checkpoint, t, frame, source, method, status, landmarks_json, taps_json, thumb IS NOT NULL FROM {s}swing_frames WHERE swing_id=?`, swingID)
 	if err != nil {
 		return nil, err
 	}
@@ -231,7 +231,7 @@ func (s *Store) ListSwingFrames(ctx context.Context, swingID int64) ([]model.Swi
 		var t sql.NullFloat64
 		var fr sql.NullInt64
 		var lm, taps string
-		if err := rows.Scan(&f.Checkpoint, &t, &fr, &f.Source, &lm, &taps, &f.HasThumb); err != nil {
+		if err := rows.Scan(&f.Checkpoint, &t, &fr, &f.Source, &f.Method, &f.Status, &lm, &taps, &f.HasThumb); err != nil {
 			return nil, err
 		}
 		f.T, f.Frame = t.Float64, int(fr.Int64)

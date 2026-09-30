@@ -289,3 +289,126 @@ def test_口から呼べる():
 def test_体の点が無ければスイングを探さない():
     r = video.detect({"view": "dtl", "handedness": "R", "fps": 60, "width": 1280, "height": 720, "frames": [{"t": 0.0, "lm": None}]})
     assert r["swings"] == [] and r["reason"]
+
+
+# ------------------------------------------------------------ 段2b のレビューで見つかったこと
+
+
+def test_新しいボールが丸から横に置かれても本物のスイングを素振りとして外さない():
+    # 練習場では、2本目からのボールがタップした丸から少し横に置かれることが多い。丸の中は打っても変わらない
+    body, truth = syn.motion("dtl", n_swings=3, ball_away=(2, 3))
+    r = video.detect(body)
+    assert len(r["swings"]) == 3 and not r["excluded"]
+    assert [s["practice_known"] for s in r["swings"]] == [True, False, False]
+    # 丸の中が最初のボールと似ているときだけ、素振りとして外す（前のテストの形）
+    body2, _ = syn.motion("dtl", n_swings=3, practice=(2,))
+    assert len(video.detect(body2)["excluded"]) == 1
+    # ボールの絵の印が無ければ、丸の中が変わらなくても外さない
+    body3, _ = syn.motion("dtl", n_swings=3, practice=(2,))
+    del body3["ball_seen"]
+    r3 = video.detect(body3)
+    assert len(r3["swings"]) == 3 and not r3["excluded"]
+
+
+def test_全部が素振りに見えたら外さずに返す():
+    # 丸がずれていた・変わり方が小さい: 1本だけの動画で外すと先へ進めない（行き止まり）
+    body, _ = syn.motion("dtl", n_swings=1, practice=(1,))
+    r = video.detect(body)
+    assert len(r["swings"]) == 1 and not r["excluded"]
+    sw = r["swings"][0]
+    assert sw["kind"] == "swing" and not sw["practice_known"] and "practice_unsure" in sw["warnings"]
+    assert ps_of(sw)["P7"]["reason"] != "no_ball_change"
+
+
+def test_点の値が数でなければそのコマの欠けにする():
+    body, _ = syn.motion("dtl")
+    body["frames"][10]["lm"][15][0] = "x"
+    body["frames"][11]["lm"][16][1] = {"a": 1}
+    r = video.detect(body)
+    assert len(r["swings"]) == 1
+    c = TestClient(app)
+    assert c.post("/v1/video/checkpoints", json=body).status_code == 200
+
+
+def test_細かく取る区間はP1の少し前から():
+    # 構えが長い（3秒）動画でも、細かく取る区間の頭は P1 の 0.5秒前まで
+    body, truth = syn.motion("dtl", lead_in=3.0)
+    sw = video.detect(body)["swings"][0]
+    assert sw["window"][0] >= ps_of(sw)["P1"]["t"] - config.VIDEO_HEAD_S - 1e-6
+
+
+def test_正面の斜めのタップ一つでP2をokにしない():
+    body, _ = syn.motion("fo")
+    base = ps_of(video.detect(body)["swings"][0])
+    # 45°のタップが P2 と同じ時刻に一つ
+    body["club_taps"] = [{"t": base["P2"]["t"], "grip": [600, 370], "head": [500, 270]}]
+    assert ps_of(video.detect(body)["swings"][0])["P2"]["status"] == "estimated"
+    # 水平のタップでも一つだけなら目安のまま（前後がそろわないと「一番水平に近い」と言えない）
+    body["club_taps"] = [{"t": base["P2"]["t"], "grip": [600, 400], "head": [500, 400]}]
+    assert ps_of(video.detect(body)["swings"][0])["P2"]["status"] == "estimated"
+    # 前後がそろっても、一番水平に近いものが斜め（30°）なら寄せ直さない
+    fr = body["frames"]
+    i = base["P2"]["frame"]
+    body["club_taps"] = [{"t": fr[i + k]["t"], "grip": [600, 400], "head": [500, 400 - dy]} for k, dy in ((-1, 90), (0, 58), (1, 80))]
+    assert ps_of(video.detect(body)["swings"][0])["P2"]["method"] == "rule"
+
+
+def test_テンポの近くは幅が丸ごと目安の近くにあるときだけ():
+    # 30fps の比 4.0 は幅が 2.95〜5.82（目安をまたぐ）→ 言葉も「近く」も出さない
+    tp = video.tempo(0.0, 1.0, 1.25, 1 / 30)
+    word, _, near_ = video.tempo_word(tp, "iron")
+    assert word is None and not near_
+    # 60fps の比 2.2（合成のスイング）も幅が 1.91〜2.56 で目安 2.8±0.3 をまたがない・丸ごと入らない → 近くと言わない
+    tp2 = video.tempo(0.0, 0.7333, 0.7333 + 0.3333, 1 / 60)
+    assert video.tempo_word(tp2, "iron")[2] is False
+    # 240fps で比 2.8 → 幅が丸ごと 2.5〜3.1 に入るので近くと言える
+    tp3 = video.tempo(0.0, 0.84, 1.14, 1 / 240)
+    assert video.tempo_word(tp3, "iron") == (None, 2.8, True)
+    # 実際の間隔が 1/120（240fps を間引いて取った）なら幅が広がり、言い切れなくなる
+    tp4 = video.tempo(0.0, 0.84, 1.14, (1 / 120, 1 / 120, 1 / 120))
+    assert tp4["hi"] - tp4["lo"] > tp3["hi"] - tp3["lo"]
+
+
+def test_コマの少ない動画はテンポを判断しない():
+    body, _ = syn.motion("dtl", fps=30)
+    det = video.detect(body)["swings"][0]
+    r = {x["id"]: x for x in cm.measure_swing(syn.measure_input(body, det))["items"]}
+    t = r["tempo.ratio"]
+    assert t["state"] == "reference" and t.get("value") is None and t["ref_reason"] == "fps"
+
+
+def test_テンポの幅は実際に取ったコマの間隔で作る():
+    # 240fps の動画を 120Hz で取った時系列: 幅は 1/120 で作る（1/240 で作ると半分になり、言葉が出やすい）
+    body, _ = syn.motion("dtl", fps=240)
+    body["frames"] = body["frames"][::2]
+    body["roi"] = body["roi"][::2]
+    body["fps"] = 240
+    det = video.detect(body)["swings"][0]
+    r = {x["id"]: x for x in cm.measure_swing(syn.measure_input(body, det))["items"]}
+    v = r["tempo.ratio"]["value"]
+    assert all(abs(d - 1000 / 120) < 0.6 for d in v["dt_ms"]), v["dt_ms"]
+
+
+def test_テンポの言葉は中立で一本だけなら一本だけの見立て():
+    import json
+    cat = json.load(open(os.path.join(os.path.dirname(cm.__file__), "catalog.json")))
+    items = cat["items"] if isinstance(cat, dict) else cat
+    it = next(x for x in items if x["id"] == "tempo.ratio")
+    labels = [f["label"] for f in it["faults"]]
+    assert all("上げに比べて下ろしが" in x for x in labels), labels
+    body, _ = syn.motion("dtl", n_swings=1)
+    det = video.detect(body)["swings"][0]
+    m = cm.measure_swing(syn.measure_input(body, det))
+    by = {x["id"]: x for x in cj.aggregate([{"swing_id": 1, "view": "dtl", "items": m["items"]}])["items"]}
+    assert by["tempo.ratio"]["single"] and by["tempo.ratio"]["n_ref"] == 1
+    assert by["tempo.ratio"]["ref_near"] is False  # 比 2.2 の幅は目安の近くに丸ごとは入らない
+
+
+def test_組に分けて送るときは全部素振りでも外したまま返す():
+    body, _ = syn.motion("dtl", n_swings=1, practice=(1,))
+    body["practice_fallback"] = False
+    r = video.detect(body)
+    assert not r["swings"] and len(r["excluded"]) == 1
+    c = TestClient(app)
+    j = c.post("/v1/video/checkpoints", json=body).json()
+    assert not j["swings"] and len(j["excluded"]) == 1
