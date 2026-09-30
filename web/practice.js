@@ -103,6 +103,14 @@ const Practice = (() => {
     }).catch(() => null);
     if (!T.diag) T.diag = await fetchIt;
   }
+  // 本番で意識すること: 前の版で作ったプランは「〜を見る」だけの一言を持っていることがある（見るだけでは球は変わらない。本人の声）。
+  // そのときは診断の「意識する体の動き」を出す
+  const actCue = (p) => {
+    const c = (p && p.cue) || "";
+    const d = T.diag && T.diag.fix && T.diag.fix.cue;
+    if (d && (!c || /見る。?$/.test(c))) return String(d).split("。")[0];
+    return c;
+  };
   // ドリルのブロックに当てる診断の練習法（跡を見る道具はブロックにしない）。2つ目のドリルのブロックは2つ目の練習法（無ければ1つ目）
   const diagDrills = () => ((T.diag && T.diag.fix && T.diag.fix.drills) || []).filter((d) => d.role !== "check");
   function drillFor(p, i) {
@@ -223,7 +231,7 @@ const Practice = (() => {
     const blocks = tpl.map((b, i) => {
       const cls = st.done || i < st.idx ? "done" : i === st.idx ? "cur" : "";
       const dd = b.kind === "drill" && !T.drill ? drillFor(p, i) : null;
-      let extra = b.kind === "intervention" ? `<span class="bcue">「${esc(p.cue)}」</span>` : b.kind === "drill" && T.drill ? `<span class="bcue sub">${esc(T.drill.title)}</span>`
+      let extra = b.kind === "intervention" ? `<span class="bcue">「${esc(actCue(p))}」</span>` : b.kind === "drill" && T.drill ? `<span class="bcue sub">${esc(T.drill.title)}</span>`
         : dd ? `<span class="bcue sub" data-t="blockdrill">${esc(dd.name)}</span>` : b.kind === "baseline" ? `<span class="bcue sub">何も意識しない（あとで比べるため）</span>` : "";
       if (isMotion(p) && i === testBlock(p)) extra = `<span class="bcue" data-t="testcue">撮る・課題以外は意識しない</span>`;
       else if (films(p, i)) extra += `<span class="bcue sub" data-t="film">撮る</span>`;
@@ -312,7 +320,7 @@ const Practice = (() => {
         next.textContent = isMotion(p) ? "動画で数える" : "取り込んで確かめる";
       } else {
         const dd = b.kind === "drill" && !T.drill ? drillFor(p, st.idx) : null;
-        let cue = b.kind === "intervention" ? `「${p.cue}」` : b.kind === "drill" && T.drill ? `ドリル中: 「${T.drill.cue_drill || T.drill.title}」` : dd ? `ドリル: ${dd.name}` : b.kind === "baseline" ? "いつも通り（何も意識しない）" : "";
+        let cue = b.kind === "intervention" ? `「${actCue(p)}」` : b.kind === "drill" && T.drill ? `ドリル中: 「${T.drill.cue_drill || T.drill.title}」` : dd ? `ドリル: ${dd.name}` : b.kind === "baseline" ? "いつも通り（何も意識しない）" : "";
         if (isMotion(p) && st.idx === testBlock(p)) cue = "撮ります。課題以外は意識しません。当たり方も行方も問いません。打ち終えてから、できたと思った回数を一回だけ答えます。";
         else if (films(p, st.idx)) cue += "（撮ります）";
         now.innerHTML = `<p class="caption">いま ${no(st.idx)}（${st.idx + 1} / ${tpl.length}）</p><p class="kind" data-t="kind">${esc(blkName(p, st.idx, b.kind))}</p>

@@ -105,8 +105,10 @@ def test_アイアンの要点(rep):
     assert row["path"]["status"] == "keep" and row["path"]["now"] == "安定しています。"
     assert row["strike"]["now"].startswith("ネック寄りがほとんどです。")
     act = [x["text"] for x in _block(g, "action")["lines"]]
-    assert act[0] == "意識する一点: 飛んだ先より、クラブのどこに当たったかだけを見る。"
-    assert "確かめ済みのドリルはまだありません。意識する一点だけで進めます。" in act
+    # 「見る」だけの一言にしない（見るだけでは球は変わらない。本人の声）。体の動きで書く
+    assert act[0] == "意識する一点: 当たる瞬間、手元を構えたときと同じ場所（体の近く）へ低く戻すつもりで振る。"
+    assert not act[0].endswith("見る。")
+    assert "ドリルのやり方は、くわしいレポートの「直し方」に出ています（プランを始めると練習の画面にも出ます）。" in act
     assert _block(g, "action")["drill"] is None and _block(g, "action")["start"] == "strike_heel"
     assert g["headline"] == "まず取り組むのは「ネック寄りの当たりを減らす」です。"
 

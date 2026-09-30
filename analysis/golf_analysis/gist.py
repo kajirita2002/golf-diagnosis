@@ -373,9 +373,9 @@ def scope_gist(p: dict, cands: dict | None, sections: list[dict], hand: str, cro
     elif focus and is_measure:
         cue = "一球ずつ、当たった場所を確かめる。"
     elif focus and focus["candidate_id"].startswith("strike"):
-        cue = "飛んだ先より、クラブのどこに当たったかだけを見る。"
+        cue = "当たる瞬間、手元を構えたときと同じ場所（体の近く）へ低く戻すつもりで振る。"
     elif focus:
-        cue = f"曲がり方より、{T['launch']}だけを見る。"
+        cue = "切り返しから当たる瞬間まで、左手の甲を平らに保ったまま、体の回転で振り抜く。"
     else:
         cue = None
     ev_act = ev("now.hypothesis", "now.design", "now.advance") or ev("next.now")
@@ -393,7 +393,7 @@ def scope_gist(p: dict, cands: dict | None, sections: list[dict], hand: str, cro
         elif drill:
             act_lines.append(_line("道具を使う練習もあります（プランを始めると出ます）。", ev_act))
         else:
-            act_lines.append(_line("確かめ済みのドリルはまだありません。意識する一点だけで進めます。", ev_act))
+            act_lines.append(_line("ドリルのやり方は、くわしいレポートの「直し方」に出ています（プランを始めると練習の画面にも出ます）。", ev_act))
         if keep:
             act_lines.append(_line(f"{'・'.join(keep)}は、今は触らずそのままにします。", ev("next.untouched", "now.design") or ev_act))
 
