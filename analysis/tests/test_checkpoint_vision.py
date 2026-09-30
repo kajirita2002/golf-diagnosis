@@ -146,7 +146,7 @@ def test_知らない項目と選択肢の外と数字の文と定義の外の�
         def f(a):
             a["answers"].append({"swing": 1, "item": "q99", "option": "o1", "visibility": "clear", "visual": "見ました"})
             p_of = {q["item"]: q["p"] for q in req[1]["qs"]}
-            not_p3 = [x for x in a["answers"] if p_of.get(x["item"]) not in ("P3", None)]
+            not_p3 = [x for x in a["answers"] if p_of.get(x["item"]) not in ("P3", None) and "〜" not in p_of[x["item"]]]
             not_p3[0]["option"] = "o9"
             not_p3[1]["visual"] = "約三十度に見えます 35°"
             a["frames"] = [dict(x, is_phase="no") if x["p"] == "P3" else x for x in a["frames"]]
@@ -158,8 +158,9 @@ def test_知らない項目と選択肢の外と数字の文と定義の外の�
     assert len(out["dropped"]) == 2
     ans = out["swings"][0]["answers"]
     assert out["swings"][0]["reselect"] == ["P3"]
-    p3 = [i for i in out["swings"][0]["asked"] if cp.by_id(i)["p"] == "P3"]
+    p3 = [i for i in out["swings"][0]["asked"] if "P3" in cv._expand(cp.by_id(i)["p"])]
     assert p3 and all(ans[i] == {"reselect": "P3"} for i in p3)
+    assert any("-" in cp.by_id(i)["p"] for i in p3)  # 区間の項目（P1〜P4 など）も、区間の中のコマが違えば選び直しに回す
     assert all("option" not in v for v in ans.values() if v.get("dropped"))
 
 

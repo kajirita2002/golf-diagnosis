@@ -20,6 +20,11 @@ const Home = (() => {
       return { key: "video_resume", heading: "動画の処理が途中です", primary: { label: "同じ動画を選んで続ける", href } };
     }
     if (local.setupMismatch) return { key: "setup", heading: "撮り方を確かめたい", primary: { label: "撮り方を合わせる", href: "#/record" } };
+    // 動きの課題（段2c）: プランが無く、動画のチェックで「まずここ」が決まっていれば、それが今日の一点
+    const mf = h && h.motion_focus;
+    if (mf && !(h.plan)) {
+      return { key: "motion", heading: "課題が見つかりました", motion: mf, primary: { label: "この課題を見る", href: `#/session/${mf.session_id}/check/${encodeURIComponent(mf.item_id)}` } };
+    }
     // 球は無く、動画のチェックだけがある（段2a）: 「ようこそ」のままにせず、動画のチェックへ
     if (h && !h.sessions_with_shots && h.latest_video) {
       const v = h.latest_video;
@@ -124,6 +129,14 @@ const Home = (() => {
         ${p.title ? `<p data-home="first"><span class="label">いまの課題</span><br><b>${esc(p.title)}</b></p>` : ""}
         ${p.advance ? `<button class="textbtn" data-home="advance">合格の条件を見る</button>` : ""}</section>`;
       body += lastLine(p);
+    } else if (st.key === "motion") {
+      // 動きの課題: 言葉だけ（数字・角度は C-1 の「なぜそう言える？」の中）。球の課題とつながる候補なら印を添える
+      const m = st.motion;
+      body += `<section class="block" aria-labelledby="h-one"><h2 id="h-one" class="label">今日の一点</h2>
+        <div class="focuscard" data-home="one" data-motion-focus><p class="t-headline" style="margin:0">${esc(m.fault_label || m.title)}</p>
+          <p class="sub" style="margin:var(--s1) 0 0">${m.p && /^P\d/.test(m.p) ? lab("p", m.p.replace("_5", ".5")) + " " : ""}${esc(m.title)}</p></div>
+        ${m.linked ? `<p data-home="linked"><span class="chip brand">${icon("layers")}${esc(m.linked_text || "球の課題とつながる候補です（まだ確かめていません）")}</span></p>` : ""}
+        ${m.drill ? `<p data-home="drill"><span class="label">練習の一例</span><br>${esc(m.drill.cue || m.drill.title)}</p>` : ""}</section>`;
     } else if (f && st.key !== "first") {
       // プランの前: 課題（何を直すか）を先に、意識すること（どう打つか）を2番目に。「今日の一点」とは呼ばない
       body += `<section class="block" aria-labelledby="h-issue"><h2 id="h-issue" class="label">いまの課題</h2>
@@ -209,7 +222,7 @@ const Home = (() => {
   // 動画だけの日は、チェックの「まずここ」の文を後から入れる（ホームの API では課題を選ばない。選ぶのはチェックと同じ関数）
   async function videoFocus(el, h, alive) {
     const slot = el.querySelector("[data-video-focus]");
-    if (!slot || !h || !h.latest_video || !window.Checks) return;
+    if (!slot || !h || !h.latest_video || typeof Checks === "undefined") return;
     try {
       const d = await Checks.load(h.latest_video.session_id);
       const c = d && d.checks;

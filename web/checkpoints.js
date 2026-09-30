@@ -7,6 +7,9 @@
   - 範囲の中・判断できない・参考・フォロー（任意）は畳む。判断できない理由は束ねて1行、どう撮れば見られるかを添える。
   - 判定の文は全部サーバーの定型文（カタログ）。ここで事実の文を作らない。
   - 理想の帯と線（段3）はまだ描かない。
+  - 見た目の項目（段2c）: ［見た目を評価する（料金）］で、端末に置いたコマの写真（長辺 1024px）を送り、AI（Claude）の答えで埋める。
+    写真はサーバーにも残さない。鍵が無い・上限・失敗でも、測れる項目の一覧はそのまま出す（押せない理由を1行で出す）。
+  - 球の課題とつながる候補（§9.1）は印だけ。「まだ確かめていません」まで言う。TrackMan の球とは本人が確かめて結ぶ。
 */
 const Checks = (() => {
   const { $, $$, esc, icon, lab, S, api, LS } = App;
@@ -67,7 +70,7 @@ const Checks = (() => {
     const one = it.single && (it.state === "in_range" || it.state === "out_range" || (it.state === "reference" && it.n_ref)) ? `<span class="caption">一本だけの見立て</span>` : "";
     return `<li><a class="cprow" href="#/session/${sid}/check/${encodeURIComponent(it.id)}" data-item="${esc(it.id)}" data-state="${esc(it.focus ? "focus" : it.state)}">
       ${badge(it)}<span class="grow1"><span class="cpt">${esc(it.title)}</span><small>${esc(sub)}</small>
-      <span class="cpstate">${stateChip(it)} <span class="caption">${esc(basisText(it))}</span> ${one}${also}</span></span>${icon("chevron-right", "chev")}</a></li>`;
+      <span class="cpstate">${stateChip(it)} <span class="caption">${esc(basisText(it))}</span> ${one}${also}${linkChip(it)}</span></span>${icon("chevron-right", "chev")}</a></li>`;
   }
 
   function bigCard(sid, data, it, kind) {
@@ -76,8 +79,10 @@ const Checks = (() => {
       ${src ? `<img src="${esc(src)}" alt="${esc(pLabel(it.p))} のあなたのコマ" loading="lazy">` : `<span class="noimg" aria-hidden="true">${icon("video")}</span>`}
       <span class="grow1"><span class="cph">${/^P\d/.test(it.p || "") ? lab("p", pLabel(it.p)) + " " : ""}${esc(it.title)}</span>
         <span class="cpf">${esc(it.fault_label || it.look_at)}</span>
-        <span class="cpstate">${kind === "focus" ? "" : stateChip(it)} <span class="caption">${esc(basisText(it))}</span></span></span>${icon("chevron-right", "chev")}</a>`;
+        <span class="cpstate">${kind === "focus" ? "" : stateChip(it)} <span class="caption">${esc(basisText(it))}</span>${linkChip(it)}</span></span>${icon("chevron-right", "chev")}</a>`;
   }
+  // 球の課題とつながる候補の印（事前の表から。§9.1）。確かめていないことは印の中で言う
+  const linkChip = (it) => it.linked && (it.state === "out_range" || it.focus) ? ` <span class="chip brand" data-linked>球の課題とつながる候補</span>` : "";
 
   function fold(title, items, sid, attrs = "", lead = "") {
     if (!items.length) return "";
@@ -101,7 +106,10 @@ const Checks = (() => {
     no_head_width: "クラブの先の両端を押すと見られます", camera: "撮り方ガイドの置き方で撮ると見られます", camera_unknown: "構えのコマを選ぶと、撮り方を確かめて見られます",
     no_series: "動画を「自動で取り出す」で入れると見られます", fps: "スローモーションで撮ると見られます", fps_unknown: "スローモーションで撮ると見られます", low_visibility: "体全体が明るく写るように撮ると見られます",
     club_short: "この向きではクラブが短く写り、向きを測れません", border: "範囲の境目なので、どちらとも言えません。もう何本か選ぶと決まることがあります",
-    split: "スイングによって分かれています。もう何本か選ぶと決まることがあります", vision_pending: "見た目の評価（これから）で見られます",
+    split: "スイングによって分かれています。もう何本か選ぶと決まることがあります", vision_pending: "「見た目を評価する」で見られます",
+    vision_unclear: "写真では見えにくかった項目です。明るく、全身が入るように撮ると見られます",
+    vision_dropped: "見た目の答えが検証を通らなかったので出していません。もう一度評価すると見られることがあります",
+    vision_reselect: "このコマを選び直すと見られます",
     scale: "ボールの両端を押し直すと見られます", unclear: "ガイドの読み方を確かめているところです", ref_club: "この番手の基準はガイドにありません",
   };
   const howto = (it) => it.needs_note && it.reason === "not_in_2d" ? `見るには、${it.needs_note}が要ります` : HOWTO[it.reason] || "";
@@ -200,6 +208,7 @@ const Checks = (() => {
       h += `<section class="block" aria-labelledby="h-first"><h2 id="h-first" class="label">まずここ</h2>${bigCard(sid, data, focus, "focus")}</section>`;
       if (next) h += `<section class="block" aria-labelledby="h-next"><h2 id="h-next" class="label">次に見る</h2>${bigCard(sid, data, next, "next")}</section>`;
     }
+    h += visionHtml(data) + matchHtml(data);
     const unkLead = rs.length ? `<p class="caption" data-unk-why>${rs.map(([t, n]) => `${esc(t)} ${lab("count", n + "件")}`).join("・")}</p>` : "";
     h += `<div class="block">
       ${fold(`ほかに範囲の外 ${lab("count", outs.length + "件")}`, outs, sid, "data-fold=out")}
@@ -212,7 +221,13 @@ const Checks = (() => {
       ${focus ? `<div class="stack block"><a class="btn block" data-more-swing href="#/video/${esc(se.date)}?session=${sid}">${icon("video")}もう一本選ぶ</a></div>` : ""}
       <ul class="navlist block">${App.navItem(`#/guide/${esc(views[0] || "dtl")}`, "撮り方ガイド", "カメラの置き方")}</ul>`;
     body.innerHTML = h;
+    const vl = data.vision && data.vision.last;
+    if (vl && (vl.status === "queued" || vl.status === "running")) pollVision(sid, vl.job_id, alive);
     body.addEventListener("click", async (ev) => {
+      const vr = ev.target.closest("[data-vision-run]");
+      if (vr) { runVision(sid, data, vr, alive); return; }
+      const mr = ev.target.closest("[data-match-run]");
+      if (mr) { runMatch(sid, data, mr); return; }
       const fx = ev.target.closest("[data-fix-view]");
       const del = ev.target.closest("[data-del-swing]");
       if (!fx && !del) return;
@@ -234,6 +249,170 @@ const Checks = (() => {
         (fx || del).insertAdjacentHTML("afterend", App.errOf(e, { what: fx ? "向きを直せませんでした" : "消せませんでした", saved: "スイングは前のままです。" }));
       }
     });
+  }
+
+  // ---- 見た目の評価（段2c。§6.7） ----
+  const VIS_PS = ["P1", "P2", "P3", "P4", "P5", "P5_5", "P6", "P6_5", "P7", "P8", "P9", "P10"];
+  const costText = (v) => "約$" + (Math.round((v.cost_usd_hi || 0) * 100) / 100).toFixed(2);
+  const costLab = (v) => lab("cost", costText(v));
+  function visionHtml(data) {
+    const v = data.vision, c = data.checks;
+    if (!v || !c) return "";
+    const pend = (c.items || []).filter((x) => x.reason === "vision_pending" && !x.optional).length;
+    const last = v.last;
+    const running = last && (last.status === "queued" || last.status === "running");
+    const done = last && last.status === "done";
+    if (!pend && !last) return "";
+    let h = `<section class="card block" data-vision aria-labelledby="h-vis"><h2 id="h-vis" class="label">見た目の項目</h2>`;
+    if (running) h += `<p data-vision-state="running" role="status">写真を読んでいます（一分ほど）。この画面を離れても続きます。</p>`;
+    else if (last && last.status === "failed") h += `<div class="note warn" data-vision-state="failed"><p style="margin:0">見た目の評価ができませんでした。もう一度押すと頼み直せます。</p>
+      ${last.error ? `<details><summary class="textbtn">くわしく</summary><p class="caption">${esc(last.error)}</p></details>` : ""}</div>`;
+    if (done) {
+      h += `<p data-vision-state="done">見た目の項目は、写真を読んで選んだ答えで埋めています（札は「見た目」）。</p>`;
+      if (last.n_dropped) h += `<p class="caption" data-vision-dropped>検証を通らなかったので出していない項目 ${lab("count", last.n_dropped + "件")}</p>`;
+      const rs = [...new Set((last.reselect || []).flatMap((x) => x.ps || []))];
+      if (rs.length) h += `<p class="caption" data-vision-reselect>${rs.map((p) => lab("p", pLabel(p))).join("・")} のコマは、決まった瞬間に見えないと答えました。選び直すと、そのコマの項目も見られます。</p>`;
+      if ((last.extra || []).length) h += `<details class="folded" data-vision-extra><summary>そのほかの気づき（判定には使っていません）</summary><ul class="parts">${last.extra.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></details>`;
+    }
+    if (pend && !running) {
+      if (!v.ready) h += `<p data-vision-off>見た目の評価は、いまは使えません。測れる項目はそのまま見られます。</p>${v.reason ? `<details><summary class="textbtn">くわしく</summary><p class="caption">${esc(v.reason)}</p></details>` : ""}`;
+      else if (v.n_target) {
+        h += `<p>まだ見ていない見た目の項目が ${lab("count", pend + "件")}あります。</p>
+          <button type="button" class="btn primary block" data-vision-run>見た目を評価する（${costLab(v)}まで）</button>
+          <p class="caption" data-vision-about>スイング${lab("count", v.n_target + "本")}の選んだコマの写真（長辺を小さくしたもの）だけを送ります。サーバーにも残しません。料金はまだ実測していない見積もりです。</p>`;
+      }
+    }
+    return h + `</section>`;
+  }
+
+  // 写真の角に P の番号を焼き込む（AI にどのコマかを渡す。§6.7）。描けない端末ではそのまま送る
+  async function stampP(blob, p) {
+    try {
+      const bm = await createImageBitmap(blob);
+      const k = Math.min(1, 1024 / Math.max(bm.width, bm.height));
+      const cv = document.createElement("canvas");
+      cv.width = Math.round(bm.width * k); cv.height = Math.round(bm.height * k);
+      const g = cv.getContext("2d");
+      g.drawImage(bm, 0, 0, cv.width, cv.height);
+      const fs = Math.max(18, Math.round(cv.height / 18));
+      g.font = `bold ${fs}px sans-serif`;
+      const t = pLabel(p);
+      g.fillStyle = "rgba(0,0,0,.7)"; g.fillRect(0, 0, g.measureText(t).width + fs, fs * 1.5);
+      g.fillStyle = "rgba(255,255,255,1)"; g.fillText(t, fs / 2, fs * 1.15);
+      return await new Promise((ok) => cv.toBlob((b) => ok(b || blob), "image/jpeg", 0.85));
+    } catch { return blob; }
+  }
+
+  async function runVision(sid, data, btn, alive) {
+    const v = data.vision;
+    const box = btn.closest("[data-vision]");
+    const say = (html) => { const old = box.querySelector("[data-vision-msg]"); if (old) old.remove(); box.insertAdjacentHTML("beforeend", `<div data-vision-msg>${html}</div>`); };
+    const ok = await App.ask({ title: "見た目を評価しますか", text: `料金は ${costText(v)} までの見積もりです。選んだコマの写真を AI（Claude）に送ります。写真はサーバーにも残しません。`, ok: "評価する", cancel: "やめる" });
+    if (!ok) return;
+    btn.setAttribute("aria-disabled", "true");
+    try {
+      // 同じ向きが多いほうの、判定したスイングから（見た目の答えがまだのものを先に）
+      const sws = (data.swings || []).filter((s) => (s.frames || []).length);
+      const byView = {};
+      for (const s of sws) byView[s.view] = (byView[s.view] || 0) + 1;
+      const view = Object.keys(byView).sort((a, b) => byView[b] - byView[a])[0];
+      const pick = sws.filter((s) => s.view === view).sort((a, b) => (a.has_vision ? 1 : 0) - (b.has_vision ? 1 : 0));
+      const fd = new FormData();
+      const used = [];
+      let n = 0;
+      for (const s of pick) {
+        if (used.length >= v.n_target) break;
+        let got = 0;
+        for (const f of s.frames) {
+          if (!VIS_PS.includes(f.checkpoint) || n >= (v.max_images || 32)) continue;
+          const b = await Video.keptFrame(`${s.id}:${f.checkpoint}`);
+          if (!b) continue;
+          fd.append(`f.${s.id}.${f.checkpoint}`, await stampP(b, f.checkpoint), `${f.checkpoint}.jpg`);
+          n += 1; got += 1;
+        }
+        if (got) used.push(s.id);
+      }
+      if (!used.length) {
+        say(`<p class="note warn">この端末に、コマの写真が残っていません。動画を選んだ端末で開くと評価できます（写真は端末の中だけに置いています）。</p>`);
+        btn.removeAttribute("aria-disabled");
+        return;
+      }
+      fd.append("meta", JSON.stringify({ session_id: sid, swings: used.map((id) => ({ swing_id: id })) }));
+      const r = await api("POST", "/v1/swings/checks", fd);
+      if (!r.job_id) { say(`<p class="note">${esc(r.reason || "いまは評価できません")}</p>`); btn.removeAttribute("aria-disabled"); return; }
+      if (r.cached) { App.toast("前に評価した答えを使いました"); invalidate(sid); App.invalidate(sid); App.render(); return; }
+      btn.remove();
+      say(`<p role="status" data-vision-state="running">写真を読んでいます（一分ほど）。この画面を離れても続きます。</p>`);
+      pollVision(sid, r.job_id, alive);
+    } catch (e) {
+      btn.removeAttribute("aria-disabled");
+      say(App.errOf(e, { what: "評価を頼めませんでした", saved: "判定は前のままです。" }));
+    }
+  }
+
+  async function pollVision(sid, jobId, alive) {
+    for (let i = 0; i < 150; i++) {
+      await new Promise((ok) => setTimeout(ok, i < 5 ? 1000 : 2000));
+      if (!alive()) return;
+      let j;
+      try { j = await api("GET", `/v1/jobs/${jobId}`); } catch { continue; }
+      if (j.status === "done" || j.status === "failed") {
+        if (!alive()) return;
+        if (j.status === "done") App.toast("見た目の項目を埋めました");
+        invalidate(sid); App.invalidate(sid); App.render();
+        return;
+      }
+    }
+  }
+
+  // ---- 球との対応づけ（§9.1） ----
+  function matchHtml(data) {
+    const m = data.match;
+    if (!m || !m.n_shots || !data.checks) return "";
+    const body = m.mismatch
+      ? `<div class="note warn" data-match-mismatch><p style="margin:0">本数が合いません（動画 ${lab("count", m.n_swings + "本")}・球 ${lab("count", m.n_shots + "球")}）。素振りや打ち直しが入っているかもしれません。合わないあいだは結びません。</p></div>`
+      : `<p>動画のスイングを、撮った順に球へ当てます。順番が合っていれば結んでください。</p>
+         <button type="button" class="btn block" data-match-run>順番に結ぶ（${lab("count", m.n_swings + "本")}）</button>`;
+    return `<details class="folded block" data-match><summary>球との対応づけ（${m.matched ? `結んだ ${lab("count", m.matched + "本")}` : "まだ結んでいません"}）</summary>${body}
+      <p class="caption">結ぶと、その球だけに出た球の課題も、動きの課題とつながる候補に数えます。</p></details>`;
+  }
+
+  async function runMatch(sid, data, btn) {
+    btn.setAttribute("aria-disabled", "true");
+    try {
+      const plan = await api("POST", `/v1/sessions/${sid}/swings/match-suggest`);
+      if (plan.mismatch) throw new Error("本数が合わなくなりました。開き直してください");
+      for (const pr of plan.pairs) await api("PUT", `/v1/swings/${pr.swing_id}/match`, { seq: pr.seq });
+      App.toast("球と結びました");
+      invalidate(sid); App.invalidate(sid); App.render();
+    } catch (e) {
+      btn.removeAttribute("aria-disabled");
+      btn.insertAdjacentHTML("afterend", App.errOf(e, { what: "結べませんでした", saved: "前のままです。" }));
+    }
+  }
+
+  // 練習の一例（チェックポイント版のドリル。ガイドの考え方の要約。確かめ中の札つき）
+  function drillHtml(it) {
+    const d = (it.drills || [])[0];
+    if (!d) return "";
+    return `<section class="card block" data-drill="${esc(d.id)}" aria-labelledby="h-drill"><h2 id="h-drill" class="label">練習の一例</h2>
+      <p class="t-headline" style="margin:0 0 var(--s2)">${esc(d.title)}</p><p>${esc(d.what_changes)}</p>
+      <ol class="plain">${(d.steps || []).map((x) => `<li>${esc(x)}</li>`).join("")}</ol>
+      <p><span class="label">意識する一点</span><br>${esc(d.cue)}</p><p class="caption">${esc(d.adjust)}</p>
+      ${d.checked ? "" : `<p><span class="chip none">確かめ中（人がガイドと突き合わせる前の要約）</span></p>`}</section>`;
+  }
+
+  // 診断（D）とホームに出す「動きの課題」のカード（チェックの「まずここ」。無ければ空）
+  async function motionCard(sid) {
+    let d;
+    try { d = await load(sid); } catch { return ""; }
+    const c = d && d.checks;
+    const f = c && (c.items || []).find((x) => x.focus);
+    if (!f) return "";
+    return `<a class="card block cpcard focus" data-motion-card href="#/session/${sid}/check/${encodeURIComponent(f.id)}">
+      ${thumbOf(d, f) ? `<img src="${esc(thumbOf(d, f))}" alt="${esc(pLabel(f.p))} のあなたのコマ" loading="lazy">` : `<span class="noimg" aria-hidden="true">${icon("video")}</span>`}
+      <span class="grow1"><span class="label">動きの課題</span><span class="cph">${esc(f.fault_label || f.title)}</span>
+      <span class="cpf">${/^P\d/.test(f.p || "") ? lab("p", pLabel(f.p)) + " " : ""}${esc(f.title)}</span>${linkChip(f)}</span>${icon("chevron-right", "chev")}</a>`;
   }
 
   // ---- C-1 項目1つ ----
@@ -271,6 +450,8 @@ const Checks = (() => {
       ${how ? `<p data-howto>${esc(how)}</p>` : ""}
       <p class="sub">${esc(it.look_at)}</p>
       ${range}
+      ${it.linked && (it.state === "out_range" || it.focus) ? `<p data-linked-text><span class="chip brand">${esc(it.linked_text || "球の課題とつながる候補です（まだ確かめていません）")}</span></p>` : ""}
+      ${drillHtml(it)}
       <button type="button" class="textbtn" data-why>${icon("info")}なぜそう言える？</button>
       <nav class="itemnav" aria-label="${esc(GROUP_WORD[g])}の項目">
         ${prev ? `<a class="btn" data-prev href="#/session/${sid}/check/${encodeURIComponent(prev.id)}">${icon("chevron-left")}前の項目</a>` : "<span></span>"}
@@ -321,6 +502,11 @@ const Checks = (() => {
     if (it.state === "reference" && it.n_ref) rows.push(`<li><b>何本から</b>: ${it.n_ref}本${it.single ? "（一本だけの見立てです）" : ""}</li>`);
     if (estimatedFrame(data, it) && !isTempo(it)) rows.push(`<li><b>コマの選び方</b>: このコマは、ガイドの定義を画像から直接は見られないので、代わりの決め方で選んだ目安です（後ろからのクラブが水平のコマなど）</li>`);
     if (BASIS[it.basis]) rows.push(`<li><b>根拠</b>: ${esc(BASIS[it.basis])}${it.proxy ? `（代わりの点: ${esc(it.proxy)}）` : ""}</li>`);
+    if ((it.visions || []).length) {
+      const sw = (data.swings || []).map((x) => x.id);
+      rows.push(`<li><b>見た目（AI）の答え</b>: ${it.visions.map((v) => `スイング ${sw.indexOf(v.swing_id) + 1}「${esc(v.option)}」${v.visual ? `（${esc(v.visual)}）` : ""}`).join("／")}。AI が写真から選んだ答えで、正しさはまだ測っていません</li>`);
+    }
+    if (it.linked) rows.push(`<li><b>球の課題とつながる候補</b>: この日の球に出た課題と、事前に決めた表（ガイドも動きを「可能性」として扱っています）で結びついています。本当に効いているかは、練習で確かめます</li>`);
     if (it.conflict) rows.push(`<li><b>食い違い</b>: 見た目の答えと向きが逆でした。あなたが押した点を採っています</li>`);
     if (it.note && it.state !== "reference") rows.push(`<li><b>読み方</b>: ${esc(it.note)}</li>`);
     if (!it.checked_by) rows.push(`<li><b>未確認の項目</b>: この項目の基準の読み取りは、まだ人がガイドと突き合わせていません</li>`);
@@ -381,5 +567,5 @@ const Checks = (() => {
   App.route("/session/:id/check", renderC, { tab: "record" });
   App.route("/session/:id/check/:item", renderItem, { tab: "record" });
   App.route("/guide/:view", renderGuide, { tab: "record" });
-  return { load, invalidate, STATE };
+  return { load, invalidate, STATE, motionCard };
 })();

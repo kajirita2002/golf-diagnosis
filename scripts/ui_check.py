@@ -44,7 +44,8 @@ import zlib
 from playwright.sync_api import sync_playwright
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from e2e import REAL, ROOT, Services, call, create_plan_from_report, fake_narrative_file, import_csv, import_practice, practice_tsv, seed_real  # noqa: E402
+from e2e import multipart as e2e_multipart  # noqa: E402
+from e2e import REAL, ROOT, Services, call, create_plan_from_report, fake_narrative_file, fake_vision_file, import_csv, import_practice, practice_tsv, seed_real  # noqa: E402
 
 WEB = os.path.join(ROOT, "web")
 
@@ -261,9 +262,13 @@ def check_home_states(page, errors: list[str]) -> None:
         ("setup", {"sessions_with_shots": 1}, {"setupMismatch": True}),
         # 球は無く動画だけ（段2a のレビュー）: 「ようこそ」のままにしない
         ("video", {"sessions_with_shots": 0, "latest_video": {"session_id": 4, "n_swings": 1, "n_same_view": 1}}, {}),
+        # 動きの課題（段2c）: プランが無ければ、動画の「まずここ」が今日の一点。プラン中はプランが先
+        ("motion", {"sessions_with_shots": 0, "latest_video": {"session_id": 4}, "motion_focus": {"session_id": 4, "item_id": "iron.p2.dtl.head_vs_hands"}}, {}),
+        ("motion", {"sessions_with_shots": 1, "focus_state": "found", "focus": {"session_id": 3, "scope_id": "x", "startable": True}, "motion_focus": {"session_id": 4, "item_id": "a"}}, {}),
+        ("plan", {"sessions_with_shots": 1, "plan": {"next_index": 1, "total": 37, "last": None}, "motion_focus": {"session_id": 4, "item_id": "a"}}, {}),
     ]
     want_label = {"first": "最初の記録を入れる", "finding": "診断を見る", "measure": "診断を見る", "found": "この一点で練習を組む", "plan": "練習を始める",
-                  "stop": "続けるか選ぶ", "passed": "次の項目を見る", "video_resume": "同じ動画を選んで続ける", "setup": "撮り方を合わせる", "video": "チェックを見る"}
+                  "stop": "続けるか選ぶ", "passed": "次の項目を見る", "video_resume": "同じ動画を選んで続ける", "setup": "撮り方を合わせる", "video": "チェックを見る", "motion": "この課題を見る"}
     for key, h, local in cases:
         st = page.evaluate("([h, l]) => App.homeState(h, l)", [h, local])
         if st["key"] != key or st["primary"]["label"] != want_label[key]:
@@ -1687,6 +1692,135 @@ def fake_screenshot_answer(path: str) -> None:
         json.dump({"tables": [ok, bad]}, f)
 
 
+# ============================================================ 5. 見た目の評価（段2c）
+
+KEEP_JS = """async ([ids, ps]) => {
+  for (const id of ids) for (const p of ps) {
+    const c = document.createElement('canvas'); c.width = 1024; c.height = 576;
+    const g = c.getContext('2d'); g.fillStyle = 'gray'; g.fillRect(0, 0, 1024, 576);
+    const b = await new Promise((ok) => c.toBlob(ok, 'image/jpeg', 0.8));
+    if (!(await Video.keepFrame(id + ':' + p, b))) return false;
+  }
+  return true;
+}"""
+
+
+def check_vision_off(browser, root: str, base: str, pid: int, shots_dir: str, errors: list[str]) -> None:
+    """鍵が無い本番と同じ状態（段2c）: チェック一覧は壊れず、見た目の評価は押せない理由を1行で出す。"""
+    tag = "vision-off"
+    ses = call("POST", f"{base}/sessions", {"player_id": pid, "date": "2026-09-25", "location": "練習場"})
+    seed_swings(base, ses["id"], 3)
+    ctx, page = new_page(browser, 320, 700, errors, tag, pid)
+    goto(page, root, f"/session/{ses['id']}/check", "[data-summary]")
+    if page.locator("[data-vision] [data-vision-off]").count() != 1 or page.locator("[data-vision-run]").count():
+        errors.append(f"[{tag}] 鍵が無いのに評価のボタンが出る、または理由が出ない")
+    if page.locator("a.cprow").count() == 0:
+        errors.append(f"[{tag}] 鍵が無いと一覧が出ない")
+    plain_first(page, "#view", tag, "チェック一覧（鍵なし）", errors)
+    no_overflow(page, tag, "チェック一覧（鍵なし）", errors)
+    targets(page, tag, "チェック一覧（鍵なし）", errors)
+    shot(page, shots_dir, f"{tag}-check")
+    ctx.close()
+
+
+def check_vision_on(browser, shots_dir: str, errors: list[str]) -> None:
+    """偽の Claude（段2c）: ［見た目を評価する（料金）］→ 確かめのシート → ジョブ → 見た目の項目が埋まる。
+    送るのは端末に置いた長辺 1024px の写真だけ（multipart）。課題の項目に練習の一例。ホームの今日の一点と診断に動きの課題。"""
+    tag = "vision"
+    with Services(fake_vision=fake_vision_file("ok")) as sv:
+        me = call("POST", f"{sv.base}/me")["player"]
+        ses = call("POST", f"{sv.base}/sessions", {"player_id": me["id"], "date": "2026-09-30", "location": "練習場"})
+        sid = ses["id"]
+        seed_swings(sv.base, sid, 3)
+        ids = [s["id"] for s in call("GET", f"{sv.base}/sessions/{sid}/swings")]
+        ctx, page = new_page(browser, 390, 844, errors, tag, me["id"])
+        sent: list[tuple[str, int, str]] = []
+        page.on("request", lambda r: sent.append((r.url, len(r.post_data_buffer or b""), r.headers.get("content-type", ""))) if r.method == "POST" and "/v1/swings/checks" in r.url else None)
+        goto(page, sv.root, f"/session/{sid}/check", "[data-summary]")
+        if not page.evaluate(KEEP_JS, [ids, ["P1", "P2", "P3", "P4", "P5", "P6", "P7"]]):
+            errors.append(f"[{tag}] 端末に写真を置けない")
+        btn = page.locator("[data-vision-run]")
+        if btn.count() != 1:
+            errors.append(f"[{tag}] 評価のボタンが出ない")
+            ctx.close()
+            return
+        label = page.locator("[data-vision-run] [data-label=cost]").inner_text()
+        if not check_plain_label(label, "cost"):
+            errors.append(f"[{tag}] 料金のラベルの形が違う: {label}")
+        plain_first(page, "#view", tag, "チェック一覧（評価の前）", errors)
+        targets(page, tag, "チェック一覧（評価の前）", errors)
+        shot(page, shots_dir, f"{tag}-1-before")
+        btn.click()
+        page.wait_for_selector("[data-sheet=confirm].on")
+        shot(page, shots_dir, f"{tag}-2-confirm", full=False)
+        page.click("[data-sheet=confirm] [data-ok]")
+        try:
+            page.wait_for_selector("[data-vision-state=done]", timeout=60000)
+        except Exception:  # noqa: BLE001
+            errors.append(f"[{tag}] 評価が終わった表示にならない: {page.inner_text('[data-vision]')[:200]!r}")
+        if len(sent) != 1 or "multipart/form-data" not in sent[0][2]:
+            errors.append(f"[{tag}] 写真の送り方が違う: {sent}")
+        items = call("GET", f"{sv.base}/sessions/{sid}/checks")["checks"]["items"]
+        vis = [x for x in items if x["basis"] == "visual"]
+        pend = [x["id"] for x in items if x["reason"] == "vision_pending" and not x.get("optional")]
+        if not vis or pend:
+            errors.append(f"[{tag}] 見た目の項目が埋まらない（見た目 {len(vis)}件・まだ {pend}）")
+        if "見た目" not in page.inner_text("#view"):
+            errors.append(f"[{tag}] 見た目の札が一覧に出ない")
+        plain_first(page, "#view", tag, "チェック一覧（評価のあと）", errors)
+        no_overflow(page, tag, "チェック一覧（評価のあと）", errors)
+        shot(page, shots_dir, f"{tag}-3-after")
+        # 課題（P2 のクラブの先・内側）に練習の一例（確かめ中の札つき）
+        page.click("[data-card=focus]")
+        page.wait_for_selector("[data-title]")
+        if page.locator("[data-drill='cp.p2_head_inside']").count() != 1 or "確かめ中" not in page.inner_text("[data-drill]"):
+            errors.append(f"[{tag}] 課題の項目に練習の一例が出ない")
+        plain_first(page, "#view", tag, "項目1つ（練習の一例）", errors)
+        no_overflow(page, tag, "項目1つ（練習の一例）", errors)
+        shot(page, shots_dir, f"{tag}-4-item")
+        # 見た目の項目1つ: 「なぜそう言える？」に写真から選んだ答え
+        vi = next(x for x in vis if x["visions"])
+        goto(page, sv.root, f"/session/{sid}/check/{vi['id']}", "[data-why]")
+        page.click("[data-why]")
+        page.wait_for_selector("[data-sheet=why].on")
+        if "見た目（AI）の答え" not in page.inner_text("[data-sheet=why]"):
+            errors.append(f"[{tag}] 「なぜそう言える？」に見た目の答えが出ない")
+        shot(page, shots_dir, f"{tag}-5-why", full=False)
+        page.keyboard.press("Escape")
+        # 同じ日の球（振る方向が右にそろう）を入れると、課題に「球の課題とつながる候補」の印が付く（事前の表・§9.1）
+        rows = "\n".join(f"7i,{80 + i % 3},{1 + (i % 2) * 0.5},{4 + (i % 3) * 0.4},{150 + i}" for i in range(12))
+        path = os.path.join(shots_dir, "vision_shots.csv")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("Club,Club Speed [mph],Face Angle [deg],Club Path [deg],Carry [yds]\n" + rows + "\n")
+        body, ctype = e2e_multipart(path)
+        call("POST", f"{sv.base}/sessions/{sid}/import", raw=body, ctype=ctype)
+        goto(page, sv.root, f"/session/{sid}/check", "[data-summary]")
+        if page.locator("[data-card=focus] [data-linked]").count() != 1:
+            errors.append(f"[{tag}] 球の課題とつながる候補の印が出ない")
+        if page.locator("[data-match-mismatch]").count() != 1:
+            errors.append(f"[{tag}] 動画と球の本数が合わないのに赤い注意が出ない")
+        shot(page, shots_dir, f"{tag}-3b-linked")
+        # ホームの今日の一点が動きの課題になる・診断に動きの課題のカード
+        goto(page, sv.root, "/home", "[data-motion-focus]")
+        if page.locator("[data-home=linked]").count() != 1:
+            errors.append(f"[{tag}] ホームに球の課題とつながる候補の印が出ない")
+        plain_first(page, "#view", tag, "ホーム（動きの課題）", errors)
+        primary_in_view(page, tag, "ホーム（動きの課題）", errors)
+        shot(page, shots_dir, f"{tag}-6-home")
+        goto(page, sv.root, f"/session/{sid}", "[data-motion-slot], [data-motion-card]")
+        try:
+            page.wait_for_selector("[data-motion-card]", timeout=15000)
+        except Exception:  # noqa: BLE001
+            errors.append(f"[{tag}] 診断に動きの課題が出ない: {page.inner_html('#view')[:400]}")
+        shot(page, shots_dir, f"{tag}-7-diag")
+        no_overflow(page, tag, "診断（動きの課題）", errors)
+        # 二度目はキャッシュ（Claude を呼ばず、上限にも数えない）
+        goto(page, sv.root, f"/session/{sid}/check", "[data-summary]")
+        if page.locator("[data-vision-run]").count():
+            errors.append(f"[{tag}] 評価のあとも評価のボタンが残る")
+        ctx.close()
+
+
 def main() -> None:
     shots_dir = os.environ.get("SHOTS_DIR") or tempfile.mkdtemp(prefix="ui-")
     os.makedirs(shots_dir, exist_ok=True)
@@ -1725,7 +1859,9 @@ def main() -> None:
         check_video_portrait(browser, sv.root, me["id"], shots_dir, errors)
         check_video_auto(browser, sv.root, sv.base, me["id"], shots_dir, errors)
         check_routes(browser, sv.root, me["id"], real_id, shots_dir, errors)
+        check_vision_off(browser, sv.root, sv.base, me["id"], shots_dir, errors)
         check_narrative(browser, shots_dir, errors)
+        check_vision_on(browser, shots_dir, errors)
         browser.close()
     print("スクリーンショット:", shots_dir)
     if errors:

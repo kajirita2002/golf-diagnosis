@@ -672,10 +672,11 @@ def run_vision_off(base: str) -> None:
     print("OK（見た目の評価・鍵なし）")
 
 
-def fake_vision_file() -> str:
+def fake_vision_file(pick: str = "fault") -> str:
+    """偽の Claude（見た目の評価）。依頼の質問を読んで、良い側（ok）か外れ側（fault）のラベルを選ぶ。1回目だけ検証に落ちる答えを返す。"""
     path = os.path.join(tempfile.mkdtemp(), "vision.json")
     with open(path, "w", encoding="utf-8") as f:
-        json.dump({"mode": "auto", "pick": "fault", "bad_first": True, "extra": ["全体に落ち着いた構えに見えます"]}, f, ensure_ascii=False)
+        json.dump({"mode": "auto", "pick": pick, "bad_first": True, "extra": ["全体に落ち着いた構えに見えます"]}, f, ensure_ascii=False)
     return path
 
 

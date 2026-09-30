@@ -75,6 +75,16 @@ const Video = (() => {
     } catch { return false; }
   }
 
+  // 端末に置いた長辺 1024px のコマ（無ければ null）。見た目の評価（段2c）に送るときだけ読む
+  async function keptFrame(key) {
+    try {
+      const db = await idb();
+      const b = await new Promise((ok, ng) => { const tx = db.transaction("swingFrames", "readonly"); const r = tx.objectStore("swingFrames").get(key); r.onsuccess = () => ok(r.result || null); r.onerror = () => ng(r.error); });
+      db.close();
+      return b instanceof Blob ? b : null;
+    } catch { return null; }
+  }
+
   // ---- fps: ファイルの中の記録（mp4 / mov） ----
   // 上の階層の箱をたどって ftyp と moov だけを読み、mp4box に渡す（mdat は読まない。moov が末尾でも大きな動画を丸ごと読まない）
   async function containerInfo(file) {
@@ -1583,5 +1593,5 @@ const Video = (() => {
 
   App.route("/video", render, { tab: "record", noTabbar: true });
   App.route("/video/:date", render, { tab: "record", noTabbar: true });
-  return { catalog, containerInfo, selfTest, poseDetector };
+  return { catalog, containerInfo, selfTest, poseDetector, keptFrame, keepFrame };
 })();

@@ -78,7 +78,7 @@ def enabled_reason() -> tuple[bool, str]:
         return True, ""
     if os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"):
         return True, ""
-    return False, "AI の評価はまだ使えません（サーバーに Claude の鍵が設定されていません）"
+    return False, "見た目の評価はまだ使えません（サーバーに鍵が設定されていません）"
 
 
 def status() -> dict:
@@ -137,12 +137,13 @@ def build_questions(swings: list[dict], rng: random.Random) -> dict:
         ps = [p for p in sw.get("frames") or {}]
         qs = []
         for it in _vision_items(sw["view"], sw.get("club"), sw.get("club_class")):
-            p = it.get("p")
-            if p not in ps:
-                continue  # そのコマが無ければ聞かない
+            p = it.get("p") or ""
+            span = _expand(p)
+            if not span or span[0] not in ps or span[-1] not in ps:
+                continue  # そのコマ（区間なら両端）が無ければ聞かない
             labels = list(it["vision"]["options"])
             rng.shuffle(labels)
-            qs.append({"qid": "", "item": it["id"], "p": p, "question": fill(it.get("look_at", ""), hand),
+            qs.append({"qid": "", "item": it["id"], "p": p, "ps": [x for x in span if x in ps], "question": fill(it.get("look_at", ""), hand),
                        "options": [{"id": f"o{i + 1}", "label": fill(lab, hand)} for i, lab in enumerate(labels)],
                        "raw_labels": labels})
         rng.shuffle(qs)  # 質問の順もカタログの順（ドミノの順）から切り離す
@@ -150,6 +151,23 @@ def build_questions(swings: list[dict], rng: random.Random) -> dict:
             q["qid"] = f"q{i:02d}"
         out.append({"n": n, "swing_id": sw.get("swing_id"), "view": sw["view"], "fps": float(sw.get("fps") or 0), "hand": hand, "ps": ps, "questions": qs})
     return {"swings": out}
+
+
+P_ORDER = ["P1", "P2", "P3", "P4", "P5", "P5_5", "P6", "P6_5", "P7", "P8", "P9", "P10"]
+
+
+def _expand(p: str) -> list[str]:
+    """P の名前（区間 "P1-P4" も）→ その区間の P の並び。"""
+    if p in P_ORDER:
+        return [p]
+    a, _, b = p.partition("-")
+    if a in P_ORDER and b in P_ORDER and P_ORDER.index(a) <= P_ORDER.index(b):
+        return P_ORDER[P_ORDER.index(a): P_ORDER.index(b) + 1]
+    return []
+
+
+def _p_label(p: str) -> str:
+    return p.replace("_5", ".5").replace("-", "〜")
 
 
 def schema(qset: dict) -> dict:
@@ -201,7 +219,7 @@ def build_content(qset: dict, images: dict[tuple[int, str], bytes], previous: An
                 continue
             content.append({"type": "text", "text": f"スイング{s['n']} {p.replace('_5', '.5')}（この瞬間の定義: {_p_word(p, s['hand'])}）"})
             content.append({"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": base64.standard_b64encode(img).decode()}})
-        qs = [{"item": q["qid"], "p": q["p"].replace("_5", ".5"), "question": q["question"], "options": [{"id": o["id"], "label": o["label"]} for o in q["options"]]}
+        qs = [{"item": q["qid"], "p": _p_label(q["p"]), "question": q["question"], "options": [{"id": o["id"], "label": o["label"]} for o in q["options"]]}
               for q in s["questions"]]
         content.append({"type": "text", "text": f"<questions swing=\"{s['n']}\">\n{json.dumps(qs, ensure_ascii=False)}\n</questions>\n</swing>"})
     tail = "上のすべてのスイングの、すべての質問に答えてください。frames には、渡した各コマについて一つずつ答えます。"
@@ -265,7 +283,7 @@ def validate(qset: dict, out: Any) -> dict:
             res["problems"].append(f"スイング{key[0]} {key[1]} の visual: {'・'.join(tp)}")
             res["rejected"][key] = "文の検査に落ちた"
             continue
-        if (key[0], q["p"]) in bad_phase:
+        if any((key[0], x) in bad_phase for x in q["ps"]):
             res["rejected"][key] = "コマが違う"
             continue
         label = q["raw_labels"][q["options"].index(opt)]
@@ -428,8 +446,8 @@ def _finish(qset: dict, v: dict | None, calls: list[dict], validation: list[dict
                 continue
             if key in v["accepted"]:
                 ans[q["item"]] = v["accepted"][key]
-            elif q["p"] in reselect:
-                ans[q["item"]] = {"reselect": q["p"]}
+            elif set(q["ps"]) & set(reselect):
+                ans[q["item"]] = {"reselect": next(x for x in q["ps"] if x in reselect)}
             else:
                 why = v["rejected"].get(key, "答えが無い")
                 ans[q["item"]] = {"dropped": True, "why": why}

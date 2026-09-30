@@ -127,6 +127,17 @@ const Report = (() => {
         ${sec ? `<a class="btn block" href="#/session/${sid}/detail?scope=${encodeURIComponent(sc.scope_id)}&sec=${sec}">図と数字をくわしく見る</a>` : ""}` });
   }
 
+  // 動きの課題（動画のチェックの「まずここ」）を、球の結果の隣に並べる（段2c）。動画が無ければ何も出さない
+  async function motionSlot(body, sid, alive) {
+    const slot = $("[data-motion-slot]", body);
+    if (!slot || typeof Checks === "undefined") return;
+    let sws = [];
+    try { sws = await api("GET", `/v1/sessions/${sid}/swings`); } catch { return; }
+    if (!sws.length || !alive()) return;
+    const html = await Checks.motionCard(sid);
+    if (alive() && slot.isConnected) slot.outerHTML = html;
+  }
+
   async function renderD({ el, params, query, alive }) {
     const sid = Number(params.id);
     el.innerHTML = `<div class="pagehead">${App.backBtn("#/record")}<h1>診断</h1></div><div data-body></div>`;
@@ -155,9 +166,10 @@ const Report = (() => {
       if (!rep.n_shots) { try { sws = await api("GET", `/v1/sessions/${sid}/swings`); } catch { sws = []; } }
       if (!alive()) return;
       if (sws.length) {
-        body.innerHTML = `<a class="card vidcard block" data-video-first href="#/session/${sid}/check">${icon("video")}<span class="grow1"><b>動画のチェック</b>
+        body.innerHTML = `<div data-motion-slot></div><a class="card vidcard block" data-video-first href="#/session/${sid}/check">${icon("video")}<span class="grow1"><b>動画のチェック</b>
             <span class="caption">スイング${lab("count", sws.length + "本")}をガイドの基準で見ています</span></span>${icon("chevron-right", "chev")}</a>
           <p class="sub">球の記録はまだありません。計測器の表を入れると、球の解説も出ます。</p>${links}`;
+        motionSlot(body, sid, alive);
         return;
       }
       body.innerHTML = `<div class="note">${rep.n_shots ? "この記録の球は全部「除外」になっているので、解説は作れません。一球ずつの画面で除外を外すと解説が出ます。" : "この記録には球がありません。取り込むと解説が出ます。"}</div>${links}`;
@@ -168,7 +180,8 @@ const Report = (() => {
       `<a href="#/session/${sid}?scope=${encodeURIComponent(x.scope_id)}" ${x === sc ? 'aria-current="page"' : ""} data-scope="${esc(x.scope_id)}">${scopeLab(x)}</a>`).join("")}</div>` : "";
     // 範囲のセグメントがあるときは、同じ名前をカードの中でくり返さない
     body.innerHTML = `${seg}<article class="card block" data-gist data-scope="${esc(sc.scope_id)}">
-        ${seg ? "" : `<p class="label">${scopeLab(sc)}</p>`}${gistHtml(sc)}</article>${links}`;
+        ${seg ? "" : `<p class="label">${scopeLab(sc)}</p>`}${gistHtml(sc)}</article><div data-motion-slot></div>${links}`;
+    motionSlot(body, sid, alive);
     const slot = $(".figslot", body);
     if (slot) {
       try {
