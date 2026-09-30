@@ -36,7 +36,7 @@ const Home = (() => {
       const pr = p.last && p.last.progress;
       // 判定と選ぶボタンが最初から出るように、最後に判定した回を開く（?show=last）
       if (pr && pr.next_action === "ask_continue") return { key: "stop", heading: "止める", primary: { label: "続けるか選ぶ", href: "#/practice/result?show=last" } };
-      if (pr && ((pr.advance && pr.advance.ok) || pr.next_action === "recompute_candidates")) {
+      if (pr && ((pr.advance && pr.advance.ok) || pr.next_action === "recompute_candidates" || pr.next_action === "next_item")) {
         return { key: "passed", heading: "合格しました", primary: { label: "次の項目を見る", href: "#/practice/result?show=last" } };
       }
       return { key: "plan", heading: "プラン中", nth: (p.next_index || 0) + 1, primary: { label: "練習を始める", href: "#/practice/run", count: p.total } };

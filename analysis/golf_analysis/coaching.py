@@ -1311,7 +1311,7 @@ def motion_progress(tests: list[dict]) -> dict:
     text = MOTION_NEXT_TEXT.get(action) or NEXT_TEXT.get(action, "")
     if state == "insufficient":
         text = "判定できるように撮り直します。"
-    out = {"version": config.PLAN_VERSION, "kind": "motion", "state": state, "head": head, "text": STATE_TEXT_MOTION[state],
+    out = {"version": config.PLAN_VERSION, "kind": "motion", "state": state, "head": head, "title": head, "text": STATE_TEXT_MOTION[state],
            "next_action": action, "next_text": text, "pass_days": pass_days, "fail_days": len(fail_streak_days)}
     if state == "failed":
         out["next_options"] = [{"action": "switch_drill", "text": NEXT_TEXT["switch_drill"]}, {"action": "video_or_coach", "text": NEXT_TEXT["video_or_coach"]}]

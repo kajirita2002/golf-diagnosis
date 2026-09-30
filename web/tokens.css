@@ -485,3 +485,23 @@ ul.plain li{margin:var(--s1) 0}
 .itemnav{display:grid;grid-template-columns:1fr 1fr;gap:var(--s2);margin-top:var(--s5)}
 .itemnav .btn{min-height:48px;justify-content:center}
 .itemnav .btn.next{justify-content:center}
+
+/* 10球テスト（段4。docs/DESIGN_v2.md §8.2）: 丸は形でも分ける（色だけで分けない） */
+.tenballs{display:flex;flex-wrap:wrap;gap:var(--s2);list-style:none;padding:0;margin:var(--s3) 0 var(--s2)}
+.tenballs .ball{width:28px;height:28px;border-radius:var(--r-full);border:2px solid var(--line-strong);box-sizing:border-box;position:relative}
+.tenballs .ball.in{background:var(--good);border-color:var(--good)}
+.tenballs .ball.out{border-color:var(--bad)}
+.tenballs .ball.out::before,.tenballs .ball.out::after{content:"";position:absolute;left:50%;top:50%;width:14px;height:2px;background:var(--bad);transform:translate(-50%,-50%) rotate(45deg)}
+.tenballs .ball.out::after{transform:translate(-50%,-50%) rotate(-45deg)}
+.tenballs .ball.unk{border-style:dashed}
+.tenballs .ball.none{border-color:var(--line)}
+.tenballs .ball:nth-child(8){margin-right:var(--s3)}
+.stepper{display:flex;align-items:center;gap:var(--s3)}
+.stepper .btn{min-width:48px;min-height:48px;font-size:1.25rem}
+.stepper output{min-width:4em;text-align:center;font-size:1.125rem}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:var(--s2);margin:var(--s3) 0}
+.pair figure{margin:0}.pair img{width:100%;height:auto;border-radius:var(--r-s);display:block}
+.trend8 .g-pass{stroke:var(--good);stroke-dasharray:4 4}
+.camov{position:relative;border-radius:var(--r-m);overflow:hidden;background:var(--surface-2)}
+.camov video,.camov img{width:100%;display:block}
+.camov img{position:absolute;inset:0;height:100%;object-fit:contain;opacity:.4;pointer-events:none}

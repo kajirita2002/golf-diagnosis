@@ -459,12 +459,55 @@ const Checks = (() => {
       ${range}
       ${it.linked && (it.state === "out_range" || it.focus) ? `<p data-linked-text><span class="chip brand">${esc(it.linked_text || "球の課題とつながる候補です（まだ確かめていません）")}</span></p>` : ""}
       ${drillHtml(it)}
+      ${!tempo && it.state === "out_range" && testP(it) ? `<button type="button" class="btn block" data-motion-plan>この動きで練習を組む（十球テスト）</button>` : ""}
       <button type="button" class="textbtn" data-why>${icon("info")}なぜそう言える？</button>
       <nav class="itemnav" aria-label="${esc(GROUP_WORD[g])}の項目">
         ${prev ? `<a class="btn" data-prev href="#/session/${sid}/check/${encodeURIComponent(prev.id)}">${icon("chevron-left")}前の項目</a>` : "<span></span>"}
         ${nxt ? `<a class="btn" data-next href="#/session/${sid}/check/${encodeURIComponent(nxt.id)}">次の項目${icon("chevron-right")}</a>` : "<span></span>"}</nav>
       ${prev || nxt ? `<p class="caption" style="text-align:center">${esc(GROUP_WORD[g])}の項目だけを順に見ます（${lab("count", (k + 1) + " / " + same.length)}）</p>` : ""}`;
     $("[data-why]", body).addEventListener("click", () => openWhy(data, it));
+    const mp = $("[data-motion-plan]", body);
+    if (mp) mp.addEventListener("click", () => startMotionPlan(sid, data, it));
+  }
+
+  // ---- 動きのプランを始める（段4。docs/DESIGN_v2.md §8.3）: 合格の条件は十球テスト 八/十 ----
+  // 項目の P が区間（P1-P4）なら、終わりの P のコマで数える
+  const testP = (it) => { const m = /^(P\d+(?:_5)?)(?:-(P\d+))?$/.exec(it.p || ""); return m ? m[2] || m[1] : null; };
+  async function startMotionPlan(sid, data, it) {
+    if (!S.player) return;
+    const d = (it.drills || [])[0];
+    const club = ((data.swings || []).find((x) => x.view === it.view) || (data.swings || [])[0] || {}).club || "";
+    const sh = App.openSheet({ title: "この動きで練習を組む", label: "motionplan", size: "full", html: `
+      <p class="t-headline" data-mp="what">${esc(it.fault_label || it.title)}</p>
+      <p class="sub">練習の最後の十球を撮って、課題の場所が範囲に入った回を数えます。十回中八回で合格です。別の日にもう一回合格すると「効いた」です。</p>
+      ${club ? `<p class="caption">${lab("club", App.clubJa(club))}で打つ</p>` : ""}
+      <label class="field"><span>意識する一点</span><textarea class="plain" data-mp="cue" rows="3" maxlength="120">${esc(d ? d.cue : "")}</textarea></label>
+      ${d ? `<p class="caption">練習の一例「${esc(d.title)}」を使います${d.checked ? "" : "（確かめ中）"}。</p>` : ""}
+      <p class="caption">いま動いているプランがあれば、置き換えるかを聞きます。</p>
+      <div class="block"><button type="button" class="btn primary block" data-mp="go">プランを作る</button><div data-mp="err"></div></div>` });
+    const q = (k) => $(`[data-mp=${k}]`, sh.el);
+    if (!club) q("err").innerHTML = `<p class="fielderr">番手が分からないので作れません（動画の番手を選び直してください）</p>`;
+    const go = async (replace) => {
+      q("err").innerHTML = "";
+      const cue = q("cue").value.trim();
+      if (!cue && !d) { q("err").innerHTML = `<p class="fielderr">意識する一点を書いてください</p>`; return; }
+      const btn = q("go");
+      if (btn.getAttribute("aria-disabled") === "true") return;
+      btn.setAttribute("aria-disabled", "true");
+      const body = { kind: "motion", cp_item_id: it.id, view: it.view, checkpoint: testP(it), club, fault: it.fault || "", drill_id: d ? d.id : "",
+        cue: cue || (d && d.cue) || "", title: it.fault_label || it.title, from_session: sid };
+      const r = await App.request("POST", `/v1/players/${S.player.id}/plans${replace ? "?replace=1" : ""}`, { body }).catch((e) => ({ ok: false, status: 0, body: { error: String(e) } }));
+      btn.removeAttribute("aria-disabled");
+      if (r.status === 409 && !replace) {
+        if (await App.ask({ title: "動いているプランがもう1つあります", text: "動かせるのは1つだけです。いまのプランを「替えた」にして、この動きのプランに置き換えますか？", ok: "置き換える", cancel: "やめる" })) return go(true);
+        return;
+      }
+      if (!r.ok) { q("err").innerHTML = App.errorHtml({ what: "プランを作れませんでした", next: "内容を確かめて、もう一度押してください。", detail: (r.body && r.body.error) || r.text }); return; }
+      sh.close("done");
+      App.toast("動きのプランを作りました。練習の画面に組み方が出ます。");
+      App.go("/practice");
+    };
+    q("go").addEventListener("click", () => { if (club) go(false); });
   }
 
   // 写真に使ったコマが「目安」（代わりの規則で決めた）か（§6.4）
@@ -557,7 +600,12 @@ const Checks = (() => {
         <li>できればスローモーション（一秒に多くのコマ）で。コマが少ないと、下ろしから当たる瞬間のクラブが見えません</li></ul></section>
       <section class="card block"><h2>試し撮りの確かめ方</h2>
         <p>一本目の構えのコマで、腰の高さと手元（正面ならスタンスの真ん中）が画面の真ん中の線から離れていないかを自動で確かめます。外れていれば、チェックの画面に「カメラをもう少し右へ」のように直す向きが出ます。外れたままだと、傾きの項目は判断できないにします。</p></section>
+      <section class="card block" data-overlay><h2>前回の構えに合わせる</h2>
+        <p>別の日と比べるときは、前回と同じ置き方で撮ります。前回の構えのコマを薄く重ねて、体の位置が重なるようにカメラを動かします。</p>
+        <button type="button" class="btn block" data-cam>カメラで合わせる</button><div data-camview></div>
+        <p class="caption">カメラの映像はこの端末の中だけで使い、どこにも送りません。</p></section>
       <p class="sub block" data-other></p>`;
+    $("[data-cam]", el).addEventListener("click", (ev) => openOverlay(el, view, ev.currentTarget, alive));
     // 戻るは来た画面へ（動画の段から開いたら、動画の段へ）。履歴が無いときだけ記録の画面へ
     $("[data-gback]", el).addEventListener("click", (ev) => {
       if (App.cameInApp()) { ev.preventDefault(); history.back(); }
@@ -569,6 +617,51 @@ const Checks = (() => {
       const n = (cat.items || []).filter((it) => it.view === other && !it.optional).length;
       $("[data-other]", el).innerHTML = `この向きでは、${esc(VIEW[other])}の項目 ${lab("count", n + "件")}は判断できません（${esc(VIEW[other])}撮ると見られます）。`;
     } catch { /* 圏外でも置き方は読める */ }
+  }
+
+  // 前回の P1（構え）を、カメラのプレビューに薄く重ねる（§8.2・§10 R0）。映像はどこにも送らない
+  async function prevP1(view) {
+    const ss = (await App.sessions().catch(() => [])).slice(0, 6);
+    const ids = [];
+    for (const s of ss) {
+      try { for (const sw of await api("GET", `/v1/sessions/${s.id}/swings`)) if (sw.view === view) ids.push(sw.id); } catch { /* 次の日へ */ }
+      if (ids.length >= 4) break;
+    }
+    return ids;
+  }
+  async function openOverlay(el, view, btn, alive) {
+    const box = $("[data-camview]", el);
+    if (btn.getAttribute("aria-disabled") === "true") return;
+    btn.setAttribute("aria-disabled", "true");
+    let stream = null;
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error("この端末ではカメラを開けません");
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
+    } catch (e) {
+      btn.removeAttribute("aria-disabled");
+      box.innerHTML = `<p class="note warn">カメラを開けませんでした（${esc(e && e.message ? e.message : "許可されていません")}）。前回の構えのコマは、チェックの画面の写真で見られます。</p>`;
+      return;
+    }
+    if (!alive()) { stream.getTracks().forEach((t) => t.stop()); return; }
+    box.innerHTML = `<div class="camov" data-camov><video autoplay playsinline muted></video></div><p class="caption" data-camnote>前回の構えのコマを探しています…</p>
+      <button type="button" class="btn block" data-camstop>カメラを閉じる</button>`;
+    const v = $("video", box);
+    v.srcObject = stream;
+    const stop = () => { stream.getTracks().forEach((t) => t.stop()); box.innerHTML = ""; btn.removeAttribute("aria-disabled"); window.removeEventListener("hashchange", stop); };
+    $("[data-camstop]", box).addEventListener("click", stop);
+    window.addEventListener("hashchange", stop);
+    const ids = await prevP1(view);
+    const note = $("[data-camnote]", box);
+    if (!note) return;
+    const tryNext = (i) => {
+      if (i >= ids.length) { note.textContent = "前回の構えのコマがまだありません。今回の撮影が次回の基準になります。"; return; }
+      const img = new Image();
+      img.alt = "前回の構えのコマ（薄く重ねています）";
+      img.onload = () => { const ov = $("[data-camov]", box); if (ov) { ov.appendChild(img); note.textContent = "薄い姿が前回の構えです。体と足元が重なるようにカメラを動かします。"; } };
+      img.onerror = () => tryNext(i + 1);
+      img.src = `/v1/swings/${ids[i]}/thumbs/P1`;
+    };
+    tryNext(0);
   }
 
   App.route("/session/:id/check", renderC, { tab: "record" });
