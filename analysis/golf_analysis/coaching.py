@@ -171,6 +171,7 @@ def _secondary(c: dict, cands: dict) -> list[dict]:
 def build_plan(
     shots: list[dict], hand: str, scope_id: str, candidate_id: str, drill_id: str | None = None,
     club: str | None = None, window: dict | None = None, cue: str | None = None, variant: str = "standard",
+    diag_drills: bool = False,
 ) -> dict:
     """POST /v1/plan/build: 候補から1つ選んでプランの中身を作る（保存は Go の plans）。
 
@@ -233,7 +234,8 @@ def build_plan(
     else:
         dscope = "default"
     per_block = design["per_block"] if design else config.PLAN_DEFAULT_PER_BLOCK
-    template = _template(per_block, with_drill=d is not None, variant=variant)
+    # 診断のドリルを使うときは、確かめ済みのドリル集のドリルが無くてもドリルのブロックを残す（手順は診断が持つ）
+    template = _template(per_block, with_drill=d is not None or bool(diag_drills), variant=variant)
 
     p = sc["profile"]
     b = p["band"]

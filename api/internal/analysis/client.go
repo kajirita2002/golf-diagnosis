@@ -266,6 +266,8 @@ type PlanBuildInput struct {
 	Cue         string           `json:"cue,omitempty"`
 	// Variant は型（standard ＝ A-B-B-A / alternate ＝「移せていない」の次の、ドリルと本番を1球ずつ交互）。空なら standard。
 	Variant string `json:"variant,omitempty"`
+	// DiagDrills は診断のドリルをドリルのブロックで打つか（確かめ済みのドリルが無くても型にドリルのブロックを残す）
+	DiagDrills bool `json:"diag_drills,omitempty"`
 }
 
 // PlanCandidatesInput は POST /v1/plan/candidates（候補と勧めるドリル）への入力。

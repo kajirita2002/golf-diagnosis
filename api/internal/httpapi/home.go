@@ -126,8 +126,12 @@ type homeFocus struct {
 	Gap         json.RawMessage `json:"gap,omitempty"`    // 要点の「理想との差」の塊（言葉の行と比べる行）
 	Figure      json.RawMessage `json:"figure,omitempty"` // 比べる図 C1 の中身
 	BandShape   json.RawMessage `json:"band_shape,omitempty"`
-	Startable   bool            `json:"startable"` // この課題でプランを組めるか（測るだけの候補は組めない）
+	Startable   bool            `json:"startable"`         // この課題でプランを組めるか（測るだけの候補は組めない）
 	Earlier     bool            `json:"earlier,omitempty"` // 最新の記録では決まらず、前の記録の課題を出している
+	// Diag は診断（diagnosis）のうちホームに要るもの: {summary, video_needed, video_hint, issue, next, n_issues}。
+	// issue はプランがあればプランの候補の課題、無ければ診断の1つ目（課題 → 原因 → 理想 → 今日やること の4行と、
+	// 練習の画面のドリルの手順に使う）。文は分析サービスの定型文だけ（ここで作らない）。
+	Diag json.RawMessage `json:"diag,omitempty"`
 }
 
 type homePlan struct {
@@ -380,7 +384,12 @@ func (s *Server) homeFocusOf(ctx context.Context, sid int64, scope, planIssue st
 	if err != nil {
 		return nil, "unavailable"
 	}
-	raw, err := s.Analyzer.Report(ctx, analysis.ReportInput{Shots: ps, Handedness: pl.Handedness, Experiments: exps})
+	// 診断の材料（動画の保存済みの判定）も渡す。読めなければ動画なしの診断のまま（ホームは止めない）
+	swings, nVideos, serr := s.sessionSwingChecks(ctx, sid)
+	if serr != nil {
+		swings, nVideos = []json.RawMessage{}, 0
+	}
+	raw, err := s.Analyzer.Report(ctx, analysis.ReportInput{Shots: ps, Handedness: pl.Handedness, Experiments: exps, Swings: swings, NVideos: nVideos})
 	if err == nil {
 		raw, err = addBandShapes(raw)
 	}
@@ -390,6 +399,7 @@ func (s *Server) homeFocusOf(ctx context.Context, sid int64, scope, planIssue st
 		}
 		return nil, "unavailable"
 	}
+	diag := homeDiag(raw, planIssue)
 	var rep struct {
 		Scopes []struct {
 			ScopeID   string                     `json:"scope_id"`
@@ -424,7 +434,7 @@ func (s *Server) homeFocusOf(ctx context.Context, sid int64, scope, planIssue st
 			continue
 		}
 		f := &homeFocus{SessionID: sid, SessionDate: se.Date, ScopeID: sc.ScopeID, Label: sc.Label,
-			CandidateID: sc.Gist.Focus.CandidateID, Title: sc.Gist.Focus.Title, BandShape: sc.BandShape}
+			CandidateID: sc.Gist.Focus.CandidateID, Title: sc.Gist.Focus.Title, BandShape: sc.BandShape, Diag: diag}
 		if c1, ok := sc.Figures["C1"]; ok {
 			f.Figure = c1
 		}
@@ -474,11 +484,62 @@ func (s *Server) homeFocusOf(ctx context.Context, sid int64, scope, planIssue st
 			}
 			// 「次に見る」は解説の順（まずここ → 次）なので、プランの候補の次は分からない。出さない
 			*f = homeFocus{SessionID: f.SessionID, SessionDate: f.SessionDate, ScopeID: f.ScopeID, Label: f.Label,
-				CandidateID: planIssue, Title: title, Startable: true}
+				CandidateID: planIssue, Title: title, Startable: true, Diag: diag}
 		}
 		return f, "found"
 	}
 	return nil, "no_focus"
+}
+
+// homeDiag は解説の diagnosis から、ホームに要るものだけを取り出す（無ければ nil）。
+// planIssue（プランの候補の id）があれば、その候補を plan_candidate に持つ課題を選ぶ（プランと食い違う課題を並べない）。
+// 見つからなければ診断の1つ目。next は選んだ課題の次の課題の題だけ。
+func homeDiag(raw json.RawMessage, planIssue string) json.RawMessage {
+	var rep struct {
+		Diagnosis *struct {
+			Summary     string            `json:"summary"`
+			Strengths   []string          `json:"strengths"`
+			VideoNeeded bool              `json:"video_needed"`
+			VideoHint   string            `json:"video_hint"`
+			Issues      []json.RawMessage `json:"issues"`
+		} `json:"diagnosis"`
+	}
+	if json.Unmarshal(raw, &rep) != nil || rep.Diagnosis == nil || len(rep.Diagnosis.Issues) == 0 {
+		return nil
+	}
+	d := rep.Diagnosis
+	pick := 0
+	if planIssue != "" {
+		pick = -1
+		for i, is := range d.Issues {
+			var head struct {
+				PlanCandidate string `json:"plan_candidate"`
+			}
+			if json.Unmarshal(is, &head) == nil && head.PlanCandidate == planIssue {
+				pick = i
+				break
+			}
+		}
+		if pick < 0 {
+			return nil
+		}
+	}
+	out := map[string]any{"summary": d.Summary, "strengths": d.Strengths, "video_needed": d.VideoNeeded, "video_hint": d.VideoHint,
+		"issue": d.Issues[pick], "n_issues": len(d.Issues), "rank": pick + 1}
+	if pick+1 < len(d.Issues) {
+		var nx struct {
+			ID    string `json:"id"`
+			Title string `json:"title"`
+		}
+		if json.Unmarshal(d.Issues[pick+1], &nx) == nil && nx.Title != "" {
+			out["next"] = map[string]any{"id": nx.ID, "title": nx.Title}
+		}
+	}
+	b, err := json.Marshal(out)
+	if err != nil {
+		return nil
+	}
+	return b
 }
 
 // motionFocus は動画の判定の「まずここ」（無ければ nil）。文はカタログの定型文だけ（ここで作らない）。

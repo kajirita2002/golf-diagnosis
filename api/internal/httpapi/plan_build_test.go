@@ -52,6 +52,14 @@ func Test候補からプランを作ると分析サービスの型をそのま�
 	if pf.buildIns[1].Window != nil {
 		t.Fatalf("ok でない窓を渡した: %v", pf.buildIns[1].Window)
 	}
+	if pf.buildIns[0].DiagDrills || pf.buildIns[1].DiagDrills {
+		t.Fatal("頼んでいないのに診断のドリルのブロックを頼んだ")
+	}
+	// 診断レポートから作るときは、診断のドリルのブロックを残すよう分析サービスに頼む
+	e.do("POST", base+"?replace=1", map[string]any{"from_session": sid, "scope_id": "club:9 Iron", "candidate_id": "strike_heel", "cue": "x", "diag_drills": true}, 201)
+	if !pf.buildIns[2].DiagDrills {
+		t.Fatal("diag_drills を分析サービスへ渡していない")
+	}
 	// 確かめていないドリルは、分析サービスが通しても Go が断る
 	e.do("POST", base+"?replace=1", map[string]any{"from_session": sid, "scope_id": "club:9 Iron", "candidate_id": "strike_heel", "drill_id": "strike.two_balls"}, 400)
 	// 別の選手のセッションからは作れない

@@ -543,3 +543,99 @@ ul.plain li{margin:var(--s1) 0}
 .camov{position:relative;border-radius:var(--r-m);overflow:hidden;background:var(--surface-2)}
 .camov video,.camov img{width:100%;display:block}
 .camov img{position:absolute;inset:0;height:100%;object-fit:contain;opacity:.4;pointer-events:none}
+
+/* ---- 診断レポート（web/diagnosis.js）: 課題 → 原因の動き → 理想の動き → 直し方 → 確かめ方。
+   読み物なので本文は 1rem・行間 1.8。段の区切りは線ではなく余白と番号で作る ---- */
+.dg .card + .card,.dg .card + .note,.dg .note + .card,.dg nav + .card{margin-top:var(--s4)}
+.dgbody{font-size:1rem;line-height:1.8;margin:var(--s2) 0}
+.dgsum h2{margin-bottom:var(--s1)}
+.dglist{margin:var(--s1) 0 0;padding:0;list-style:none}
+.dglist li{margin:var(--s1) 0;line-height:1.7}
+.dglist.good li{color:var(--good);font-weight:600}
+.dgvideo b{display:inline-flex;align-items:center;gap:var(--s2)}
+.dgtoc{background:var(--surface);border-radius:var(--r-m);padding:var(--s3) var(--s4);box-shadow:var(--e1);margin-top:var(--s4)}
+.dgtoc ol{list-style:none;margin:0;padding:0}
+.dgtoc a{display:flex;align-items:center;gap:var(--s2);min-height:48px;color:var(--ink);text-decoration:none;font-weight:600}
+.dgtoc li + li{box-shadow:inset 0 1px 0 var(--line)}
+.dgissue{padding:var(--s4) var(--s4) var(--s2)}
+.dgissue.first{box-shadow:var(--e1),inset 0 4px 0 var(--bad)}
+.dgihead h2{font-size:1.25rem;line-height:1.4;margin-top:var(--s2)}
+.dgissue.first .dgihead h2{font-size:1.375rem}
+.dgino{display:block;font-size:.8125rem;color:var(--sub);font-weight:600;letter-spacing:.04em}
+.dgchips{gap:var(--s1) var(--s2);margin:var(--s2) 0}
+.dgchips .chip{white-space:normal;height:auto;padding-top:2px;padding-bottom:2px}
+.dgsec{padding:var(--s5) 0 var(--s2)}
+.dgsec + .dgsec,.dgmore > .dgsec:first-of-type{box-shadow:inset 0 1px 0 var(--line)}
+.dgstep{display:flex;align-items:baseline;gap:var(--s2);font-size:1.125rem;line-height:1.4;margin:0 0 var(--s2)}
+.dgno{font-size:1.25rem;color:var(--brand);font-weight:700;flex:none}
+.dg h4{font-size:1rem;line-height:1.5;margin:0 0 var(--s2);color:var(--ink)}
+.dgsub{margin:var(--s4) 0}
+.dgfact{background:var(--good-weak);border-radius:var(--r-m);padding:var(--s3) var(--s4);box-shadow:inset 4px 0 0 var(--good)}
+.dglead{margin:var(--s4) 0 0}
+.dgcauses{list-style:none;margin:var(--s2) 0 0;padding:0}
+.dgcause{background:var(--surface-2);border-radius:var(--r-m);padding:var(--s3) var(--s4);margin:var(--s2) 0}
+.dgctitle{display:flex;gap:var(--s2);align-items:baseline;margin:0;font-size:1.0625rem;line-height:1.55}
+.dgrank{flex:none;display:inline-grid;place-items:center;width:1.75rem;height:1.75rem;border-radius:var(--r-full);background:var(--surface);color:var(--ink);font-weight:700;font-size:.875rem;box-shadow:inset 0 0 0 1px var(--line-strong)}
+.dgcta{background:var(--brand-weak);border-radius:var(--r-m);padding:var(--s4);margin:var(--s4) 0;box-shadow:inset 0 0 0 2px var(--brand)}
+.dgctabtn{background:var(--surface);border-color:var(--brand);color:var(--brand);font-size:1.0625rem;min-height:56px}
+.dgart:empty{display:none}
+.dgpart{margin:var(--s3) auto;max-width:15rem;text-align:center;color:var(--ink)}
+.dgpart svg{width:100%;height:auto;max-height:260px;display:block;margin:0 auto}
+.dgpart.flip svg{transform:scaleX(-1)}
+.dgpart .club{stroke:var(--brand)}
+.dgov{margin:var(--s3) 0}
+.dgfig{margin:var(--s3) 0;color:var(--ink)}
+.dgfig svg{display:block;width:100%;max-width:26rem;height:auto;margin:0 auto;background:var(--surface-2);border-radius:var(--r-m)}
+.dgfig text{fill:var(--sub);font-size:13px;font-family:inherit}
+.dgfig .ln{fill:none;stroke:var(--ink);stroke-width:2.5;stroke-linejoin:round;stroke-linecap:round}
+.dgfig .guide{fill:none;stroke:var(--line-strong);stroke-width:1.5}
+.dgfig .core{fill:var(--sub)}
+.dgfig .ball{fill:var(--surface);stroke:var(--ink);stroke-width:2}
+.dgfig .now{fill:var(--warn);stroke:var(--surface);stroke-width:1.5}
+.dgfig .nowline{fill:none;stroke:var(--warn);stroke-width:5;stroke-linecap:round}
+.dgfig .nowarrow{fill:none;stroke:var(--warn);stroke-width:2;stroke-dasharray:1 5;stroke-linecap:round}
+.dgfig .ideal{fill:none;stroke:var(--good);stroke-width:3;stroke-dasharray:7 5;stroke-linecap:round}
+.dgfig figcaption{text-align:center;margin-top:var(--s1)}
+.dgcheck{list-style:none;margin:0;padding:0}
+.dgcheck li{position:relative;padding:var(--s2) 0 var(--s2) 2rem;line-height:1.7}
+.dgcheck li + li{box-shadow:inset 0 1px 0 var(--line)}
+.dgcheck li::before{content:"";position:absolute;left:0;top:calc(var(--s2) + .2rem);width:1.25rem;height:1.25rem;border-radius:4px;box-shadow:inset 0 0 0 2px var(--line-strong)}
+.dgdrill{background:var(--surface-2);border-radius:var(--r-m);padding:var(--s3) var(--s4);margin:var(--s3) 0}
+.dgdrill.tentative{background:transparent;box-shadow:inset 0 0 0 1px var(--line-strong)}
+.dgdname{display:flex;gap:var(--s2);align-items:baseline;margin:0;font-size:1.0625rem;line-height:1.55}
+.dgdno{flex:none;display:inline-grid;place-items:center;width:1.75rem;height:1.75rem;border-radius:var(--r-s);background:var(--brand);color:var(--on-brand);font-weight:700;font-size:.875rem}
+.dgkv{margin:var(--s2) 0 0}
+.dgkv div{display:grid;grid-template-columns:4.5em 1fr;gap:var(--s2);padding:var(--s1) 0}
+.dgkv dt{color:var(--sub);font-weight:600;font-size:.9375rem}
+.dgkv dd{margin:0;line-height:1.7}
+.dgsteps{margin:var(--s1) 0 var(--s2);padding-left:1.5em}
+.dgsteps li{margin:var(--s1) 0;line-height:1.7}
+.dgsafe{display:flex;gap:var(--s2);align-items:flex-start;background:var(--warn-weak);color:var(--ink);border-radius:var(--r-s);padding:var(--s2) var(--s3);margin:var(--s2) 0 0;font-size:.9375rem;line-height:1.6}
+.dgsafe svg.icon{flex:none;color:var(--warn);width:20px;height:20px;margin-top:2px}
+.dgmenu{list-style:none;margin:0;padding:0}
+.dgmenu li{display:flex;gap:var(--s3);align-items:flex-start;padding:var(--s3) 0;line-height:1.6}
+.dgmenu li + li{box-shadow:inset 0 1px 0 var(--line)}
+.dgmno{flex:none;display:inline-grid;place-items:center;width:1.75rem;height:1.75rem;border-radius:var(--r-full);background:var(--surface-2);font-weight:700;font-size:.875rem}
+.dgballs{flex:none;font-weight:700;font-size:1.0625rem;font-variant-numeric:tabular-nums}
+.dgmore > summary{list-style:none;margin:var(--s2) 0;font-weight:600}
+.dgmore > summary::-webkit-details-marker{display:none}
+.dgmore[open] > summary{color:var(--sub)}
+/* ホームの課題のカード（4行: 課題・原因・理想・今日やること） */
+.hcard{padding:0;overflow:hidden}
+.hcard dl{margin:0}
+.hrow{padding:var(--s3) var(--s4)}
+.hrow + .hrow{box-shadow:inset 0 1px 0 var(--line)}
+.hrow dt{font-weight:700;color:var(--brand);font-size:.875rem;line-height:1.5;letter-spacing:.04em}
+.hrow dd{margin:var(--s1) 0 0;line-height:1.75}
+.hrow dd b{font-size:1.0625rem}
+.hrow.issue{background:var(--bad-weak)}
+.hrow.issue dt{color:var(--bad)}
+.hmenu{margin:var(--s1) 0 0;padding-left:1.3em}
+.hmenu li{margin:2px 0}
+@media (max-width:359px){.dgkv div{grid-template-columns:1fr;gap:0}}
+.stickyact{position:sticky;bottom:calc(var(--tabbar-h) + env(safe-area-inset-bottom) + var(--s2));z-index:5}
+.stickyact .btn.primary{box-shadow:var(--e2)}
+.vidbtn{font-size:1.0625rem;min-height:56px;border-color:var(--brand);color:var(--brand)}
+.vidbtn svg.icon{color:var(--brand)}
+#h-tm .dgno,#h-vid .dgno{margin-right:var(--s1)}
+.run .runsteps{text-align:left;margin-top:var(--s2)}

@@ -267,7 +267,7 @@ def check_home_states(page, errors: list[str]) -> None:
         ("motion", {"sessions_with_shots": 1, "focus_state": "found", "focus": {"session_id": 3, "scope_id": "x", "startable": True}, "motion_focus": {"session_id": 4, "item_id": "a"}}, {}),
         ("plan", {"sessions_with_shots": 1, "plan": {"next_index": 1, "total": 37, "last": None}, "motion_focus": {"session_id": 4, "item_id": "a"}}, {}),
     ]
-    want_label = {"first": "最初の記録を入れる", "finding": "診断を見る", "measure": "診断を見る", "found": "この一点で練習を組む", "plan": "練習を始める",
+    want_label = {"first": "最初の記録を入れる", "finding": "診断を見る", "measure": "くわしいレポートを見る", "found": "くわしいレポートを見る", "plan": "練習を始める",
                   "stop": "続けるか選ぶ", "passed": "次の項目を見る", "video_resume": "同じ動画を選んで続ける", "setup": "撮り方を合わせる", "video": "チェックを見る", "motion": "この課題を見る"}
     for key, h, local in cases:
         st = page.evaluate("([h, l]) => App.homeState(h, l)", [h, local])
@@ -516,11 +516,31 @@ def check_home(page, root: str, base: str, pid: int, shots_dir: str, tag: str, e
     want = page.evaluate("(h) => App.homeState(h).key", home)
     if state != want:
         errors.append(f"[{tag}] ホームの状態が {state}（homeState は {want}）")
-    if state == "found":
-        if page.inner_text("[data-home=one]").strip() != home["focus"]["cue"]:
-            errors.append(f"[{tag}] 今日の一点が要点の「意識する一点」でない")
-        if home["focus"].get("next_title") and home["focus"]["next_title"] not in page.inner_text("[data-home=next]"):
-            errors.append(f"[{tag}] 次に見るが無い")
+    diag = (home.get("focus") or {}).get("diag")
+    if state == "found" and diag:
+        # 課題のカードは4行（課題 → 原因 → 理想 → 今日やること）。どの行も文がある（謎の一言だけにしない）
+        rows = page.eval_on_selector_all("[data-home=diag] [data-row]", "(xs) => xs.map((x) => [x.dataset.row, x.querySelector('dt').textContent.trim(), x.querySelector('dd').textContent.trim()])")
+        if [r[0] for r in rows] != ["issue", "cause", "ideal", "today"] or [r[1] for r in rows] != ["課題", "原因", "理想", "今日やること"]:
+            errors.append(f"[{tag}] ホームの課題のカードが4行（課題・原因・理想・今日やること）でない: {rows}")
+        for r in rows:
+            if len(r[2]) < 4:
+                errors.append(f"[{tag}] ホームの「{r[1]}」の行が空: {r[2]!r}")
+        is0 = diag["issue"]
+        if page.inner_text("[data-home=first]").strip() != is0["title"]:
+            errors.append(f"[{tag}] ホームの課題が診断の課題でない")
+        if page.inner_text("[data-home=one]").strip() != (is0["fix"]["cue_move"] or is0["fix"]["cue"]):
+            errors.append(f"[{tag}] 今日やることの意識する動きが診断の文でない")
+        c0 = (is0.get("causes") or [{}])[0]
+        if c0.get("title") and c0["title"] not in page.inner_text("[data-home=diag] [data-row=cause]"):
+            errors.append(f"[{tag}] 原因の行に、いちばん可能性の高い動きが無い")
+        if (is0.get("fix") or {}).get("menu") and page.locator("[data-home=menu] li").count() != len(is0["fix"]["menu"]):
+            errors.append(f"[{tag}] 今日やることに練習メニューが無い")
+        if diag.get("next") and diag["next"]["title"] not in page.inner_text("[data-home=next]"):
+            errors.append(f"[{tag}] 次に取り組む課題が無い")
+        if diag.get("video_needed") and c0.get("basis") == "likely" and page.locator("[data-home=video]").count() != 1:
+            errors.append(f"[{tag}] 動画が無いのに、原因を確かめる動画の案内が無い")
+        if page.get_attribute("[data-primary]", "href") != f"#/session/{home['focus']['session_id']}":
+            errors.append(f"[{tag}] ［くわしいレポートを見る］がレポートへ行かない")
     # 主ボタンは1つ（HIG）
     if page.locator("#view [data-primary]").count() != 1:
         errors.append(f"[{tag}] ホームの主ボタンが {page.locator('#view [data-primary]').count()} 個")
@@ -553,38 +573,83 @@ def check_home_fold(browser, root: str, pid: int, shots_dir: str, errors: list[s
         ctx.close()
 
 
+STEP_WANT = ["① いま起きていること", "② 原因の動き", "③ 理想の動き", "④ 直し方（アクションプラン）", "⑤ 直ったかの確かめ方"]
+
+
 def check_diag(page, root: str, base: str, sid: int, shots_dir: str, tag: str, errors: list[str]) -> None:
+    """診断レポート: 課題ごとに ①〜⑤ を開かなくても読める・数字は「なぜ？」の中だけ・ドリルに札と安全。"""
     rep = call("GET", f"{base}/sessions/{sid}/report")["report"]
-    goto(page, root, f"/session/{sid}", "[data-gist] .gblock")
-    blocks = page.eval_on_selector_all("[data-gist] .gblock > h2", "(xs) => xs.map((x) => x.textContent)")
-    if blocks != ["いま", "課題", "理想との差", "意識すること・やること"]:
-        errors.append(f"[{tag}] 診断の4つの塊が無い: {blocks}")
-    mains = [x for x in rep["scopes"] if x["kind"] == "main"]
-    if len(mains) > 1 and page.locator("[data-scopes] a").count() != len(mains):
-        errors.append(f"[{tag}] 範囲のセグメントの数が違う")
-    if page.locator("[data-gist] figure.fig svg[data-fig=C1]").count() != 1:
-        errors.append(f"[{tag}] 理想との差の比べる図（C1）が無い")
-    plain_first(page, "#view", tag, "診断", errors)
-    no_overflow(page, tag, "診断", errors)
-    targets(page, tag, "診断", errors)
-    page.wait_for_timeout(300)
-    shot(page, shots_dir, f"{tag}-diag")
+    dg = rep["diagnosis"]
+    goto(page, root, f"/session/{sid}", "[data-report] [data-issue='0'] [data-sec=check]")
+    page.wait_for_timeout(600)
+    got = page.evaluate("""() => [...document.querySelectorAll('[data-report] .dgissue')].map((c) => ({
+        steps: [...c.querySelectorAll('.dgstep')].map((h) => h.textContent.replace(/\\s+/g, ' ').trim()),
+        secs: [...c.querySelectorAll('.dgsec')].map((x) => [x.dataset.sec, [...x.querySelectorAll('.dgbody, .dgcheck li, .dgsteps li, [data-cue-move], .dgmenu li')].map((p) => p.textContent.trim()).filter((t) => t.length > 3).length]),
+        visible: [...c.querySelectorAll('.dgsec')].filter((x) => x.checkVisibility()).map((x) => x.dataset.sec) }))""")
+    if len(got) != len(dg["issues"]):
+        errors.append(f"[{tag}] レポートの課題の数が診断と違う: {len(got)} / {len(dg['issues'])}")
+    if got:
+        if got[0]["steps"] != STEP_WANT:
+            errors.append(f"[{tag}] 1つ目の課題に ①〜⑤ の見出しがそろっていない: {got[0]['steps']}")
+        if got[0]["visible"] != ["now", "cause", "ideal", "fix", "check"]:
+            errors.append(f"[{tag}] 1つ目の課題の5段が、開かなくても見えていない: {got[0]['visible']}")
+        for sec, n in got[0]["secs"]:
+            if n < 1:
+                errors.append(f"[{tag}] 1つ目の課題の「{sec}」の段に文が無い")
+        for k, g in enumerate(got[1:], 1):
+            if g["visible"] != ["now"] or len(g["steps"]) != 5:
+                errors.append(f"[{tag}] {k + 1}つ目の課題は見出しと①だけを見せて開ける形でない: {g}")
+    if not page.locator("[data-report] [data-summary] .dgbody").inner_text().strip():
+        errors.append(f"[{tag}] 今日のまとめが無い")
+    is0 = dg["issues"][0]
+    # ドリル: 手順・札（PGAガイド p.X／一般的な練習法）・安全の注意
+    drills = page.eval_on_selector_all("[data-issue='0'] [data-drill]", "(xs) => xs.map((x) => [x.querySelectorAll('.dgsteps li').length, (x.querySelector('[data-label=source]') || {}).textContent || '', !!x.querySelector('.dgsafe')])")
+    if len(drills) != len(is0["fix"]["drills"]) or not drills:
+        errors.append(f"[{tag}] ドリルが隠れている: {drills}")
+    for n, src, safe in drills:
+        if n < 1 or not safe or not re.fullmatch(CONFIG.PLAIN_LABEL_PATTERNS["source"], src.strip()):
+            errors.append(f"[{tag}] ドリルに手順・札・安全の注意のどれかが無い: {n} {src!r} {safe}")
+    if page.locator("[data-issue='0'] [data-menu] li").count() != len(is0["fix"]["menu"]):
+        errors.append(f"[{tag}] 今日の練習メニューが無い")
+    if dg.get("video_needed") and is0.get("video_cta") and page.locator("[data-issue='0'] [data-video-cta] a[data-act=video]").count() != 1:
+        errors.append(f"[{tag}] 動画が無いのに、原因の段に［動画を撮って原因を確かめる］が無い")
+    if page.locator("#view [data-primary]").count() != 1 or page.inner_text("#view [data-primary]").strip() != "この課題で練習を組む":
+        errors.append(f"[{tag}] レポートの主ボタンが［この課題で練習を組む］1つでない")
+    plain_first(page, "#view", tag, "診断レポート", errors)
+    no_overflow(page, tag, "診断レポート", errors)
+    targets(page, tag, "診断レポート", errors)
+    shot(page, shots_dir, f"{tag}-report")
+    # 2つ目の課題を開くと、①〜⑤が全部読める
+    if len(got) > 1:
+        page.click("[data-issue='1'] details[data-more] > summary")
+        vis = page.eval_on_selector_all("[data-issue='1'] .dgsec", "(xs) => xs.filter((x) => x.checkVisibility()).length")
+        if vis != 5:
+            errors.append(f"[{tag}] 2つ目の課題を開いても5段が出ない: {vis}")
+        no_overflow(page, tag, "診断レポート（2つ目を開く）", errors)
     # 「なぜそう言える？」: シート・数字入りの根拠・Esc で閉じ、押したボタンへフォーカスが戻る
-    btn = page.locator("[data-gist] [data-why=now]")
+    btn = page.locator("[data-issue='0'] [data-dgwhy=now]")
+    btn.scroll_into_view_if_needed()
     btn.click()
-    page.wait_for_selector("[data-sheet=why].on")
-    claims = page.locator("[data-sheet=why] .claim").all_inner_texts()
+    page.wait_for_selector("[data-sheet=dgwhy].on")
+    claims = page.locator("[data-sheet=dgwhy] .claim").all_inner_texts()
     if not claims or not any(re.search(r"[0-9]", c) for c in claims):
         errors.append(f"[{tag}] 「なぜそう言える？」に数字入りの根拠が無い: {claims[:2]}")
-    if page.get_attribute("[data-sheet=why]", "aria-modal") != "true":
+    if page.get_attribute("[data-sheet=dgwhy]", "aria-modal") != "true":
         errors.append(f"[{tag}] シートが aria-modal でない")
     no_overflow(page, tag, "なぜそう言える？", errors)
     page.wait_for_timeout(350)
-    shot(page, shots_dir, f"{tag}-diag-why", full=False)
+    shot(page, shots_dir, f"{tag}-report-why", full=False)
     page.keyboard.press("Escape")
-    page.wait_for_selector("[data-sheet=why]", state="detached")
-    if not page.evaluate("document.activeElement && document.activeElement.dataset.why === 'now'"):
+    page.wait_for_selector("[data-sheet=dgwhy]", state="detached")
+    if not page.evaluate("document.activeElement && document.activeElement.dataset.dgwhy === 'now'"):
         errors.append(f"[{tag}] シートを閉じてもフォーカスが「なぜそう言える？」へ戻らない")
+    for key in ("cause", "fix", "check"):
+        page.locator(f"[data-issue='0'] [data-dgwhy={key}]").click()
+        page.wait_for_selector("[data-sheet=dgwhy].on")
+        if not page.locator("[data-sheet=dgwhy] .claim, [data-sheet=dgwhy] .caption").count():
+            errors.append(f"[{tag}] 「なぜそう言える？」（{key}）が空")
+        page.keyboard.press("Escape")
+        page.wait_for_selector("[data-sheet=dgwhy]", state="detached")
 
 
 # 図の点を数える JS（範囲のカードの直下の節の図だけ。畳んだ短い版の中は数えない）
@@ -800,8 +865,8 @@ def check_plan(browser, root: str, base: str, shots_dir: str, tag: str, w: int, 
                     c0["drills"]["drills"] = [d for d in FAKE_DRILLS["drills"] if set(d.get("issues") or []) & set(c0.get("issue_names") or [c0["id"]])]
         route.fulfill(response=resp, body=json.dumps(body))
     page.route("**/plan-candidates*", fake_cands)
-    goto(page, root, f"/session/{sid}?scope=group:iron", "[data-gist] [data-act=startplan]")
-    page.click("[data-gist] [data-act=startplan]")
+    goto(page, root, f"/session/{sid}?scope=group:iron", "[data-report] [data-act=startplan]")
+    page.click("[data-report] [data-act=startplan]")
     page.wait_for_selector("[data-sheet=plan]")
     try:
         page.wait_for_function("document.querySelectorAll('[data-sheet=plan] label.drl').length === 2", timeout=5000)
@@ -831,8 +896,15 @@ def check_plan(browser, root: str, base: str, shots_dir: str, tag: str, w: int, 
     tpl = today["plan"]["template"]
     if page.locator("#tBlocks li").count() != len(tpl):
         errors.append(f"[{tag}] 練習のブロックの数が型と違う")
-    if page.locator("[data-t=head] [data-t=nodrill]").count() != 1:
-        errors.append(f"[{tag}] 練習に「確かめ済みのドリルはまだありません」が無い")
+    # 確かめ済みのドリルが無いときは、診断の練習法（手順・札・安全）を出す（「見る」だけの本番にしない）
+    if page.locator("[data-t=diagdrills] [data-drill]").count() < 1 or page.locator("[data-t=diagdrills] .dgsteps li").count() < 3:
+        errors.append(f"[{tag}] 練習に診断のドリル（手順つき）が無い")
+    if page.locator("[data-t=diagplan] [data-t=setup] li").count() < 1:
+        errors.append(f"[{tag}] 練習に「構えで直すこと」が無い")
+    if not any(b["kind"] == "drill" for b in tpl):
+        errors.append(f"[{tag}] 診断のドリルがあるのに、組み方にドリルのブロックが無い（ドリルの球が本番に混ざる）")
+    if page.locator("#tBlocks [data-t=blockdrill]").count() != sum(1 for b in tpl if b["kind"] == "drill"):
+        errors.append(f"[{tag}] 組み方のドリルのブロックに、診断のドリルの名前が無い")
     head = page.inner_text("[data-t=head] .ttitle")
     if not head or check_plain(head):
         errors.append(f"[{tag}] 練習の見出しが空か、数字・専門用語を含む: {head!r}")
@@ -872,6 +944,8 @@ def check_plan(browser, root: str, base: str, shots_dir: str, tag: str, w: int, 
     ctx.set_offline(True)
     for act in ("[data-t=next]", "[data-t=next]", "[data-t=plus]"):
         page.click(f"[data-t=run] {act}")
+    if tpl[2]["kind"] == "drill" and page.locator("[data-t=run] [data-t=runsteps] li").count() < 1:
+        errors.append(f"[{tag}] 練習中のドリルのブロックに、ドリルの手順が無い（圏外）")
     cnt = page.inner_text("[data-t=run] [data-t=count]")
     if cnt != f"{tpl[2]['n'] + 1}球":
         errors.append(f"[{tag}] 圏外でブロックが進まない／球を足せない: {cnt}")
@@ -1019,9 +1093,9 @@ def check_settings(browser, root: str, base: str, pid: int, sid: int, shots_dir:
         errors.append("[settings] 再読み込みでテーマが戻る")
     page.wait_for_timeout(400)
     shot(page, shots_dir, "home-dark")
-    goto(page, root, f"/session/{sid}", "[data-gist]")
-    page.wait_for_timeout(300)
-    shot(page, shots_dir, "diag-dark")
+    goto(page, root, f"/session/{sid}", "[data-report] [data-sec=check]")
+    page.wait_for_timeout(600)
+    shot(page, shots_dir, "report-dark")
     goto(page, root, "/settings", "[data-set=theme]")
     page.click("[data-set=theme] button[data-v=auto]")
     page.click("[data-set=unit] button[data-v=m]")

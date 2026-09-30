@@ -78,6 +78,9 @@ class PlanBuildIn(BaseModel):
     window: dict[str, Any] | None = None
     cue: str | None = None
     variant: str = "standard"
+    # 診断のドリル（docs/DESIGN_diagnosis.md）を練習のドリルのブロックで打つ。確かめ済みのドリル集のドリルが無くても、
+    # 型にドリルのブロックを残す（ドリルの球を「いつも通り」「本番」に混ぜない）
+    diag_drills: bool = False
 
 
 class PlanEvaluateIn(BaseModel):
@@ -360,7 +363,8 @@ def plan_candidates(body: PlanCandidatesIn) -> dict:
 def plan_build(body: PlanBuildIn) -> dict:
     """候補から1つ選んでプランの中身を作る。params は作った時点で固定する（§8.1・§7.3）。"""
     try:
-        out = coaching.build_plan(body.shots, _hand(body.handedness), body.scope_id, body.candidate_id, body.drill_id, body.club, body.window, body.cue, body.variant)
+        out = coaching.build_plan(body.shots, _hand(body.handedness), body.scope_id, body.candidate_id, body.drill_id, body.club, body.window, body.cue, body.variant,
+                                     diag_drills=body.diag_drills)
     except coaching.PlanError as e:
         raise HTTPException(422, str(e)) from e
     # 今日の練習の画面の最初に出す言葉（数字も専門用語も使わない。gist.py）。trigger に入れて plans に残す

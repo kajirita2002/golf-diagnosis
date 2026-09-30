@@ -6,8 +6,8 @@
     キャッシュに残る）。video.js と checkpoints.js は入れる（圏外でもコマ選びの画面とチェックの写しが開けるように）。
   - ネットワークを先に使い、届かないときだけ手元の写しを返す（直した画面がすぐ届く）。
 */
-const CACHE = "golf-shell-v5";
-const SHELL = ["./", "index.html", "tokens.css", "icons.svg", "app.js", "home.js", "record.js", "report.js", "practice.js", "progress.js", "settings.js", "figures.js", "video.js", "checkpoints.js", "ideal.js"];
+const CACHE = "golf-shell-v6";
+const SHELL = ["./", "index.html", "tokens.css", "icons.svg", "app.js", "home.js", "record.js", "diagnosis.js", "report.js", "practice.js", "progress.js", "settings.js", "figures.js", "video.js", "checkpoints.js", "ideal.js"];
 
 self.addEventListener("install", (ev) => {
   ev.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).catch(() => {}));

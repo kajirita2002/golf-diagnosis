@@ -149,6 +149,9 @@ type planIn struct {
 	Window      map[string]any `json:"window"` // 解説の band_shape.window（{face_min, face_max, path}・右打ちの座標）
 	// Variant は型（standard / alternate）。alternate は「移せていない」の次の型（ドリルと本番を1球ずつ交互。§8.6）
 	Variant string `json:"variant"`
+	// DiagDrills は診断のドリル（診断レポートの練習法）をドリルのブロックで打つか。型にドリルのブロックを残すだけで、
+	// ドリル集のドリル（drill_id）とは別（確かめ済みの札は診断の側が持つ）
+	DiagDrills bool `json:"diag_drills"`
 	// 動きのプラン（kind=motion。docs/DESIGN_v2.md §8.3）: カタログの項目・10球テストで取り出す向きと P・外れの向き・見出し
 	Kind       string `json:"kind"`
 	CPItemID   string `json:"cp_item_id"`
@@ -244,7 +247,7 @@ func (s *Server) fromBuild(ctx context.Context, pid int64, in *planIn) (map[stri
 		return nil, bad("variant は standard か alternate です")
 	}
 	bi := analysis.PlanBuildInput{Shots: ps, Handedness: pl.Handedness, ScopeID: in.ScopeID, CandidateID: in.CandidateID,
-		Club: in.Club, Window: windowOf(in.Window), Cue: in.Cue, Variant: in.Variant}
+		Club: in.Club, Window: windowOf(in.Window), Cue: in.Cue, Variant: in.Variant, DiagDrills: in.DiagDrills}
 	if !custom {
 		bi.DrillID = in.DrillID
 	}

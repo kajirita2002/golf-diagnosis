@@ -142,14 +142,19 @@ const Record = (() => {
         <p class="caption" data-trig-note hidden>プランのきっかけの診断の記録です。練習の球はここに入れず、新しい記録として入れてください（混ぜると診断が変わり、練習としても記録できません）。</p></div>
       <label class="field" data-loc-wrap><span>場所（任意）</span><input data-loc placeholder="例: 練習場" autocomplete="off"></label>
       <p class="caption" data-loc-fixed hidden></p>
-      <a class="card vidcard block" data-video href="#/video/${esc(date)}">${icon("video")}<span class="grow1"><b>動画を入れる</b>
-        <span class="caption">後ろから・正面から。動画は送りません（送るのは選んだコマの小さな写真と体の点だけ）</span></span>${icon("chevron-right", "chev")}</a>
+      <p class="dgbody" data-record-howto>一回の練習で、<b>球のデータ（TrackMan）</b>と<b>スイングの動画</b>をセットで入れます。計測器で分かるのは当たる瞬間のクラブの様子までで、体のどの動きが原因かは動画で確かめます。</p>
       <section class="card block" aria-labelledby="h-tm">
-        <h2 id="h-tm">${canRead ? "TrackMan のスクショ" : "TrackMan の表を入れる"}</h2>
+        <h2 id="h-tm"><span class="dgno" aria-hidden="true">①</span> 球のデータ（${canRead ? "TrackMan のスクショ" : "TrackMan の表"}）</h2>
         ${shotPart}
         ${canRead ? `<details class="block" data-other><summary class="textbtn">ほかの入れ方（表の貼り付け・CSV・レポートのリンク）</summary>${other}</details>` : `<div data-other>${other}</div>`}
 
         <div data-import-msg role="status"></div>
+      </section>
+      <section class="card block" aria-labelledby="h-vid">
+        <h2 id="h-vid"><span class="dgno" aria-hidden="true">②</span> スイングの動画（後ろから・できれば正面からも）</h2>
+        <p class="sub">同じ練習の数スイングを撮ります。原因の動き（腰・手元・手首など）を、ガイドの形と比べて確かめます。</p>
+        <a class="btn block vidbtn" data-video href="#/video/${esc(date)}">${icon("video")}動画を入れる</a>
+        <p class="caption">動画は送りません（送るのは選んだコマの小さな写真と体の点だけ）。</p>
       </section>
       <section class="block" aria-labelledby="h-day"><h2 id="h-day">この日に入っているもの</h2><div data-day></div></section>
       <div class="block" data-primary-wrap></div>
@@ -236,7 +241,11 @@ const Record = (() => {
     Promise.all(onDay.map((s) => api("GET", `/v1/sessions/${s.id}/swings`).then((ws) => [s, ws]).catch(() => [s, []]))).then((rows) => {
       if (!box.isConnected) return;
       const vids = rows.filter(([, ws]) => ws.length);
-      if (!vids.length) return;
+      if (!vids.length) {
+        // 球だけの日: 原因の動きは動画が無いと確かめられない（診断は「可能性」のまま）
+        if (withShots.length) box.insertAdjacentHTML("beforeend", `<p class="note" data-day-novideo>動画はまだありません。原因の動きを確かめるには、②で動画を入れます（入れなくても診断は出ますが、体の動きは「可能性」のままです）。</p>`);
+        return;
+      }
       const empty = $("[data-day-empty]", box);
       if (empty) empty.remove();
       const views = (ws) => [...new Set(ws.map((w) => (w.view === "fo" ? "正面から" : "後ろから")))].join("と");
@@ -246,7 +255,7 @@ const Record = (() => {
     const pw = $("[data-primary-wrap]", el);
     const a = active;
     if (a && a.fromPractice) pw.innerHTML = `<a class="btn primary block" data-primary href="#/practice/result">練習の結果へ戻る</a>`;
-    else if (withShots.length) pw.innerHTML = `<a class="btn primary block" data-primary href="#/session/${withShots[0].id}">診断を見る</a>`;
+    else if (withShots.length) pw.innerHTML = `<a class="btn primary block" data-primary href="#/session/${withShots[0].id}">診断レポートを見る</a>`;
     else pw.innerHTML = "";
   }
 

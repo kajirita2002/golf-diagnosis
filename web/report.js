@@ -175,6 +175,25 @@ const Report = (() => {
       body.innerHTML = `<div class="note">${rep.n_shots ? "この記録の球は全部「除外」になっているので、解説は作れません。一球ずつの画面で除外を外すと解説が出ます。" : "この記録には球がありません。取り込むと解説が出ます。"}</div>${links}`;
       return;
     }
+    // 診断レポート（課題 → 原因の動き → 理想の動き → 直し方 → 確かめ方）。無い古い分析サービスのときだけ、要点の4つの塊
+    const dg = rep.diagnosis;
+    if (dg && (dg.issues || []).length) {
+      $(".pagehead h1", el).innerHTML = `${lab("date", App.dateJa(se.date, false))}の診断レポート`;
+      const wrap = document.createElement("div");
+      body.replaceChildren(wrap);
+      await Diagnosis.render(wrap, { sid, rep, se, alive, startPlan });
+      body.insertAdjacentHTML("beforeend", `<div data-motion-slot></div><h2 class="label" style="margin-top:var(--s6)">もっとくわしく</h2>${links}`);
+      motionSlot(body, sid, alive);
+      // ホームの「この課題で練習を組む」から来たら、プランを始めるシートを開く（1回だけ）
+      if (query.start === "1") {
+        history.replaceState(null, "", `#/session/${sid}`);
+        const want = query.scope ? (dg.issues || []).find((x) => (x.scope_ids || []).includes(query.scope) && Diagnosis.candOf(rep, x)) : null;
+        const is = want || (Diagnosis.firstPlanOf(rep) || {}).is;
+        const hit = is && Diagnosis.candOf(rep, is);
+        if (hit) startPlan(sid, rep, hit.sc, hit.cand, hit.which, { cue: (is.fix && is.fix.cue_move) || "", diag: is });
+      }
+      return;
+    }
     const sc = mains.find((x) => x.scope_id === query.scope) || mains.find((x) => x.gist.focus) || mains[0];
     const seg = mains.length > 1 ? `<div class="seg" role="group" aria-label="範囲" data-scopes>${mains.map((x) =>
       `<a href="#/session/${sid}?scope=${encodeURIComponent(x.scope_id)}" ${x === sc ? 'aria-current="page"' : ""} data-scope="${esc(x.scope_id)}">${scopeLab(x)}</a>`).join("")}</div>` : "";
@@ -757,7 +776,8 @@ const Report = (() => {
   // ==== プランを始めるシート ====
   const checked = (d) => !!(d && typeof d.checked_by === "string" && d.checked_by.trim());
   const confirmed = new Set();
-  async function startPlan(sid, rep, sc, cand, which) {
+  // opts.cue: 意識する体の動きの初期値（診断レポートから来たら、その課題の「本番で意識する体の動き」）
+  async function startPlan(sid, rep, sc, cand, which, opts = {}) {
     const key = `${sc.scope_id}/${cand.id}`;
     // 候補の口（記録つき。開くたびに取り直す）。読めなければ解説の候補のまま
     let cc = null;
@@ -786,7 +806,7 @@ const Report = (() => {
       ${gc && gc.why ? `<p class="sub">${esc(gc.why)}</p>` : ""}
       <p class="caption">${esc(scopeName(sc))}${cand.club && cand.club.club ? `・${esc(App.clubJa(cand.club.club))}で打つ` : ""}<span data-ps="total"></span></p>
       <div data-ps="drills" class="sub">ドリル集を読み込み中…</div>
-      <label class="field"><span>本番で意識する1点</span><textarea class="plain" data-ps="cue" rows="3" maxlength="120" placeholder="例: 向こうにボールがあるつもりで打つ"></textarea></label>
+      <label class="field"><span>本番で意識する体の動き</span><textarea class="plain" data-ps="cue" rows="3" maxlength="120" placeholder="例: 向こうにボールがあるつもりで打つ"></textarea></label>
       <div class="note caption">1回の練習は「いつも通り → 本番 → 本番 → いつも通り」の順に打ちます。別の日にもう一回同じ結果が出たら「効いた」と言います。飛ぶ距離か振りの速さが続けて落ちたら知らせます。</div>
       <div data-ps="advance"></div>
       <div class="block"><button class="btn primary block" data-ps="go">プランを作る</button><div data-ps="err"></div></div>` });
@@ -796,7 +816,8 @@ const Report = (() => {
     if (adv) q("advance").innerHTML = `<p class="label" style="margin:var(--s3) 0 0">次に進む条件</p><p class="caption" style="margin-top:var(--s1)">${esc(App.textJa(adv.replace(/^次に進む条件:\s*/, "")))}</p>`;
     // 意識する1点の初期値: 要点が「意識する一点」と言った文（数字・専門用語の検査を通ったもの）。直せる
     const g = sc.gist || {};
-    if (g.focus && g.focus.candidate_id === cand.id) {
+    if (opts.cue) q("cue").value = opts.cue.replace(/。$/, "");
+    else if (g.focus && g.focus.candidate_id === cand.id) {
       const act = (g.blocks || []).find((b) => b.id === "action");
       const ln = act && (act.lines || []).find((x) => /^意識する一点: /.test(x.text || ""));
       if (ln) q("cue").value = ln.text.replace(/^意識する一点: /, "").replace(/^「(.*)」$/, "$1").replace(/。$/, "");
@@ -812,10 +833,15 @@ const Report = (() => {
     }
     if (sh.closed) return;
     const tp = d.template || [];
-    const tot = tp.filter((x) => list.length || x.kind !== "drill").reduce((a, x) => a + (x.n || 0), 0);
+    const dd = ((opts.diag && opts.diag.fix && opts.diag.fix.drills) || []).filter((x) => x.role !== "check");
+    const tot = tp.filter((x) => list.length || dd.length || x.kind !== "drill").reduce((a, x) => a + (x.n || 0), 0);
     if (tot) q("total").textContent = `・1回 約${tot}球${list.length ? "（ドリルを使うとき）" : ""}`;
     const box = q("drills");
-    if (!list.length) box.innerHTML = `<span data-t="nodrill">確かめ済みのドリルはまだありません。本番で意識する1点を自分で書いてください。</span>`;
+    if (!list.length && dd.length) {
+      box.innerHTML = `<div data-t="nodrill" data-diag-drills><p class="label" style="margin:0">練習の中のドリル（診断の練習法）</p>
+        <ul class="dglist">${dd.map((x) => `<li>${esc(x.name)}（${lab("source", x.checked_by || "一般的な練習法")}）</li>`).join("")}</ul>
+        <p class="caption">手順は練習の画面のドリルのブロックに出ます。下の「本番で意識する体の動き」には、診断の文を入れてあります（直せます）。</p></div>`;
+    } else if (!list.length) box.innerHTML = `<span data-t="nodrill">確かめ済みのドリルはまだありません。本番で意識する1点を自分で書いてください。</span>`;
     else {
       const REC = { worked_before: ["前回は効いた", "good"], not_worked_before: ["前回は効かなかった", "none"] };
       box.innerHTML = `<fieldset style="border:0;padding:0;margin:0"><legend class="label">ドリル（人が向きと安全を確かめたもの）</legend>` + list.map((x, i) => {
@@ -824,6 +850,7 @@ const Report = (() => {
         return `<label class="radio drl"><input type="radio" name="psdrill" value="${esc(x.id)}" ${i === 0 ? "checked" : ""}> <span>${esc(x.title)}${rc ? ` <span class="chip ${rc[1]}">${rc[0]}${when}</span>` : ""}${x.coach_reviewed ? "" : ` <span class="chip none">コーチ未確認</span>`}</span></label>`;
       }).join("") + `<label class="radio drl"><input type="radio" name="psdrill" value=""> <span>使わない（意識する1点を自分で書く）</span></label></fieldset>`;
     }
+    sh.diagDrills = !list.length && dd.length > 0; // 診断のドリルをドリルのブロックで打つ（型にドリルのブロックを残す）
     q("go").addEventListener("click", () => createPlan(sid, sc, cand, sh, false));
   }
 
@@ -834,7 +861,7 @@ const Report = (() => {
     const cue = q("cue").value.trim();
     if (!drill && !cue) { q("err").innerHTML = `<p class="fielderr">本番で意識する1点を書いてください</p>`; q("cue").focus(); return; }
     const w = sc && sc.band_shape && sc.band_shape.ok ? sc.band_shape.window : null;
-    const body = { from_session: sid, scope_id: sc.scope_id, candidate_id: cand.id, drill_id: drill, cue, window: w || null };
+    const body = { from_session: sid, scope_id: sc.scope_id, candidate_id: cand.id, drill_id: drill, cue, window: w || null, diag_drills: !drill && !!sh.diagDrills };
     const go = q("go");
     go.disabled = true; go.textContent = "作っています…";
     const r = await App.request("POST", `/v1/players/${S.player.id}/plans${replace ? "?replace=1" : ""}`, { body }).catch((e) => ({ ok: false, status: 0, body: { error: String(e) } }));

@@ -136,3 +136,42 @@ func Test次の候補から作ったプランのホーム(t *testing.T) {
 		t.Fatalf("別の候補の図・文・次に見るを返した: %v", f)
 	}
 }
+
+// 診断（diagnosis）: ホームは課題 → 原因 → 理想 → 今日やること の4行の材料を持つ。
+// プランがあれば、その候補の課題を選ぶ（プランと別の課題を並べない）。
+func Testホームの診断の材料(t *testing.T) {
+	e := newEnv(t)
+	pid := num(e.do("POST", "/v1/me", nil, 200)["player"].(map[string]any)["id"])
+	s := e.do("POST", "/v1/sessions", map[string]any{"player_id": pid, "date": "2026-09-27"}, 201)
+	sid := num(s["id"])
+	e.importCSV(sid, dummyCSV(t), "", 201)
+	diag := `"diagnosis":{"summary":"まとめ","strengths":["良い"],"video_needed":true,"video_hint":"動画で確かめる",
+	 "issues":[{"id":"strike_heel","title":"ネック寄りに当たる","plan_candidate":"strike_heel","scope_ids":["group:iron"]},
+	           {"id":"face_right","title":"面が右を向く","plan_candidate":"face","scope_ids":["group:iron"]}]}`
+	e.an.reportOut = strings.Replace(homeReport, `{"scopes":[`, `{`+diag+`,"scopes":[`, 1)
+	path := fmt.Sprintf("/v1/players/%d/home", pid)
+	h := e.do("GET", path, nil, 200)
+	d, _ := h["focus"].(map[string]any)["diag"].(map[string]any)
+	if d == nil || d["summary"] != "まとめ" || d["video_needed"] != true || num(d["n_issues"]) != 2 || num(d["rank"]) != 1 {
+		t.Fatalf("診断の材料: %v", h["focus"])
+	}
+	if is := d["issue"].(map[string]any); is["id"] != "strike_heel" {
+		t.Fatalf("1つ目の課題でない: %v", is)
+	}
+	if nx := d["next"].(map[string]any); nx["title"] != "面が右を向く" {
+		t.Fatalf("次の課題: %v", nx)
+	}
+	e.do("POST", fmt.Sprintf("/v1/players/%d/plans", pid), planBody(map[string]any{"from_session": sid, "issue": "face",
+		"target_metric": "face_to_path",
+		"trigger":       map[string]any{"scope_id": "group:iron", "plain": map[string]any{"title": "面が右を向く"}}}), 201)
+	h = e.do("GET", path, nil, 200)
+	d = h["focus"].(map[string]any)["diag"].(map[string]any)
+	if is := d["issue"].(map[string]any); is["id"] != "face_right" || num(d["rank"]) != 2 || d["next"] != nil {
+		t.Fatalf("プランの候補の課題でない: %v", d)
+	}
+	// 診断の無い解説（古い分析サービス）ではホームに diag を付けない
+	e.an.reportOut = homeReport
+	if h = e.do("GET", path, nil, 200); h["focus"].(map[string]any)["diag"] != nil {
+		t.Fatalf("診断が無いのに diag を返した: %v", h["focus"])
+	}
+}

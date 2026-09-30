@@ -555,3 +555,13 @@ def test_パスの向きで当てるドリルはパスの平均が合うとき�
 def test_記録は効いたに数えた回で数える():
     r = drills.records_by_drill([{"drill_id": "x", "grade": "strong", "counts_as_worked": False}, {"drill_id": "x", "grade": "moderate", "counts_as_worked": True}])
     assert r["x"]["moderate_plus"] == 1
+
+
+def test_診断のドリルを使うプランはドリルのブロックを残す(shots, heel_plan):
+    """診断レポートから作るプラン（diag_drills）は、確かめ済みのドリル集のドリルが無くても型にドリルのブロックを残す
+    （ドリルの球を「いつも通り」「本番」に混ぜず、練習の画面が診断のドリルの手順をそのブロックに出す）。無ければ今まで通り。"""
+    p = coaching.build_plan(shots, "R", "group:iron", "strike_heel", diag_drills=True)["plan"]
+    kinds = [b["kind"] for b in p["template"]]
+    assert kinds.count("drill") == 2 and kinds.count("intervention") == 2 and kinds.count("baseline") == 2
+    assert "drill" not in [b["kind"] for b in heel_plan["template"]]
+    assert [b for b in p["template"] if b["kind"] != "drill"] == heel_plan["template"]

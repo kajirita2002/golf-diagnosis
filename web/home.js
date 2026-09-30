@@ -1,6 +1,9 @@
 "use strict";
 /*
-  ホーム（docs/DESIGN_v2.md §10 H）。状態の見出し・今日の1点（プラン中）／いまの課題・主ボタン1つ・次に見る1行だけ。
+  ホーム（docs/DESIGN_v2.md §10 H）。状態の見出し・いまの課題・主ボタン1つ・次に取り組む課題1行。
+  - 診断（diagnosis）があれば、課題のカードを「課題 → 原因（いちばん可能性の高い動き）→ 理想 → 今日やること」の4行で出し、
+    ［くわしいレポートを見る］で診断レポートへ（「今日の一点」の一言だけでは、何が原因で何をすればいいか分からなかった。本人の声）。
+    プラン中は「今日やること」がプランの練習になる。動画が無ければ、原因を確かめる動画を促す。
   - 数値・角度・複数の課題・球の図の細かいもの・版と料金・選手の選択は置かない。
   - 文は全部サーバーの定型文（要点 gist・プランの言葉）。ここで事実の文を作らない。
   - 状態と主ボタンは homeState() の関数1つで決める（画面のあちこちで分岐させない）。
@@ -42,12 +45,13 @@ const Home = (() => {
       }
       return { key: "plan", heading: "プラン中", nth: (p.next_index || 0) + 1, primary: { label: "練習を始める", href: "#/practice/run", count: p.total } };
     }
+    // 課題が見つかった: まずくわしいレポート（原因・理想・直し方）を読む。練習はレポートの［この課題で練習を組む］から
     if (h.focus_state === "found" && h.focus && h.focus.startable) {
-      return { key: "found", heading: "課題が見つかりました", primary: { label: "この一点で練習を組む", href: `#/session/${h.focus.session_id}?scope=${encodeURIComponent(h.focus.scope_id)}&start=1` } };
+      return { key: "found", heading: "課題が見つかりました", primary: { label: "くわしいレポートを見る", href: `#/session/${h.focus.session_id}` } };
     }
     // 課題は出ているが、直し方を組めない（先に測れるようにする候補）。「まだ見つかっていない」とは言わない
     if (h.focus_state === "found" && h.focus) {
-      return { key: "measure", heading: "先に測れるようにします", primary: { label: "診断を見る", href: `#/session/${h.focus.session_id}?scope=${encodeURIComponent(h.focus.scope_id)}` } };
+      return { key: "measure", heading: "先に測れるようにします", primary: { label: "くわしいレポートを見る", href: `#/session/${h.focus.session_id}` } };
     }
     const sid = (h.focus && h.focus.session_id) || (h.latest && h.latest.session_id);
     return { key: "finding", heading: "課題を見つけています", primary: { label: "診断を見る", href: sid ? `#/session/${sid}` : "#/record" } };
@@ -110,6 +114,29 @@ const Home = (() => {
     return vp || null;
   }
 
+  // 課題のカード（診断があるとき）: 課題 → 原因（いちばん可能性の高い動き）→ 理想 → 今日やること の4行。
+  // 文は診断の定型文だけ。数字はラベル（球数・回数）だけ。p があればプラン中（今日やることはプランの練習）
+  function diagCard(d, p) {
+    const is = d.issue || {}, fx = is.fix || {};
+    const c0 = (is.causes || [])[0];
+    const fact = String(is.club_state || "").split(/(?<=。)/)[0];
+    const likely = c0 && c0.basis === "likely";
+    const cause = c0 ? `${fact ? `<span data-home-fact>${esc(fact)}</span><br>` : ""}<span class="label">${likely ? "体の動きの候補" : "体の動き"}</span><br><b>${esc(c0.title)}</b>
+        <span class="row dgchips" style="margin:var(--s1) 0 0">${Diagnosis.basisChip(c0.basis)}</span>${likely ? `<span class="caption" style="display:block">動画で確かめるまでは推測です。</span>` : ""}`
+      : esc(fact);
+    const menu = (fx.menu || []).map((x) => `<li>${esc(x.title)} ${lab("count", x.balls + "球")}</li>`).join("");
+    const today = p
+      ? `<span class="label">本番で意識する体の動き</span><br><b data-home="one">${esc(p.cue)}</b><br><span class="sub">次は${lab("count", ((p.next_index || 0) + 1) + "回目")}の練習${p.total ? `（${lab("count", p.total + "球")}）` : ""}。ドリルの手順は練習の画面に出ます。</span>`
+      : `<span class="label">本番で意識する体の動き</span><br><b data-home="one">${esc(fx.cue_move || fx.cue || "")}</b>${menu ? `<ol class="hmenu" data-home="menu">${menu}</ol>` : ""}`;
+    return `<section class="block" aria-labelledby="h-issue"><div class="row between" style="margin-bottom:var(--s2)"><h2 id="h-issue" class="label" style="margin:0">いまの課題</h2>${is.club_scope ? `<span class="chip none">${Diagnosis.scopeHtml(is.club_scope)}</span>` : ""}</div>
+      <div class="card hcard" data-home="diag"><dl>
+        <div class="hrow issue" data-row="issue"><dt>課題</dt><dd><b data-home="first">${esc(is.title || (p && p.title) || "")}</b></dd></div>
+        <div class="hrow" data-row="cause"><dt>原因</dt><dd>${cause}</dd></div>
+        <div class="hrow" data-row="ideal"><dt>理想</dt><dd>${esc((is.ideal && is.ideal.text) || "")}</dd></div>
+        <div class="hrow" data-row="today"><dt>今日やること</dt><dd>${today}</dd></div>
+      </dl></div></section>`;
+  }
+
   // 並び: 状態 → 今日の一点／いまの課題 → （合格の条件・前回）→ 主ボタン → 次に見る → 理想との差（小さな図）。
   // 主ボタンは320px でもスクロールせずに見える位置に置く（図が大きく、ボタンを画面の外へ押し出していた）。
   function draw(el, h, fromCopy) {
@@ -123,7 +150,11 @@ const Home = (() => {
         <p class="t-headline">スイングの記録から、いま一番の課題を一つ見つけ、直ったかを別の日に確かめます。</p>
         <p class="sub">計測器の画面のスクショか、表の貼り付けで入れられます。</p></div>`;
     }
-    if (p) {
+    const d = f && f.diag && f.diag.issue ? f.diag : null;
+    if (d && (p || (st.key !== "first" && st.key !== "motion" && st.key !== "video"))) {
+      body += diagCard(d, p);
+      if (p) body += lastLine(p);
+    } else if (p) {
       // プラン中: 「今日の一点」は打つときに意識すること。その下に、それで直す課題
       body += `<section class="block" aria-labelledby="h-one"><h2 id="h-one" class="label">今日の一点</h2>
         <div class="focuscard t-display" data-home="one">${esc(p.cue)}</div>
@@ -157,15 +188,26 @@ const Home = (() => {
     } else if (st.key === "finding") {
       body += `<p class="sub" data-home="finding">${h.focus_state === "unavailable" ? "分析のサービスに届かないので、まだ課題を出せません。記録と練習は使えます。" : "いまの記録からは、課題をまだ一つに決められません。診断で様子を見られます。"}</p>`;
     }
-    if (st.key !== "video_resume") body += `<div class="block">${primaryHtml(st)}</div>`;
+    // 課題のカードは読み物で長いので、主ボタンは画面の下（タブの上）に留める（スクロールしなくても押せる）
+    const long = d && (p || st.key === "found" || st.key === "measure");
+    if (st.key !== "video_resume") body += `<div class="block ${long ? "stickyact" : ""}">${primaryHtml(st)}</div>`;
+    if (long) {
+      // プラン中でもレポートへ1押しで戻れるように（主ボタンは練習）。動画が無ければ、原因を確かめる動画を促す
+      if (p) body += `<a class="btn block" data-home="report" href="#/session/${f.session_id}">くわしいレポートを見る</a>`;
+      const c0 = ((d.issue && d.issue.causes) || [])[0];
+      if (d.video_needed && c0 && c0.basis === "likely") {
+        body += `<a class="card vidcard block" data-home="video" href="#/video/${App.localDate()}">${icon("video")}<span class="grow1"><b>動画を撮って原因を確かめる</b>
+          <span class="caption">${esc(d.video_hint || "")}</span></span>${icon("chevron-right", "chev")}</a>`;
+      }
+    }
     // 次に見る: 動きの課題を今日の一点にしたときは、球の一番の課題を回す（球の課題をホームから消さない）。
     // 見た目だけの動きの課題は、今日の一点にしないかわりにここへ札つきで出す
     const mfv = h && h.motion_focus && h.motion_focus.basis === "visual" && !p ? h.motion_focus : null;
-    const next = st.key === "motion" ? f && f.title : f && f.next_title;
+    const next = st.key === "motion" ? f && f.title : (d && !p ? (d.next && d.next.title) : f && f.next_title);
     if (mfv && st.key !== "first" && st.key !== "video") {
       body += `<p class="sub" data-home="next"><a href="#/session/${mfv.session_id}/check/${encodeURIComponent(mfv.item_id)}">次に見る: ${esc(mfv.fault_label || mfv.title)}</a> <span class="chip none" data-visual-chip>見た目の判定（まだ確かめていません）</span></p>`;
-    } else if (next && st.key !== "first") body += `<p class="sub" data-home="next">次に見る: ${esc(next)}</p>`;
-    if (f && (f.gap || f.figure)) {
+    } else if (next && st.key !== "first") body += `<p class="sub" data-home="next">${d && !p ? "次に取り組む課題" : "次に見る"}: ${esc(next)}</p>`;
+    if (f && (f.gap || f.figure) && !d) {
       const g = f.gap || {};
       const first = (g.lines || [])[0];
       body += `<section class="block"><a class="card" style="display:block;text-decoration:none;color:inherit" href="#/session/${f.session_id}?scope=${encodeURIComponent(f.scope_id)}" data-home="gap">

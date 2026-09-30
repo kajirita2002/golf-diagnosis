@@ -6,7 +6,8 @@
   - 練習中（#/practice/run）は今のブロックだけを大きく出す。下のタブは隠し、出口は「✕ 中断」1つ。
     「次のブロックへ」は 72px、±1球と1つ戻るは 48px。1球ごとには押させない。
   - 事実の文は作らない。判定・状態・次の手の文は分析サービスの定型文をそのまま出す。
-  - ドリルは人が向きと安全を確かめたもの（checked_by）だけ。
+  - ドリルは人が向きと安全を確かめたもの（checked_by）だけ。確かめ済みが無いときは、診断の練習法（「PGAガイド p.X」／
+    「一般的な練習法」の札と安全の注意つき）をドリルのブロックに当て、手順を出す（「見る」だけの本番にしない。本人の声）。
   - 確認は全部シート（confirm を使わない）。失敗はその場に出す（alert を使わない）。
 */
 const Practice = (() => {
@@ -83,7 +84,32 @@ const Practice = (() => {
       const cat = T.offline ? LS.get(kDrills(hand())) : await drills();
       T.drill = ((cat && cat.drills) || []).find((d) => d.id === p.drill_id && checked(d)) || null;
     }
+    await loadDiag(p);
     return !!p;
+  }
+  // プランのきっかけの診断の課題（構えで直すこと・ドリルの手順・意識する体の動き）。練習場で圏外でも出せるよう写しを持つ。
+  // 写しがあれば先にそれを使い、裏で取り直す（練習の画面を解説の作成で待たせない）
+  const kDiag = (planId) => `golf.plandiag.${planId}`;
+  async function loadDiag(p) {
+    T.diag = null;
+    if (!p || isMotion(p) || !p.trigger || !p.trigger.session_id || typeof Diagnosis === "undefined") return;
+    const copy = LS.get(kDiag(p.id));
+    T.diag = copy && copy.issue ? copy.issue : null;
+    if (T.offline) return;
+    const fetchIt = App.report(p.trigger.session_id).then((r) => {
+      const is = r && r.report ? Diagnosis.issueForPlan(r.report, p.issue, p.trigger.scope_id) : null;
+      LS.set(kDiag(p.id), { issue: is, saved_at: new Date().toISOString() });
+      return is;
+    }).catch(() => null);
+    if (!T.diag) T.diag = await fetchIt;
+  }
+  // ドリルのブロックに当てる診断の練習法（跡を見る道具はブロックにしない）。2つ目のドリルのブロックは2つ目の練習法（無ければ1つ目）
+  const diagDrills = () => ((T.diag && T.diag.fix && T.diag.fix.drills) || []).filter((d) => d.role !== "check");
+  function drillFor(p, i) {
+    const dd = diagDrills();
+    if (!dd.length) return null;
+    const k = (p.template || []).slice(0, i).filter((b) => b.kind === "drill").length;
+    return dd[k] || dd[0];
   }
 
   // ドリルの置き方の図（分析サービスのファイル。script・イベント・リンクは念のため外す）
@@ -125,7 +151,20 @@ const Practice = (() => {
     return [l, c, ""];
   }
 
+  // 診断のアクションプラン（構えで直すこと・ドリルの手順）。ドリルは出どころの札と安全の注意つき
+  function diagHtml() {
+    const fx = (T.diag && T.diag.fix) || {};
+    const all = fx.drills || [];
+    if (!all.length && !(fx.setup || []).length) return "";
+    return `<section class="block dg" data-t="diagplan">
+      ${(fx.setup || []).length ? `<div class="dgsub" data-t="setup"><h2 class="t-headline">構えで直すこと</h2><ul class="dgcheck">${fx.setup.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>` : ""}
+      ${all.length ? `<div class="dgsub" data-t="diagdrills"><h2 class="t-headline">この練習のドリル</h2>
+        <p class="caption">組み方のドリルのブロックで打ちます。跡を見る道具は、どのブロックでも使えます。</p>${all.map((d, n) => Diagnosis.drillHtml(d, n)).join("")}</div>` : ""}
+    </section>`;
+  }
+
   function drillHtml(p) {
+    if (!p.drill_id && diagDrills().length) return "";
     if (!p.drill_id) return `<p class="sub" data-t="nodrill">確かめ済みのドリルはまだありません。自分で書いた「意識する1点」で進めます。</p>`;
     const d = T.drill;
     if (!d) return `<p class="sub" data-t="nodrill">ドリル（${esc(p.drill_id)}）の中身を読めませんでした。「意識する1点」で進めます。</p>`;
@@ -183,7 +222,9 @@ const Practice = (() => {
     const total = st.counts.reduce((a, b) => a + b, 0);
     const blocks = tpl.map((b, i) => {
       const cls = st.done || i < st.idx ? "done" : i === st.idx ? "cur" : "";
-      let extra = b.kind === "intervention" ? `<span class="bcue">「${esc(p.cue)}」</span>` : b.kind === "drill" && T.drill ? `<span class="bcue sub">${esc(T.drill.title)}</span>` : "";
+      const dd = b.kind === "drill" && !T.drill ? drillFor(p, i) : null;
+      let extra = b.kind === "intervention" ? `<span class="bcue">「${esc(p.cue)}」</span>` : b.kind === "drill" && T.drill ? `<span class="bcue sub">${esc(T.drill.title)}</span>`
+        : dd ? `<span class="bcue sub" data-t="blockdrill">${esc(dd.name)}</span>` : b.kind === "baseline" ? `<span class="bcue sub">何も意識しない（あとで比べるため）</span>` : "";
       if (isMotion(p) && i === testBlock(p)) extra = `<span class="bcue" data-t="testcue">撮る・課題以外は意識しない</span>`;
       else if (films(p, i)) extra += `<span class="bcue sub" data-t="film">撮る</span>`;
       return `<li class="${cls} k-${esc(b.kind)}" data-i="${i}"><span class="bno">${no(i)}</span><span class="bk">${esc(blkName(p, i, b.kind))}</span><span class="bn">${st.counts[i]}球</span><span class="br sub">${rangeText(rg[i])}</span>${extra}</li>`;
@@ -196,10 +237,13 @@ const Practice = (() => {
         <p class="status">${lab("club", App.clubJa(p.club))}・${lab("count", nth + "回目")}</p>
         <p class="t-title ttitle">${esc(planTitle(p))}</p>
         ${lastHtml()}
-        <div class="focuscard block"><span class="label">本番で意識する一点</span><p class="t-headline" style="margin:var(--s1) 0 0">「${esc(p.cue)}」</p></div>
+        <div class="focuscard block"><span class="label">本番で意識する体の動き</span><p class="t-headline" style="margin:var(--s1) 0 0">「${esc(p.cue)}」</p>
+          ${T.diag && T.diag.fix && T.diag.fix.cue_why && p.cue && T.diag.fix.cue_move && T.diag.fix.cue_move.startsWith(p.cue.replace(/。$/, "")) ? `<p class="sub" style="margin:var(--s2) 0 0" data-t="cuewhy">${esc(T.diag.fix.cue_why)}</p>` : ""}</div>
         ${drillHtml(p)}
+        ${T.diag ? `<a class="btn block" data-t="toreport" href="#/session/${p.trigger.session_id}">診断レポートを見る（原因・理想の動き）</a>` : ""}
         <button class="textbtn" data-t="planwhy">なぜこれをやる？</button>
       </section>
+      ${diagHtml()}
       <section class="block"><h2>組み方 <span class="caption">${esc(App.clubJa(p.club))}だけで ${total}球</span></h2>
         ${T.data.next_counts_reason === "more_shots" && !todayRun ? `<p class="sub" data-t="more">前回は球が足りなかったので、いつも通りと本番の球を増やしています。</p>` : ""}
         <ol class="tblocks" id="tBlocks">${blocks}</ol>
@@ -267,11 +311,13 @@ const Practice = (() => {
           : `<p class="kind">練習はここまで</p><p class="sub">球を取り込んで、ブロックの区切りを確かめます。</p>`;
         next.textContent = isMotion(p) ? "動画で数える" : "取り込んで確かめる";
       } else {
-        let cue = b.kind === "intervention" ? `「${p.cue}」` : b.kind === "drill" && T.drill ? `ドリル中: 「${T.drill.cue_drill || T.drill.title}」` : b.kind === "baseline" ? "いつも通り（何も意識しない）" : "";
+        const dd = b.kind === "drill" && !T.drill ? drillFor(p, st.idx) : null;
+        let cue = b.kind === "intervention" ? `「${p.cue}」` : b.kind === "drill" && T.drill ? `ドリル中: 「${T.drill.cue_drill || T.drill.title}」` : dd ? `ドリル: ${dd.name}` : b.kind === "baseline" ? "いつも通り（何も意識しない）" : "";
         if (isMotion(p) && st.idx === testBlock(p)) cue = "撮ります。課題以外は意識しません。当たり方も行方も問いません。打ち終えてから、できたと思った回数を一回だけ答えます。";
         else if (films(p, st.idx)) cue += "（撮ります）";
         now.innerHTML = `<p class="caption">いま ${no(st.idx)}（${st.idx + 1} / ${tpl.length}）</p><p class="kind" data-t="kind">${esc(blkName(p, st.idx, b.kind))}</p>
-          <p class="count" data-t="count">${st.counts[st.idx]}球</p><p class="sub">${rangeText(rg[st.idx])}</p><p class="cueline">${esc(cue)}</p>`;
+          <p class="count" data-t="count">${st.counts[st.idx]}球</p><p class="sub">${rangeText(rg[st.idx])}</p><p class="cueline">${esc(cue)}</p>
+          ${dd ? `<div class="runsteps" data-t="runsteps">${dd.place ? `<p class="sub">置き方: ${esc(dd.place)}</p>` : ""}<ol class="dgsteps">${(dd.steps || []).map((x) => `<li>${esc(x)}</li>`).join("")}</ol>${dd.safety ? `<p class="dgsafe">${icon("alert-triangle")}<span>${esc(dd.safety)}</span></p>` : ""}</div>` : ""}`;
         const nx = tpl[st.idx + 1];
         next.textContent = nx ? `次のブロックへ（${no(st.idx + 1)} ${blkName(p, st.idx + 1, nx.kind)}）` : "最後のブロックを打ち終えた";
       }
