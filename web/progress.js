@@ -36,26 +36,31 @@ const Progress = (() => {
   }
 
   // 十球テストの「◯/10」の推移（§8.5）。8 の線を引く。条件（向き・版）が違う日は線でつながない。合計は描かない
-  function trendSvg(tests, title) {
+  // 判定できなかった回は0の高さに描かない（「0回」に見える）。軸の下の帯に四角で置く。
+  // 軸の数字は numbers のときだけ（最初の面は言葉だけ。数字は「数字を見る」の中）
+  function trendSvg(tests, title, numbers = false) {
     if (!tests.length) return `<p class="sub">まだ十球テストがありません。</p>`;
-    const W = 360, H = 180, L = 36, R = 12, Tp = 12, B = 34;
+    const W = 360, H = 190, L = 36, R = 12, Tp = 12, B = 44;
     const n = tests.length;
     const x = (i) => (n === 1 ? (L + W - R) / 2 : L + (i * (W - L - R)) / (n - 1));
     const y = (v) => Tp + ((10 - v) * (H - Tp - B)) / 10;
-    let s = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" role="img"><title>${esc(title)}</title><desc>十球テストで範囲の中だった回数を日ごとに打った図。点線が合格の線（八）。塗った点が合格、中抜きがまだ、四角が判定できなかった日</desc>`;
+    let s = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" role="img"><title>${esc(title)}</title><desc>十球テストで範囲の中だった回数を日ごとに打った図。点線が合格の線（八）。塗った点が合格、中抜きがまだ、軸の下の四角が判定できなかった日</desc>`;
     s += `<line class="g-axis" x1="${L}" y1="${H - B}" x2="${W - R}" y2="${H - B}"/><line class="g-axis" x1="${L}" y1="${Tp}" x2="${L}" y2="${H - B}"/>`;
-    for (const v of [0, 8, 10]) s += `<text class="g-sub t11" x="${L - 4}" y="${y(v) + 4}" text-anchor="end">${v}</text>`;
+    if (numbers) for (const v of [0, 8, 10]) s += `<text class="g-sub t11" x="${L - 4}" y="${y(v) + 4}" text-anchor="end">${v}</text>`;
+    else s += `<text class="g-sub t11" x="${L - 4}" y="${y(8) + 4}" text-anchor="end">合格</text>`;
+    const band = H - B + 10; // 判定できなかった回の帯（軸の下）
     s += `<line class="g-pass" data-t="passline" x1="${L}" y1="${y(8)}" x2="${W - R}" y2="${y(8)}" style="stroke:var(--good);stroke-dasharray:4 4"/>`;
     for (let i = 1; i < n; i++) {
       const a = tests[i - 1], b = tests[i];
       if (a.view === b.view && a.catalog_version === b.catalog_version && a.passed !== null && b.passed !== null) s += `<line class="g-flight g-good" x1="${x(i - 1)}" y1="${y(a.in_range)}" x2="${x(i)}" y2="${y(b.in_range)}"/>`;
     }
     tests.forEach((t, i) => {
-      s += `<text class="g-sub t11" x="${x(i)}" y="${H - B + 16}" text-anchor="middle">${esc((t.date || "").slice(5))}</text>`;
-      if (t.passed === null) s += `<rect class="g-miss hollow" data-t="tunk" x="${x(i) - 4}" y="${y(t.in_range) - 4}" width="8" height="8"/>`;
+      s += `<text class="g-sub t11" x="${x(i)}" y="${H - B + 30}" text-anchor="middle">${esc((t.date || "").slice(5))}</text>`;
+      if (t.passed === null) s += `<rect class="g-miss hollow" data-t="tunk" x="${x(i) - 4}" y="${band - 4}" width="8" height="8"/>`;
       else s += `<circle class="${t.passed ? "g-good" : "g-miss hollow"}" data-t="${t.passed ? "tpass" : "tnot"}" cx="${x(i)}" cy="${y(t.in_range)}" r="5"/>`;
     });
-    return `<figure class="fig trend8" data-t="trend10">${s}</svg></figure>`;
+    const unk = tests.some((t) => t.passed === null) ? `<figcaption class="caption" data-t="tunkcap">軸の下の四角は、判定できるスイングが足りず撮り直しになった日です。</figcaption>` : "";
+    return `<figure class="fig trend8" data-t="trend10">${s}</svg>${unk}</figure>`;
   }
   const TW = (t) => (t.passed === true ? "合格" : t.passed === false ? "まだ" : "判定できない");
   function trendTable(tests) {
@@ -71,7 +76,7 @@ const Progress = (() => {
       <p class="sub" data-t="progruns">${tests.length ? `十球テスト ${lab("count", tests.length + "回")}・合格 ${lab("count", tests.filter((t) => t.passed === true).length + "回")}` : "まだ十球テストがありません。練習の最後の十球を撮って数えると、ここに出ます。"}</p>
       <button class="textbtn" data-t="progwhy">推移を見る</button></article>`;
     box.querySelector("[data-t=progwhy]").addEventListener("click", () => {
-      App.openSheet({ title: "十球テストの推移", label: "progwhy", size: "full", html: trendSvg(tests, "十球テストの推移") + trendTable(tests) });
+      App.openSheet({ title: "十球テストの推移", label: "progwhy", size: "full", html: trendSvg(tests, "十球テストの推移", true) + trendTable(tests) });
     });
   }
 

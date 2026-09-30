@@ -21,8 +21,9 @@ const Home = (() => {
     }
     if (local.setupMismatch) return { key: "setup", heading: "撮り方を確かめたい", primary: { label: "撮り方を合わせる", href: "#/record" } };
     // 動きの課題（段2c）: プランが無く、動画のチェックで「まずここ」が決まっていれば、それが今日の一点
+    // 見た目（AI）だけの項目は「今日の一点」にしない（十球テストで合格まで行けない・まだ確かめていない）。「次に見る」止まり
     const mf = h && h.motion_focus;
-    if (mf && !(h.plan)) {
+    if (mf && !(h.plan) && mf.basis !== "visual") {
       return { key: "motion", heading: "課題が見つかりました", motion: mf, primary: { label: "この課題を見る", href: `#/session/${mf.session_id}/check/${encodeURIComponent(mf.item_id)}` } };
     }
     // 球は無く、動画のチェックだけがある（段2a）: 「ようこそ」のままにせず、動画のチェックへ
@@ -135,12 +136,14 @@ const Home = (() => {
       body += `<section class="block" aria-labelledby="h-one"><h2 id="h-one" class="label">今日の一点</h2>
         <div class="focuscard" data-home="one" data-motion-focus><div data-motion-fig></div><p class="t-headline" style="margin:0">${esc(m.fault_label || m.title)}</p>
           <p class="sub" style="margin:var(--s1) 0 0">${m.p && /^P\d/.test(m.p) ? lab("p", m.p.replace("_5", ".5")) + " " : ""}${esc(m.title)}</p></div>
+        ${m.earlier ? `<p class="caption" data-home="earlier">前の動画（${lab("date", App.dateJa(m.date, false))}）の課題です。</p>` : ""}
         ${m.linked ? `<p data-home="linked"><span class="chip brand">${icon("layers")}${esc(m.linked_text || "球の課題とつながる候補です（まだ確かめていません）")}</span></p>` : ""}
         ${m.drill ? `<p data-home="drill"><span class="label">練習の一例</span><br>${esc(m.drill.cue || m.drill.title)}</p>` : ""}</section>`;
     } else if (f && st.key !== "first") {
       // プランの前: 課題（何を直すか）を先に、意識すること（どう打つか）を2番目に。「今日の一点」とは呼ばない
       body += `<section class="block" aria-labelledby="h-issue"><h2 id="h-issue" class="label">いまの課題</h2>
         <p class="t-headline" data-home="first" style="margin:var(--s1) 0 var(--s3)">${esc(f.title)}</p>
+        ${f.earlier ? `<p class="caption" data-home="earlier">前の記録（${lab("date", App.dateJa(f.session_date, false))}）の課題です。最新の記録だけでは、まだ一つに決められません。</p>` : ""}
         ${f.cue ? `<div class="focuscard"><span class="label">打つときに意識すること</span><p class="t-headline" data-home="one" style="margin:var(--s1) 0 0">${esc(f.cue)}</p></div>` : ""}</section>`;
     }
     if (st.key === "video") {
@@ -155,8 +158,13 @@ const Home = (() => {
       body += `<p class="sub" data-home="finding">${h.focus_state === "unavailable" ? "分析のサービスに届かないので、まだ課題を出せません。記録と練習は使えます。" : "いまの記録からは、課題をまだ一つに決められません。診断で様子を見られます。"}</p>`;
     }
     if (st.key !== "video_resume") body += `<div class="block">${primaryHtml(st)}</div>`;
-    const next = f && f.next_title;
-    if (next && st.key !== "first") body += `<p class="sub" data-home="next">次に見る: ${esc(next)}</p>`;
+    // 次に見る: 動きの課題を今日の一点にしたときは、球の一番の課題を回す（球の課題をホームから消さない）。
+    // 見た目だけの動きの課題は、今日の一点にしないかわりにここへ札つきで出す
+    const mfv = h && h.motion_focus && h.motion_focus.basis === "visual" && !p ? h.motion_focus : null;
+    const next = st.key === "motion" ? f && f.title : f && f.next_title;
+    if (mfv && st.key !== "first" && st.key !== "video") {
+      body += `<p class="sub" data-home="next"><a href="#/session/${mfv.session_id}/check/${encodeURIComponent(mfv.item_id)}">次に見る: ${esc(mfv.fault_label || mfv.title)}</a> <span class="chip none" data-visual-chip>見た目の判定（まだ確かめていません）</span></p>`;
+    } else if (next && st.key !== "first") body += `<p class="sub" data-home="next">次に見る: ${esc(next)}</p>`;
     if (f && (f.gap || f.figure)) {
       const g = f.gap || {};
       const first = (g.lines || [])[0];
@@ -241,7 +249,10 @@ const Home = (() => {
       const d = await Checks.load(h.latest_video.session_id);
       const c = d && d.checks;
       const f = c && (c.items || []).find((x) => x.focus);
-      if (f && alive() && slot.isConnected) slot.textContent = f.fault_label || f.title;
+      if (f && alive() && slot.isConnected) {
+        slot.textContent = f.fault_label || f.title;
+        if (f.basis === "visual") slot.insertAdjacentHTML("afterend", `<p><span class="chip none" data-visual-chip>${esc(Checks.VISUAL_CHIP)}</span></p>`);
+      }
     } catch (e) { console.warn(e); }
   }
 

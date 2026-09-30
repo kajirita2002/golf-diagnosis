@@ -93,6 +93,8 @@ def test_その日の6で合格_別の日にもう一度で効いた_1で合格�
 def test_合格しない理由が分かる():
     r = coaching.motion_progress([t("2026-10-01", None)])
     assert r["state"] == "insufficient" and "八回" in r["text"]
+    # 見出しは「足りない」ではなく「撮り直し」（練習量が足りないように読めるため）
+    assert r["head"] == r["title"] == "撮り直し"
     # 2・3回目の不合格は感覚の量を変える、4回目（別の日）で効かなかった
     r = coaching.motion_progress([t("2026-10-01", False), t("2026-10-02", False)])
     assert r["state"] == "checking" and r["next_action"] == "adjust_feel"

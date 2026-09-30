@@ -22,6 +22,8 @@ const Checks = (() => {
     reference: { cls: "none", mark: "", text: "参考" },
   };
   const BASIS = { measured: "測れた", measured_approx: "測れた（目安）", measured_tap: "測れた（あなたが示した点から）", visual: "見た目", conflict: "", none: "" };
+  // 見た目（AI）の答えは、測った判定と同じ断定に見せない（偽の確信を出さない）
+  const VISUAL_CHIP = "見た目の判定（まだ確かめていません）";
   const GROUP_ICON = { setup: "info", power: "power", tempo: "clock", path: "layers" };
   const VIEW = { dtl: "後ろから", fo: "正面から" };
   const pLabel = (p) => String(p || "").split("-")[0].replace("_5", ".5");
@@ -420,7 +422,7 @@ const Checks = (() => {
     return `<a class="card block cpcard focus" data-motion-card href="#/session/${sid}/check/${encodeURIComponent(f.id)}">
       ${fig || (thumbOf(d, f) ? `<img src="${esc(thumbOf(d, f))}" alt="${esc(pLabel(f.p))} のあなたのコマ" loading="lazy">` : `<span class="noimg" aria-hidden="true">${icon("video")}</span>`)}
       <span class="grow1"><span class="label">動きの課題</span><span class="cph">${esc(f.fault_label || f.title)}</span>
-      <span class="cpf">${/^P\d/.test(f.p || "") ? lab("p", pLabel(f.p)) + " " : ""}${esc(f.title)}</span>${linkChip(f)}</span>${icon("chevron-right", "chev")}</a>`;
+      <span class="cpf">${/^P\d/.test(f.p || "") ? lab("p", pLabel(f.p)) + " " : ""}${esc(f.title)}</span>${f.basis === "visual" ? `<span class="chip none" data-visual-chip>${VISUAL_CHIP}</span>` : ""}${linkChip(f)}</span>${icon("chevron-right", "chev")}</a>`;
   }
 
   // ---- C-1 項目1つ ----
@@ -460,7 +462,8 @@ const Checks = (() => {
       ${range}
       ${it.linked && (it.state === "out_range" || it.focus) ? `<p data-linked-text><span class="chip brand">${esc(it.linked_text || "球の課題とつながる候補です（まだ確かめていません）")}</span></p>` : ""}
       ${drillHtml(it)}
-      ${!tempo && it.state === "out_range" && testP(it) ? `<button type="button" class="btn block" data-motion-plan>この動きで練習を組む（十球テスト）</button>` : ""}
+      ${!tempo && it.state === "out_range" && it.basis !== "visual" && testP(it) ? `<button type="button" class="btn block" data-motion-plan>この動きで練習を組む（十球テスト）</button>` : ""}
+      ${!tempo && it.state === "out_range" && it.basis === "visual" ? `<p class="caption" data-visual-noplan>見た目の判定なので、十球テストの練習はまだ組めません。</p>` : ""}
       <button type="button" class="textbtn" data-why>${icon("info")}なぜそう言える？</button>
       <nav class="itemnav" aria-label="${esc(GROUP_WORD[g])}の項目">
         ${prev ? `<a class="btn" data-prev href="#/session/${sid}/check/${encodeURIComponent(prev.id)}">${icon("chevron-left")}前の項目</a>` : "<span></span>"}
@@ -669,5 +672,5 @@ const Checks = (() => {
   App.route("/session/:id/check", renderC, { tab: "record" });
   App.route("/session/:id/check/:item", renderItem, { tab: "record" });
   App.route("/guide/:view", renderGuide, { tab: "record" });
-  return { load, invalidate, STATE, motionCard };
+  return { load, invalidate, STATE, motionCard, VISUAL_CHIP };
 })();

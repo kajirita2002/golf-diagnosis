@@ -715,7 +715,7 @@ const Practice = (() => {
       if (!b) return;
       if (b.dataset.self) {
         const cur = practice();
-        const c = Number.isInteger((cur.self || {}).count) ? cur.self.count : 5;
+        const c = Number.isInteger((cur.self || {}).count) ? cur.self.count : 0; // 隠れた初期値で自己申告を引っ張らない
         cur.self = { ...(cur.self || {}), count: Math.max(0, Math.min(10, c + Number(b.dataset.self))) };
         savePractice(cur);
         $("[data-t=selfcount]", body).innerHTML = lab("count", cur.self.count + "回");

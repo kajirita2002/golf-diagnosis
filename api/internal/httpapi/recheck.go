@@ -79,6 +79,12 @@ func (s *Server) createMotionPlan(w http.ResponseWriter, r *http.Request, pid in
 			s.fail(w, bad("from_session はこの選手のセッションではありません"))
 			return
 		}
+		// 見た目（AI）の判定だけの項目は、十球テスト（判定できた8本が要る）で合格まで行けない。
+		// 見た目の評価は1回に数本しか見ないので、プランを組ませない
+		if s.itemBasis(ctx, se, pl, in.CPItemID) == "visual" {
+			s.fail(w, bad("この項目は見た目（AI）の判定だけなので、十球テストで数えられません。測れる項目で組んでください"))
+			return
+		}
 	}
 	trig := map[string]any{"title": in.Title, "session_id": in.FromSession, "cp_item_id": in.CPItemID}
 	params := map[string]any{"kind": "motion", "fault": in.Fault, "test_block": motionTestBlock,
@@ -99,6 +105,33 @@ func (s *Server) createMotionPlan(w http.ResponseWriter, r *http.Request, pid in
 		return
 	}
 	writeJSON(w, http.StatusCreated, p)
+}
+
+// itemBasis はそのセッションの判定で、項目の根拠（measured / visual …）。読めなければ空。
+func (s *Server) itemBasis(ctx context.Context, se *model.Session, pl *model.Player, itemID string) string {
+	d, err := s.checksData(ctx, se, pl, false)
+	if err != nil {
+		return ""
+	}
+	raw, ok := d["checks"].(json.RawMessage)
+	if !ok {
+		return ""
+	}
+	var c struct {
+		Items []struct {
+			ID    string `json:"id"`
+			Basis string `json:"basis"`
+		} `json:"items"`
+	}
+	if json.Unmarshal(raw, &c) != nil {
+		return ""
+	}
+	for _, it := range c.Items {
+		if it.ID == itemID {
+			return it.Basis
+		}
+	}
+	return ""
 }
 
 // ---- 10球テスト ----

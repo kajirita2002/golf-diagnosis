@@ -1303,7 +1303,8 @@ def motion_progress(tests: list[dict]) -> dict:
         state = "maybe"
     else:
         state = "checking"
-    head = STATE_TEXT[state][0]
+    # 判定できないのは「練習が足りない」ではなく「撮った本数が足りない」。見出しは十球テストの結果と同じ「撮り直し」
+    head = "撮り直し" if state == "insufficient" else STATE_TEXT[state][0]
     action = {"checking": "same_template", "maybe": "same_template", "worked": "try_baseline", "settled": "next_item",
               "not_transferred": "alternate_template", "failed": "switch_drill", "insufficient": "more_shots"}.get(state, "same_template")
     if state in ("checking", "maybe") and 2 <= len(fail_streak_days) < MOTION_FAIL_DAYS:

@@ -110,6 +110,9 @@ func (s *Server) patchPlayer(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, p)
 }
 
+// homeLookBack は課題を探しに戻る記録の数（最新を含む）。ホームを遅くしないために小さく保つ
+const homeLookBack = 3
+
 // homeFocus は課題（いま一番に直すもの）。段1では球の解説の要点（gist）から取る。
 type homeFocus struct {
 	SessionID   int64           `json:"session_id"`
@@ -124,6 +127,7 @@ type homeFocus struct {
 	Figure      json.RawMessage `json:"figure,omitempty"` // 比べる図 C1 の中身
 	BandShape   json.RawMessage `json:"band_shape,omitempty"`
 	Startable   bool            `json:"startable"` // この課題でプランを組めるか（測るだけの候補は組めない）
+	Earlier     bool            `json:"earlier,omitempty"` // 最新の記録では決まらず、前の記録の課題を出している
 }
 
 type homePlan struct {
@@ -174,7 +178,9 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) {
 	}
 	out["sessions_with_shots"] = withShots
 	// 動画のスイングがある最新の記録（球が無く動画だけの日でも、ホームを「ようこそ」のままにしない）。
-	// 数えるのは測れたスイングだけ（送り直しの途中で残った、コマの無いスイングは数えない）
+	// 数えるのは測れたスイングだけ（送り直しの途中で残った、コマの無いスイングは数えない）。
+	// 動きの課題は、最新の動画で決まらなければ前の動画へ戻る（少し撮っただけで課題を消さない。見るのは直近3つまで）
+	videos := 0
 	for i := range ss {
 		sws, err := s.Store.ListSwings(r.Context(), ss[i].ID)
 		if err != nil {
@@ -193,14 +199,23 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) {
 			for _, c := range views {
 				most = max(most, c)
 			}
-			out["latest_video"] = map[string]any{"session_id": ss[i].ID, "date": ss[i].Date, "n_swings": n, "n_same_view": most}
+			if videos == 0 {
+				out["latest_video"] = map[string]any{"session_id": ss[i].ID, "date": ss[i].Date, "n_swings": n, "n_same_view": most}
+			}
 			// 動きの課題（段2c）: 動画の判定から選んだ「まずここ」。ホームの「今日の1点」の候補（どちらを出すかは画面の homeState）
 			ctx, cancel := context.WithTimeout(r.Context(), homeReportTimeout)
-			if mf := s.motionFocus(ctx, &ss[i], pl); mf != nil {
-				out["motion_focus"] = mf
-			}
+			mf := s.motionFocus(ctx, &ss[i], pl)
 			cancel()
-			break
+			if mf != nil {
+				if videos > 0 {
+					mf["earlier"] = true
+				}
+				out["motion_focus"] = mf
+				break
+			}
+			if videos++; videos >= homeLookBack {
+				break
+			}
 		}
 	}
 	if latest != nil {
@@ -209,6 +224,7 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) {
 
 	// プラン（動いているもの）。課題はプランのきっかけの診断から取る（今日の1点がプランと食い違わないように）
 	focusSID, focusScope, planIssue := int64(0), "", ""
+	hasPlan := false
 	p, err := s.Store.ActivePlan(r.Context(), pid)
 	switch {
 	case err == nil:
@@ -218,6 +234,7 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		out["plan"] = hp
+		hasPlan = true
 		focusSID, focusScope, planIssue = trig, scope, p.Issue
 	case !errors.Is(err, store.ErrNotFound):
 		s.fail(w, err)
@@ -230,6 +247,28 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), homeReportTimeout)
 		f, state := s.homeFocusOf(ctx, focusSID, focusScope, planIssue)
 		cancel()
+		// プランが無く、最新の記録で課題が決まらないときは、課題が見つかった直近の記録へ戻る
+		// （別の日に少し打っただけで、前に見つけた課題をホームから消さない。見るのは直近3つまで）
+		if state == "no_focus" && !hasPlan {
+			tried := 1
+			for i := range ss {
+				if tried >= homeLookBack {
+					break
+				}
+				if ss[i].NShots == 0 || ss[i].ID == focusSID {
+					continue
+				}
+				tried++
+				ctx, cancel := context.WithTimeout(r.Context(), homeReportTimeout)
+				f2, st2 := s.homeFocusOf(ctx, ss[i].ID, "", "")
+				cancel()
+				if st2 == "found" && f2 != nil {
+					f2.Earlier = true
+					f, state = f2, st2
+					break
+				}
+			}
+		}
 		out["focus_state"] = state
 		if f != nil {
 			out["focus"] = f

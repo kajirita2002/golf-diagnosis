@@ -307,3 +307,19 @@ func Test2日の再確認はプランの評価をそのまま渡す(t *testing.T
 		t.Fatalf("プランを渡していない: %v", got["plan"])
 	}
 }
+
+// 見た目（AI）だけの項目は、十球テスト（判定できた8本が要る）で合格まで行けないので、プランを組ませない
+func Test見た目だけの項目では動きのプランを作らない(t *testing.T) {
+	c := newVisEnv(t, -1)
+	c.withFrames(t, "dtl")
+	c.an.cp.focusOut = `{"focus":"iron.p1.dtl.align","items":[{"id":"iron.p1.dtl.align","basis":"visual","state":"out_range"}]}`
+	out := c.do("POST", fmt.Sprintf("/v1/players/%d/plans", c.pid()), map[string]any{"kind": "motion", "cp_item_id": "iron.p1.dtl.align",
+		"view": "dtl", "checkpoint": "P1", "club": "7 Iron", "cue": "体の線をそろえる", "title": "向きのそろい", "from_session": c.sid}, 400)
+	if !strings.Contains(fmt.Sprint(out["error"]), "見た目") {
+		t.Fatalf("%v", out)
+	}
+	// 測った項目なら作れる
+	c.an.cp.focusOut = ""
+	c.do("POST", fmt.Sprintf("/v1/players/%d/plans", c.pid()), map[string]any{"kind": "motion", "cp_item_id": "iron.p2.dtl.head_vs_hands",
+		"view": "dtl", "checkpoint": "P2", "club": "7 Iron", "cue": "手のひらは返さない", "title": "クラブの先", "from_session": c.sid}, 201)
+}
