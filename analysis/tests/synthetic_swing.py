@@ -343,6 +343,62 @@ def motion(view: str = "dtl", hand: str = "R", fps: float = 60.0, n_swings: int 
     return body, truths
 
 
+def rough(body: dict, *, shake: float = 0.0, flicker: float = 0.0, scale: float = 1.0, hz: float | None = None,
+          drop: float = 0.0, sway: float = 0.0, sway_hz: float = 3.0, seed: int = 1) -> dict:
+    """motion() の時系列を、本物の撮り方に近づけて荒らす（本番で「スイングが見つかりませんでした」になった撮り方の合成）。
+
+    - shake: 手持ちの揺れ。全部の点が同じだけ動く（胴の長さの割合・標準偏差。ゆっくりした揺れ＋細かい揺れ）
+    - flicker: 画面越しのちらつき・小さく写った人の点の揺れ。点ごとにばらばらに動く（胴の長さの割合・標準偏差）
+    - scale: 人の大きさ（1 で画面の縦の約6割。0.4 で約4分の1）。画面の真ん中あたりへ縮める
+    - hz: 粗い走査の間隔（1秒に何コマ）。10 なら 10Hz の走査と同じ間引き
+    - drop: 体の点が丸ごと取れないコマの割合
+    - sway: 構えのあいだ手が止まらない（手だけを sway_hz で揺らす。胴の長さの割合の振れ幅）
+    元の body は変えない。"""
+    import random
+
+    rnd = random.Random(seed)
+    b = copy.deepcopy(body)
+    Lpx = 155.0 * scale
+    step = max(1, round(b["fps"] / hz)) if hz else 1
+    rois = b.get("roi")
+    frames, out_roi = [], []
+    sx = sy = 0.0
+    for k, f in enumerate(b["frames"]):
+        # 揺れ: ゆっくり動く成分（手ぶれの揺らぎ）。コマの速さに依らないように、時間で減衰させる
+        a = math.exp(-1.0 / max(b["fps"] * 0.4, 1.0))
+        sx = a * sx + math.sqrt(1 - a * a) * rnd.gauss(0, shake * Lpx)
+        sy = a * sy + math.sqrt(1 - a * a) * rnd.gauss(0, shake * Lpx)
+        if k % step:
+            continue
+        lm = f["lm"]
+        if lm is not None and rnd.random() < drop:
+            lm = None
+        if lm is not None:
+            t = f["t"]
+            new = []
+            for i, q in enumerate(lm):
+                x, y = q[0] * W, q[1] * H
+                if sway and i in (15, 16):
+                    # 構え（手が腰より下）のときだけ揺らす
+                    hip_y = (lm[23][1] + lm[24][1]) / 2 * H
+                    if y > hip_y + 0.2 * 155.0:
+                        x += sway * 155.0 * math.sin(2 * math.pi * sway_hz * t)
+                        y += 0.5 * sway * 155.0 * math.cos(2 * math.pi * sway_hz * t)
+                x = W / 2 + (x - W / 2) * scale
+                y = H * 0.55 + (y - H * 0.55) * scale
+                x += sx + rnd.gauss(0, flicker * Lpx)
+                y += sy + rnd.gauss(0, flicker * Lpx)
+                new.append([round(x / W, 5), round(y / H, 5), q[2]])
+            lm = new
+        frames.append({"t": f["t"], "lm": lm})
+        if rois:
+            out_roi.append(rois[k])
+    b["frames"] = frames
+    if rois:
+        b["roi"] = out_roi
+    return b
+
+
 # 合成の動画 testdata/synthetic/stick_motion_dtl.webm の中身（scripts/make_synthetic_video.py が作り、ui_check.py が同じ点を偽の姿勢推定に渡す）
 MOTION = {"view": "dtl", "fps": 30.0, "n_swings": 3, "practice": (2,)}
 MOTION_GROUND = 600       # 地面の上の端（ボールが地面の色の上に乗るように、ほかの動画より上げる）

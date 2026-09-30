@@ -238,7 +238,7 @@ def checkpoints_ideal(body: CheckpointIdealIn) -> dict:
 
 @app.post("/v1/video/checkpoints")
 def video_checkpoints(body: VideoCheckpointsIn) -> dict:
-    """姿勢の時系列 → スイングの区間と P1〜P10・中間・t₀（§6.3・§6.4。video/0.2。LLM を使わない・保存しない）。"""
+    """姿勢の時系列 → スイングの区間と P1〜P10・中間・t₀（§6.3・§6.4。video/0.3。スイングが無ければ diag。LLM を使わない・保存しない）。"""
     if body.view not in ("dtl", "fo"):
         raise HTTPException(400, "view は dtl か fo です")
     _hand(body.handedness)

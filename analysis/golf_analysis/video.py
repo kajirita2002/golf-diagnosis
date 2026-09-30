@@ -1,4 +1,4 @@
-"""動画の姿勢の時系列から、スイングの区間と P1〜P10（と中間の P5.5・P6.5）を取り出す（docs/DESIGN_v2.md §6.3・§6.4。版 video/0.2）。
+"""動画の姿勢の時系列から、スイングの区間と P1〜P10（と中間の P5.5・P6.5）を取り出す（docs/DESIGN_v2.md §6.3・§6.4。版 video/0.3）。
 
 - **LLM を使わない。** 規則は全部ここに1か所で持ち、pytest で固定する（tests/test_video.py）。
 - 入力は端末が取った姿勢の点の時系列（数値だけ。動画そのものは来ない）。保存しない。
@@ -11,6 +11,13 @@
 
 記号（§6.4）: H＝手の中心の代わり（両手首の中点）、Sl / St＝{lead} / {trail} 側の肩、hip＝両腰の中点、
 L＝胴の長さ（両肩の中点〜両腰の中点の、全コマの中央値）。
+
+スイングの区間を探すとき（構えの静止・始動 t₀・P1）だけ、手は**腰からの相対**（Hr＝中央値でなめらかにした手 −
+なめらかにした腰）で見る。手持ちで撮るとカメラの揺れで全部の点が同じだけ動くので、腰との差なら揺れが消える
+（video/0.3。本番で、練習場のモニターを手持ちで撮った動画が「スイングが見つかりませんでした」で止まったため）。
+測る項目（スエー・リセンタリングなど）の値にはこの相対を使わない（測る側は元の点を見る）。
+スイングが一本も見つからないときは `diag`（体の点が取れたコマの割合・手が胸より上に上がったか・構えがあったか・
+理由の記号）を返し、画面が具体的な理由と次の手を出す。
 
 入力:
   {view: dtl|fo, handedness: R|L, fps: 動画の fps（分からなければ 0）, width, height,
@@ -46,6 +53,7 @@ REASONS = {
     "no_ball_change": "ボールが動いていない",
     "p1_far": "構えから始動までが長い",
     "proxy": "代わりの規則で決めた目安",
+    "addr_guess": "構えの静止が見つからないので推定",
 }
 
 NAN = float("nan")
@@ -95,10 +103,16 @@ class Series:
             if self.roi is not None:
                 self.roi.append(roi_by_t.get(round(t, 6)))
         self.n = len(self.t)
+        # 体の点（手・腰・胸）が取れたコマの数（線でつなぐ前。スイングが見つからないときの理由に使う）
+        self.n_pose = sum(1 for i in range(self.n) if all(not _isnan(self.pts[k][i][0]) for k in ("H", "hip", "chest")))
         self._fill_gaps(config.VIDEO_MAX_GAP_S)
         self.L = self._torso()
         # 平滑化した手（粗い走査の揺れと、姿勢推定の小さな揺れを消す）
         self.Hs = self._smooth(self.pts["H"], config.VIDEO_SMOOTH_S)
+        # 区間を探すための手（中央値でなめらかに。一コマだけ跳んだ点を消す）と、腰からの相対（手持ちの揺れを消す）
+        self.Hd = self._median(self.pts["H"], config.VIDEO_FIND_MED_S)
+        hip_s = self._smooth(self.pts["hip"], config.VIDEO_FIND_HIP_S)
+        self.Hr = [[NAN, NAN] if _isnan(h[0]) or _isnan(p[0]) else [h[0] - p[0], h[1] - p[1]] for h, p in zip(self.Hd, hip_s)]
         self.ball_seen: list[tuple[float, float]] = []
         for b in body.get("ball_seen") or []:
             try:
@@ -208,6 +222,31 @@ class Series:
             out.append([sx / c, sy / c, arr[i][2]])
         return out
 
+    def _median(self, arr: list[list[float]], half: float) -> list[list[float]]:
+        out = []
+        for i in range(self.n):
+            if _isnan(arr[i][0]):
+                out.append([NAN, NAN, arr[i][2]])
+                continue
+            xs, ys = [], []
+            j = i
+            while j >= 0 and self.t[i] - self.t[j] <= half + 1e-9:
+                j -= 1
+            j += 1
+            while j < self.n and self.t[j] - self.t[i] <= half + 1e-9:
+                if not _isnan(arr[j][0]):
+                    xs.append(arr[j][0])
+                    ys.append(arr[j][1])
+                j += 1
+            out.append([_med(xs), _med(ys), arr[i][2]])
+        return out
+
+    def rok(self, i: int) -> bool:
+        return not _isnan(self.Hr[i][0])
+
+    def rdist(self, i: int, c: tuple[float, float]) -> float:
+        return math.hypot(self.Hr[i][0] - c[0], self.Hr[i][1] - c[1]) if self.rok(i) else math.inf
+
     # ---- 便利 ----
     def y(self, name: str, i: int) -> float:
         return self.pts[name][i][1]
@@ -231,61 +270,152 @@ class Series:
 
 
 def _below_hip(s: Series, i: int) -> bool:
-    return s.ok(i, "H", "hip") and s.Hs[i][1] > s.y("hip", i)
+    return s.ok(i, "H", "hip") and s.Hd[i][1] > s.y("hip", i)
 
 
 def _above_chest(s: Series, i: int) -> bool:
-    return s.ok(i, "H", "chest") and s.Hs[i][1] < s.y("chest", i)
+    return s.ok(i, "H", "chest") and s.Hd[i][1] < s.y("chest", i)
 
 
-def _static_window(s: Series, lo: int, hi: int) -> tuple[int, int, tuple[float, float]] | None:
-    """[lo, hi] の中で、手がほとんど動かない区間（VIDEO_STATIC_S 秒以上、どの点も中央から VIDEO_STATIC_L×L 以内）のうち最後のもの。
+def _below_chest(s: Series, i: int) -> bool:
+    return s.ok(i, "H", "chest") and s.Hd[i][1] >= s.y("chest", i)
 
-    返すのは (始まり, 終わり, 手の中央の位置)。"""
-    L = s.L
+
+def _med(v: list[float]) -> float:
+    v = sorted(v)
+    m = len(v)
+    return v[m // 2] if m % 2 else (v[m // 2 - 1] + v[m // 2]) / 2
+
+
+def _spread(s: Series, idx: list[int]) -> tuple[float, tuple[float, float]]:
+    """コマの並び idx の手（腰からの相対）の、中央からの一番遠い距離と中央（平均）。窓を伸ばすか決めるのに使う。"""
+    xs = [s.Hr[q][0] for q in idx]
+    ys = [s.Hr[q][1] for q in idx]
+    c = (sum(xs) / len(xs), sum(ys) / len(ys))
+    return max(math.hypot(x - c[0], y - c[1]) for x, y in zip(xs, ys)), c
+
+
+def _addr_of(s: Series, idx: list[int], cap_l: float = config.VIDEO_FIND_STATIC_L) -> tuple[tuple[float, float], float]:
+    """構えの位置（中央値）と揺れの幅（中央値からの距離の中央値の2倍）。
+
+    中央値にするのは、窓の終わりに始動の初めが少し入っても構えの位置がそちらへ寄らないようにするため
+    （しきい値を緩めたぶん、窓の端に動き始めが入りやすい）。"""
+    c = (_med([s.Hr[q][0] for q in idx]), _med([s.Hr[q][1] for q in idx]))
+    tol = 2 * _med([math.hypot(s.Hr[q][0] - c[0], s.Hr[q][1] - c[1]) for q in idx])
+    return c, min(tol, cap_l * s.L)
+
+
+def _static_window(s: Series, lo: int, hi: int) -> dict | None:
+    """[lo, hi] の中で、手（腰からの相対）がほとんど動かない区間（VIDEO_STATIC_S 秒以上、どの点も中央から VIDEO_FIND_STATIC_L×L 以内）のうち最後のもの。
+
+    点の欠けは VIDEO_FIND_GAP_S 秒までなら飛ばして続ける（粗い走査で一コマ欠けても切らない）。
+    返すのは {a: 始まり, b: 終わり, addr: 手の中央（相対）, tol: 実際に揺れていた幅, guess: False}。"""
+    lim = config.VIDEO_FIND_STATIC_L * s.L
     best = None
     i = lo
     while i <= hi:
-        if not s.ok(i, "H"):
+        if not s.rok(i):
             i += 1
             continue
-        # i から伸ばせるだけ伸ばす（中央は伸ばしながら平均で近似）
+        idx = [i]
+        sx, sy = s.Hr[i][0], s.Hr[i][1]
         j = i
-        xs, ys = [s.Hs[i][0]], [s.Hs[i][1]]
-        while j + 1 <= hi and s.ok(j + 1, "H"):
-            nx, ny = s.Hs[j + 1][0], s.Hs[j + 1][1]
-            cx, cy = sum(xs) / len(xs), sum(ys) / len(ys)
-            if math.hypot(nx - cx, ny - cy) > config.VIDEO_STATIC_L * L:
+        q = i + 1
+        while q <= hi:
+            if not s.rok(q):
+                if s.t[q] - s.t[idx[-1]] > config.VIDEO_FIND_GAP_S:
+                    break
+                q += 1
+                continue
+            if s.t[q] - s.t[idx[-1]] > config.VIDEO_FIND_GAP_S:
                 break
-            xs.append(nx)
-            ys.append(ny)
-            j += 1
-        if s.t[j] - s.t[i] >= config.VIDEO_STATIC_S - 1e-9:
-            best = (i, j, (sum(xs) / len(xs), sum(ys) / len(ys)))
+            cx, cy = sx / len(idx), sy / len(idx)
+            if math.hypot(s.Hr[q][0] - cx, s.Hr[q][1] - cy) > lim:
+                break
+            idx.append(q)
+            sx += s.Hr[q][0]
+            sy += s.Hr[q][1]
+            j = q
+            q += 1
+        if len(idx) >= 2 and s.t[j] - s.t[i] >= config.VIDEO_STATIC_S - 1e-9:
+            c, tol = _addr_of(s, idx)
+            best = {"a": i, "b": j, "addr": c, "tol": tol, "guess": False}
             i = j + 1
         else:
             i += 1
     return best
 
 
-def find_swings(s: Series) -> list[dict]:
-    """手が胸より上に上がった区間ごとに、その前に静かな構えがあり、後で腰より下へ下りたものをスイングにする。
+def _quiet_window(s: Series, lo: int, hi: int) -> dict | None:
+    """静かな構えが見つからないときの「構え（推定）」: 手が腰より下の区間 [lo, hi] が VIDEO_ADDR_MIN_S 秒以上あれば、
+    その中の VIDEO_STATIC_S 秒の窓のうち、手（腰からの相対）の動きが一番小さい所（同じくらいなら後ろ＝始動に近いほう）。
+
+    行き止まりにしないための道。P1 は必ず確かめてもらう（`addr_guess`）。"""
+    if hi <= lo or s.t[hi] - s.t[lo] < config.VIDEO_ADDR_MIN_S - 1e-9:
+        return None
+    cands = []
+    for i in range(lo, hi + 1):
+        if not s.rok(i):
+            continue
+        idx = [q for q in range(i, hi + 1) if s.t[q] - s.t[i] <= config.VIDEO_STATIC_S + 1e-9 and s.rok(q)]
+        if len(idx) < 2 or s.t[idx[-1]] - s.t[i] < 0.5 * config.VIDEO_STATIC_S:
+            continue
+        sp, _c = _spread(s, idx)
+        cands.append((sp, i, idx[-1], idx))
+    if not cands:
+        return None
+    lo_sp = min(x[0] for x in cands)
+    if lo_sp > config.VIDEO_ADDR_GUESS_L * s.L:
+        return None
+    ok = [x for x in cands if x[0] <= max(1.5 * lo_sp, config.VIDEO_FIND_STATIC_L * s.L)]
+    _sp, a, b, idx = max(ok, key=lambda x: x[1])
+    # 揺れの幅は胴の長さの半分の、さらに半分まで（始動は揺れの幅の2倍より遠く＝腰の高さより手前で決まるように）
+    c, tol = _addr_of(s, idx, cap_l=config.VIDEO_ADDR_GUESS_L / 2)
+    return {"a": a, "b": b, "addr": c, "tol": tol, "guess": True}
+
+
+def find_swings(s: Series, why: dict | None = None) -> list[dict]:
+    """手が胸より上に上がった区間ごとに、その前に構え（手が腰より下で静か）があり、後で胸より下へ下りたものをスイングにする。
 
     - ワッグル（手が胸まで上がらない）はスイングにしない。
-    - フィニッシュで手が上がっている区間は、直前の腰より下の区間に静かな構えが無い（当たる瞬間の速い動き）のでスイングにしない。
-    返すのは [{top, c_up, win: (a, b, addr)}]。"""
+    - フォローとフィニッシュで手が上がっている区間は、前のスイングの上げの区間のすぐ後（VIDEO_FOLLOW_S 秒以内）か、
+      直前の腰より下の区間が短く速い（当たる瞬間）ので、スイングにしない。
+    - 静かな構えが見つからなくても、腰より下の区間が十分長ければ、一番動きの小さい所を「構え（推定）」にする（行き止まりにしない）。
+    why に dict を渡すと、見つからなかった理由の材料（上がった区間の数・構えがあった数・下りた数）を数えて入れる。
+    返すのは [{top, c_up, win: {a, b, addr, tol, guess}, run}]。"""
     out = []
     used: set[int] = set()
     i = 0
     n = s.n
+    st = {"raised": 0, "address": 0, "static": 0, "down": 0}
     while i < n:
         if not _above_chest(s, i):
             i += 1
             continue
         j = i
-        while j + 1 < n and (_above_chest(s, j + 1) or not s.ok(j + 1, "H", "chest")):
-            j += 1
+        while True:
+            while j + 1 < n and (_above_chest(s, j + 1) or not s.ok(j + 1, "H", "chest")):
+                # 点の欠けが長く続くところで区間を切る（下ろしのコマが全部欠けると、上げとフィニッシュが一つの区間になり、
+                # フィニッシュの手の高さをトップと取り違える）
+                if not s.ok(j + 1, "H", "chest"):
+                    q = j + 1
+                    while q < n and not s.ok(q, "H", "chest"):
+                        q += 1
+                    last_ok = max((z for z in range(i, j + 1) if s.ok(z, "H", "chest")), default=i)
+                    if q < n and s.t[q] - s.t[last_ok] > config.VIDEO_RUN_GAP_S + 1e-9:
+                        break
+                j += 1
+            # 一瞬だけ胸より下に出たコマ（VIDEO_RUN_MERGE_S 秒まで・腰より下には下りていない）は切れ目にしない
+            nxt = next((q for q in range(j + 1, n) if s.t[q] - s.t[j] <= config.VIDEO_RUN_MERGE_S + 1e-9 and _above_chest(s, q)), None)
+            if nxt is None or any(_below_hip(s, q) for q in range(j + 1, nxt)):
+                break
+            j = nxt
         top = min(range(i, j + 1), key=lambda k: s.Hs[k][1] if s.ok(k, "H") else math.inf)
+        # 前のスイングの上げのすぐ後に上がったのは、フォローとフィニッシュ
+        if out and s.t[i] - s.t[out[-1]["run"][1]] < config.VIDEO_FOLLOW_S:
+            i = j + 1
+            continue
+        st["raised"] += 1
         # 直前の、腰より下の区間（その最後のコマの次が P2 の目安）
         k = i - 1
         while k >= 0 and not _below_hip(s, k):
@@ -294,18 +424,58 @@ def find_swings(s: Series) -> list[dict]:
             i = j + 1
             continue
         c_up = k + 1
+        if s.t[i] - s.t[k] > config.VIDEO_RISE_MAX_S:
+            # 上げの途中が見えていない（フィニッシュを上げと取り違えない）
+            i = j + 1
+            continue
+        # 腰より下の区間の頭。腰の高さのあたりで点が揺れて一瞬だけ腰より上に出たコマ（VIDEO_FIND_BRIEF_S 秒まで）は切れ目にしない
         m = k
-        while m - 1 >= 0 and (_below_hip(s, m - 1) or not s.ok(m - 1, "H", "hip")):
-            m -= 1
+        q = k - 1
+        while q >= 0:
+            if _below_hip(s, q):
+                m = q
+            elif s.ok(q, "H", "hip") and s.t[m] - s.t[q] > config.VIDEO_FIND_BRIEF_S + 1e-9:
+                break
+            q -= 1
         win = _static_window(s, m, k)
-        # 後で腰より下へ下りるか（下ろし）
-        down = next((q for q in range(j + 1, n) if _below_hip(s, q)), None)
+        if win:
+            st["static"] += 1
+        else:
+            win = _quiet_window(s, m, k)
+        if win:
+            st["address"] += 1
+        # 後で胸より下へ下りるか（下ろし。粗い走査では腰より下のコマが一つも無いことがあるので、胸で見る）
+        down = next((q for q in range(j + 1, n) if _below_chest(s, q)), None)
+        if down is not None:
+            st["down"] += 1
         # 同じ構えから二つ目の「上」は、フィニッシュ（点が欠けて下ろしが見えなかったとき）なので数えない
-        if win and down is not None and c_up not in used and s.t[top] - s.t[win[1]] <= config.VIDEO_MAX_BACK_S:
+        if win and down is not None and c_up not in used and s.t[top] - s.t[win["b"]] <= config.VIDEO_MAX_BACK_S:
             used.add(c_up)
             out.append({"top": top, "c_up": c_up, "win": win, "run": (i, j)})
         i = j + 1
+    if why is not None:
+        why.update(st)
     return out
+
+
+def diagnose(s: Series, why: dict) -> dict:
+    """スイングが見つからなかった理由（画面が具体的な理由と次の手を出すため）。
+
+    reason: no_pose（体の点がほとんど取れない）/ no_raise（手が胸より上に上がった区間が無い）/
+            no_address（上がったが、その前に手が腰より下で落ち着いた構えが無い）/ no_down（上がったまま下りてこない）/ other"""
+    ratio = s.n_pose / s.n if s.n else 0.0
+    if ratio < config.VIDEO_DIAG_MIN_POSE:
+        reason = "no_pose"
+    elif not why.get("raised"):
+        reason = "no_raise"
+    elif not why.get("address"):
+        reason = "no_address"
+    elif not why.get("down"):
+        reason = "no_down"
+    else:
+        reason = "other"
+    return {"reason": reason, "pose_ratio": round(ratio, 3), "n_frames": s.n, "raised": bool(why.get("raised")),
+            "address": bool(why.get("address")), "static": bool(why.get("static")), "down": bool(why.get("down"))}
 
 
 # ------------------------------------------------------------ P を決める
@@ -389,17 +559,22 @@ def _club_snap(s: Series, p: dict) -> dict:
 def detect_one(s: Series, sw: dict) -> dict:
     """1スイングの P（§6.4 の表の規則）。"""
     L = s.L
-    a, b, addr = sw["win"]
+    win = sw["win"]
+    a, b, addr = win["a"], win["b"], win["addr"]
     top0 = sw["top"]
     end = s.n - 1
+    # 構えの位置の近さ: 胴の長さの VIDEO_STATIC_L か、構えの区間で実際に揺れていた幅の大きいほう。
+    # 始動はその2倍より遠く（揺れの幅の中で「離れた」と言わない）
+    near_l = max(config.VIDEO_STATIC_L * L, win["tol"])
+    t0_l = max(config.VIDEO_T0_L * L, 2 * near_l)
 
     def dist_addr(i: int) -> float:
-        return math.hypot(s.Hs[i][0] - addr[0], s.Hs[i][1] - addr[1]) if s.ok(i, "H") else math.inf
+        return s.rdist(i, addr)
 
-    # t₀: 静かな構えのあと、手が構えから 0.08L 離れ、そのまま P2 の目安まで離れ続けた最初のコマ
+    # t₀: 構えのあと、手（腰からの相対）が構えから 0.08L 離れ、そのまま P2 の目安まで離れ続けた最初のコマ
     t0i = None
     for i in range(b, sw["c_up"] + 1):
-        if dist_addr(i) >= config.VIDEO_T0_L * L and all(dist_addr(q) >= config.VIDEO_T0_L * L for q in range(i, sw["c_up"] + 1)):
+        if dist_addr(i) >= t0_l and all(dist_addr(q) >= t0_l for q in range(i, sw["c_up"] + 1) if s.rok(q)):
             t0i = i
             break
     if t0i is None:
@@ -409,11 +584,14 @@ def detect_one(s: Series, sw: dict) -> dict:
     # P1: t₀ の直前で、手がまだ構えの位置にある最後のコマ（静止区間の最後。ゆっくり始めたときは少し後ろへ）
     p1 = None
     for i in range(t0i - 1, a - 1, -1):
-        if dist_addr(i) <= config.VIDEO_STATIC_L * L:
+        if dist_addr(i) <= near_l:
             p1 = i
             break
     ps["P1"] = _p(s, "P1", p1 if p1 is not None else b, "rule", "ok")
-    if p1 is not None and s.t[t0i] - s.t[p1] > config.VIDEO_P1_GAP_S:
+    if win["guess"]:
+        # 静かな構えが見つからず、一番動きの小さい所を構えにした: P1 は必ず確かめてもらう
+        ps["P1"].update(status="estimated", confidence="low", reason="addr_guess")
+    elif p1 is not None and s.t[t0i] - s.t[p1] > config.VIDEO_P1_GAP_S:
         ps["P1"].update(confidence="low", reason="p1_far")
     # P2: t₀ のあと、手が腰の高さに達した最初のコマ（後ろからはシャフトが短く写るので目安。正面はタップで寄せ直す）
     i2 = _first(s, t0i, top0, lambda i: s.ok(i, "H", "hip") and s.Hs[i][1] <= s.y("hip", i))
@@ -678,9 +856,12 @@ def detect(body: dict) -> dict:
     out: dict[str, Any] = {"video_version": config.VIDEO_VERSION, "n_frames": s.n, "torso_px": round(s.L, 2), "swings": [], "excluded": []}
     if s.n < 3 or s.L <= 1:
         out["reason"] = "体の点が足りないので、スイングを探せません"
+        out["diag"] = diagnose(s, {})
+        out["diag"]["reason"] = "no_pose"
         return out
     k = 0
-    for sw in find_swings(s):
+    why: dict = {}
+    for sw in find_swings(s, why):
         one = detect_one(s, sw)
         one["series"] = series_for(body, s, one)
         need = [p["p"] for p in one["ps"] if p["p"] in PS_REQUIRED and p["confidence"] == "low"]
@@ -704,4 +885,6 @@ def detect(body: dict) -> dict:
                     p.update(reason="proxy", reason_text=REASONS["proxy"])
             out["swings"].append(one)
         out["excluded"] = []
+    if not out["swings"] and not out["excluded"]:
+        out["diag"] = diagnose(s, why)
     return out
