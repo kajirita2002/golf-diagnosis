@@ -387,6 +387,8 @@ def ideal(swing: dict, item_id: str) -> dict:
         "alt": fill(f"{fl or it.get('look_at', '')}。目安: {it.get('ok_text', '')}", hand),
         "skeleton": RawFrame((swing.get("frames") or {}).get(p) or {}, ctx.w, ctx.h).all() if p else {},
         "bones": [list(b) for b in BONES],
+        # 全部の P の点（理想と比べる画面で、端末の参照動画の骨格を重ねるときの位置と縮尺の合わせ方に使う。§7.3）
+        "skeletons": {q: RawFrame(f, ctx.w, ctx.h).all() for q, f in (swing.get("frames") or {}).items() if isinstance(f, dict)},
     }
     visual = (it.get("measure") or {}).get("how") == "vision" or it.get("judgeable") == "visual" or res.get("basis") == "visual"
     if visual:

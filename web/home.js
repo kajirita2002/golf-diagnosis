@@ -133,7 +133,7 @@ const Home = (() => {
       // 動きの課題: 言葉だけ（数字・角度は C-1 の「なぜそう言える？」の中）。球の課題とつながる候補なら印を添える
       const m = st.motion;
       body += `<section class="block" aria-labelledby="h-one"><h2 id="h-one" class="label">今日の一点</h2>
-        <div class="focuscard" data-home="one" data-motion-focus><p class="t-headline" style="margin:0">${esc(m.fault_label || m.title)}</p>
+        <div class="focuscard" data-home="one" data-motion-focus><div data-motion-fig></div><p class="t-headline" style="margin:0">${esc(m.fault_label || m.title)}</p>
           <p class="sub" style="margin:var(--s1) 0 0">${m.p && /^P\d/.test(m.p) ? lab("p", m.p.replace("_5", ".5")) + " " : ""}${esc(m.title)}</p></div>
         ${m.linked ? `<p data-home="linked"><span class="chip brand">${icon("layers")}${esc(m.linked_text || "球の課題とつながる候補です（まだ確かめていません）")}</span></p>` : ""}
         ${m.drill ? `<p data-home="drill"><span class="label">練習の一例</span><br>${esc(m.drill.cue || m.drill.title)}</p>` : ""}</section>`;
@@ -217,6 +217,20 @@ const Home = (() => {
     if (shown && shown === JSON.stringify(h)) return; // 写しと同じなら描き直さない（ちらつかせない）
     await drawFigure(el, draw(el, h, fromCopy), alive);
     videoFocus(el, h, alive);
+    motionFig(el, h, alive);
+  }
+
+  // 動きの課題の写真に、範囲の面と「範囲に入れた目安」の線を重ねる（段3。描けなければ何も出さない）
+  async function motionFig(el, h, alive) {
+    const slot = el.querySelector("[data-motion-fig]");
+    const mf = h && h.motion_focus;
+    if (!slot || !mf || typeof Checks === "undefined" || typeof Ideal === "undefined") return;
+    try {
+      const d = await Checks.load(mf.session_id);
+      const it = ((d && d.checks && d.checks.items) || []).find((x) => x.id === mf.item_id);
+      const html = it ? await Ideal.thumbHtml(d, it) : "";
+      if (html && alive() && slot.isConnected) slot.outerHTML = `<div class="row" data-motion-fig>${html}</div>`;
+    } catch (e) { console.warn(e); }
   }
 
   // 動画だけの日は、チェックの「まずここ」の文を後から入れる（ホームの API では課題を選ばない。選ぶのはチェックと同じ関数）

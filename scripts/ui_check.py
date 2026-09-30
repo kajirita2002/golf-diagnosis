@@ -1821,6 +1821,224 @@ def check_vision_on(browser, shots_dir: str, errors: list[str]) -> None:
         ctx.close()
 
 
+# ============================================================ 5. 理想との比較（段3）
+
+THUMB_JS = """(fr) => {
+  // 棒人間のサムネイル（長辺 360px の JPEG）を点から描く。本物の写真・人は使わない
+  const W = 1280, H = 720, k = 360 / W;
+  const c = document.createElement('canvas'); c.width = 360; c.height = Math.round(H * k);
+  const g = c.getContext('2d');
+  g.fillStyle = 'rgb(107,142,78)'; g.fillRect(0, 0, c.width, c.height);
+  g.strokeStyle = 'rgb(240,240,240)'; g.lineWidth = 3; g.lineCap = 'round';
+  const L = fr.landmarks, P = (i) => [L[i].x * W * k, L[i].y * H * k];
+  for (const [a, b] of [[11,12],[23,24],[11,23],[12,24],[11,13],[13,15],[12,14],[14,16],[23,25],[25,27],[24,26],[26,28],[27,31],[28,32]]) {
+    const A = P(a), B = P(b); g.beginPath(); g.moveTo(A[0], A[1]); g.lineTo(B[0], B[1]); g.stroke();
+  }
+  const n = P(0); g.beginPath(); g.arc(n[0], n[1], 6, 0, 7); g.stroke();
+  if (fr.taps && fr.taps.grip && fr.taps.head) { g.strokeStyle = 'rgb(30,30,30)'; g.beginPath(); g.moveTo(fr.taps.grip[0] * k, fr.taps.grip[1] * k); g.lineTo(fr.taps.head[0] * k, fr.taps.head[1] * k); g.stroke(); }
+  return c.toDataURL('image/jpeg', 0.85).split(',')[1];
+}"""
+
+
+def seed_swings_thumbs(page, base: str, sid: int, n: int, faults=()) -> list[int]:
+    """合成のスイングを、棒人間のサムネイルつきで足す（理想の図は本人のコマの上に描くため）。"""
+    ids = []
+    for _ in range(n):
+        sw = SYNTH.swing("dtl", faults=faults)
+        s = call("POST", f"{base}/sessions/{sid}/swings", {"view": "dtl", "club": "7 Iron", "club_class": "iron", "fps": 240, "fps_source": "container",
+                                                            "width": SYNTH.W, "height": SYNTH.H, "ball": sw["ball"]})
+        frames = [{"checkpoint": p, "t": f["t"], "frame": int(f["t"] * 60), "landmarks": f["landmarks"], "taps": f["taps"],
+                   "thumb": page.evaluate(THUMB_JS, f)} for p, f in sw["frames"].items()]
+        call("PUT", f"{base}/swings/{s['id']}/frames", {"frames": frames, "missing": []})
+        ids.append(s["id"])
+    return ids
+
+
+CHIP_CONTRAST_JS = """() => {
+  const rgb = (s) => (s.match(/[\\d.]+/g) || []).slice(0, 3).map(Number);
+  const lum = (c) => { const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }; const [r, g, b] = c.map(f); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+  const cr = (a, b) => { const x = lum(rgb(a)), y = lum(rgb(b)); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
+  const surf = getComputedStyle(document.body).backgroundColor;
+  const out = [];
+  for (const b of document.querySelectorAll('[data-idps] button, [data-seg] button')) {
+    const cs = getComputedStyle(b);
+    const bg = cs.backgroundColor.includes('rgba(0, 0, 0, 0)') ? getComputedStyle(b.parentElement).backgroundColor : cs.backgroundColor;
+    out.push({ t: b.textContent.trim(), text: cr(cs.color, bg), edge: b.closest('[data-idps]') ? Math.max(cr(cs.borderTopColor, surf), cr(bg, surf)) : 9 });
+  }
+  return out;
+}"""
+
+
+def check_ideal(browser, root: str, base: str, shots_dir: str, errors: list[str]) -> None:
+    """理想との比較: C-1 の範囲の面と目安の線・範囲の中では描かない・I の相手と見せ方・P と濃さはボタンだけで・
+    端末の動画を入れても画像がネットワークに出ない・画像にする・動きを減らす設定・ダークのチップのコントラスト。"""
+    tag = "ideal"
+    pl = call("POST", f"{base}/players", {"name": "Ideal", "handedness": "R"})
+    pid = pl["id"]
+    old = call("POST", f"{base}/sessions", {"player_id": pid, "date": "2026-09-20", "location": "練習場"})
+    ses = call("POST", f"{base}/sessions", {"player_id": pid, "date": "2026-09-29", "location": "練習場"})
+    sid = ses["id"]
+    ctx, page = new_page(browser, 390, 844, errors, tag, pid)
+    pose = SYNTH.pose_json()
+    ctx.add_init_script(FAKE_POSE_JS % json.dumps({"dtl": pose["dtl"], "fo": pose["fo"]}))
+    goto(page, root, "/settings", "[data-refs-entry]")
+    seed_swings_thumbs(page, base, old["id"], 1)
+    seed_swings_thumbs(page, base, sid, 3, faults=("p2_inside",))
+    item = "iron.p2.dtl.head_vs_hands"
+    # C-1: 範囲の外の項目は写真の上に範囲の面と目安の線（凡例と注記つき）
+    goto(page, root, f"/session/{sid}/check/{item}", "[data-title]")
+    try:
+        page.wait_for_selector("[data-idfig] svg[data-ov]", timeout=20000)
+    except Exception:
+        errors.append(f"[{tag}] 項目1つの画面に範囲と目安の線が出ない")
+        shot(page, shots_dir, f"{tag}-c1-fail")
+        ctx.close()
+        return
+    got = page.evaluate("""() => { const s = document.querySelector('[data-idfig] svg[data-ov]');
+      const now = s.querySelector('line.now:not(.e)'), fix = s.querySelector('line.fix:not(.e)');
+      return { zone: s.querySelectorAll('.z').length, fix: s.querySelectorAll('line.fix:not(.e)').length, arrow: s.querySelectorAll('.arrh').length,
+        title: (s.querySelector('title') || {}).textContent || '', desc: (s.querySelector('desc') || {}).textContent || '',
+        dashNow: now ? getComputedStyle(now).strokeDasharray : '', dashFix: fix ? getComputedStyle(fix).strokeDasharray : '',
+        wNow: now ? parseFloat(getComputedStyle(now).strokeWidth) : 0, wFix: fix ? parseFloat(getComputedStyle(fix).strokeWidth) : 0,
+        edge: s.querySelectorAll('line.e').length,
+        legend: (document.querySelector('[data-legend]') || {}).textContent || '', note: (document.querySelector('[data-ideal-note]') || {}).textContent || '' }; }""")
+    if not got["zone"] or not got["fix"]:
+        errors.append(f"[{tag}] 範囲の面か目安の線が無い: {got}")
+    if not got["title"] or not got["desc"]:
+        errors.append(f"[{tag}] 重ねた図に代わりの文が無い")
+    if got["dashNow"] not in ("none", "") or got["dashFix"] in ("none", "") or got["wFix"] < got["wNow"] * 1.4 or not got["edge"]:
+        errors.append(f"[{tag}] 今と目安が線の種類・太さ・縁で分かれていない（色だけ）: {got}")
+    if "実線" not in got["legend"] or "破線" not in got["legend"] or "まだ確かめていません" not in got["note"]:
+        errors.append(f"[{tag}] 凡例か注記が無い: {got['legend']!r} {got['note']!r}")
+    if "帯" in page.inner_text("#view"):
+        errors.append(f"[{tag}] 画面の言葉に「帯」がある")
+    no_overflow(page, tag, "項目1つ（理想）", errors)
+    targets(page, tag, "項目1つ（理想）", errors)
+    shot(page, shots_dir, f"{tag}-c1")
+    # 範囲の中の項目には描かない
+    goto(page, root, f"/session/{sid}/check/iron.p1.dtl.hands", "[data-title]")
+    page.wait_for_timeout(1500)
+    if page.locator("svg[data-ov]").count():
+        errors.append(f"[{tag}] 範囲の中の項目に線を描いた")
+    # D の動きの課題のカード・ホームにも小さな図
+    goto(page, root, "/home", "[data-home]")
+    try:
+        page.wait_for_selector("[data-motion-fig] svg[data-ov]", timeout=15000)
+    except Exception:
+        errors.append(f"[{tag}] ホームの動きの課題に範囲と線の図が無い")
+    shot(page, shots_dir, f"{tag}-home")
+    goto(page, root, f"/session/{sid}", "[data-body]")
+    try:
+        page.wait_for_selector("[data-motion-card] svg[data-ov]", timeout=20000)
+    except Exception:
+        errors.append(f"[{tag}] 診断の動きの課題に範囲と線の図が無い")
+    # I: 理想と比べる（ボタンだけで P と濃さを全部操作できる）
+    goto(page, root, f"/session/{sid}/check/{item}", "[data-ideal-open]")
+    page.click("[data-ideal-open]")
+    page.wait_for_selector("[data-idps]")
+    if page.locator("[data-idps] button").count() != 7:
+        errors.append(f"[{tag}] P のボタンが7つでない")
+    page.click("[data-idps] button[data-p=P3]")
+    if page.get_attribute("[data-idps] button[data-p=P3]", "aria-pressed") != "true" or page.locator("[data-stage] svg[data-ov] .z").count():
+        errors.append(f"[{tag}] P3 に切り替わらない・課題の P 以外に範囲を描いた")
+    page.click("[data-pprev]")
+    if page.get_attribute("[data-idps] button[data-p=P2]", "aria-pressed") != "true":
+        errors.append(f"[{tag}] 前の P のボタンで戻れない")
+    for v, want in (("0", "0"), ("50", "0.5"), ("100", "1")):
+        page.click(f"[data-seg=alpha] button[data-v='{v}']")
+        op = page.evaluate("getComputedStyle(document.querySelector('[data-stage] .ovl')).opacity")
+        if op != want:
+            errors.append(f"[{tag}] 濃さ {v} のボタンで濃さが {op}")
+    no_overflow(page, tag, "理想と比べる", errors)
+    targets(page, tag, "理想と比べる", errors)
+    shot(page, shots_dir, f"{tag}-i-guide")
+    with page.expect_download(timeout=15000) as dl:
+        page.click("[data-export]")
+    if not dl.value.suggested_filename.endswith(".png"):
+        errors.append(f"[{tag}] 画像にするが PNG でない: {dl.value.suggested_filename}")
+    # 自分のベスト（範囲の中だった日）
+    page.click("[data-seg=target] button[data-v=best]")
+    try:
+        page.wait_for_selector("[data-best-who]", timeout=10000)
+        if "範囲の中でした" not in page.inner_text("[data-best-who]"):
+            errors.append(f"[{tag}] ベストの札が違う")
+    except Exception:
+        errors.append(f"[{tag}] 自分のベストが出ない")
+    shot(page, shots_dir, f"{tag}-i-best")
+    # 端末の動画: 初回だけ断り → 無ければ入れる画面へ
+    page.click("[data-seg=target] button[data-v=ref]")
+    page.wait_for_selector(".sheet [data-ok]")
+    page.click(".sheet [data-ok]")
+    page.wait_for_selector("[data-ref-none]")
+    # 取り込み: 画像も点もネットワークに出さない（読むのは画面のファイルと同梱の部品だけ）
+    net: list[tuple[str, str]] = []
+    page.on("request", lambda r: net.append((r.method, r.url)))
+    goto(page, root, "/refs", "[data-ref-file]")
+    page.set_input_files("[data-ref-file]", os.path.join(SYN, "stick_dtl.webm"))
+    page.wait_for_selector("[data-ref-video]")
+    page.wait_for_function("document.querySelector('[data-ref-video]').readyState >= 2", timeout=20000)
+    no_overflow(page, tag, "端末の動画の取り込み", errors)
+    targets(page, tag, "端末の動画の取り込み", errors)
+    shot(page, shots_dir, f"{tag}-ref-import")
+    for i in range(7):
+        if i:
+            page.click("[data-dt='0.5']")
+            page.wait_for_timeout(250)
+        page.wait_for_selector("[data-ref-pick]:not([aria-disabled=true])")
+        page.click("[data-ref-pick]")
+    page.wait_for_selector("[data-ref-list]", timeout=20000)
+    if "1本" not in page.inner_text("[data-ref-count]"):
+        errors.append(f"[{tag}] 端末の動画の数が出ない")
+    goto(page, root, f"/session/{sid}/ideal/{item}", "[data-idps]")
+    page.click("[data-seg=target] button[data-v=ref]")
+    page.wait_for_selector("[data-ref-local]")
+    if page.locator("[data-ref-layer] line").count() == 0:
+        errors.append(f"[{tag}] お手本の骨格が重ならない")
+    shot(page, shots_dir, f"{tag}-i-ref-over")
+    page.click("[data-seg=mode] button[data-v=side]")
+    if page.locator("[data-stage] figure img").count() != 2:
+        errors.append(f"[{tag}] 並べるで2枚にならない")
+    shot(page, shots_dir, f"{tag}-i-ref-side")
+    page.click("[data-seg=mode] button[data-v=over]")
+    with page.expect_download(timeout=15000):
+        page.click("[data-export]")
+    # 画像を運べる送信（POST / PUT / PATCH）が1つも無い。GET はコマのサムネイル・判定・同梱の部品だけ
+    posts = [(m, u) for m, u in net if m != "GET"]
+    if posts:
+        errors.append(f"[{tag}] 端末の動画を使うあいだに送信があった: {(posts or bad)[:4]}")
+    # ダーク: チップと切り替えの字と縁のコントラスト（字 4.5・部品 3.0）
+    page.evaluate("document.documentElement.dataset.theme = 'dark'")
+    for c in page.evaluate(CHIP_CONTRAST_JS):
+        if c["text"] < 4.5 or c["edge"] < 3.0:
+            errors.append(f"[{tag}] ダークのチップのコントラストが足りない: {c}")
+    shot(page, shots_dir, f"{tag}-i-dark")
+    page.evaluate("delete document.documentElement.dataset.theme")
+    # 設定に端末の動画の数と入口
+    goto(page, root, "/settings", "[data-refs-entry]")
+    page.wait_for_function("document.querySelector('[data-refs-entry]').textContent.includes('1本')", timeout=5000)
+    ctx.close()
+    # 動きを減らす設定: 自動で流さない
+    ctx = browser.new_context(viewport={"width": 320, "height": 700}, service_workers="block", reduced_motion="reduce")
+    ctx.add_init_script(f"try {{ localStorage.setItem('golf.player', '{int(pid)}'); }} catch (e) {{}}")
+    page = ctx.new_page()
+    page.on("pageerror", lambda e: errors.append(f"[{tag}-rm] JS エラー: {e}"))
+    goto(page, root, f"/session/{sid}/ideal/{item}", "[data-idps]")
+    page.click("[data-seg=target] button[data-v=best]")
+    page.wait_for_selector("[data-seg=mode]")
+    page.click("[data-seg=mode] button[data-v=play]")
+    page.wait_for_selector("[data-reduced]")
+    before = page.get_attribute("[data-idps] [aria-pressed=true]", "data-p")
+    page.click("[data-play]")
+    page.wait_for_timeout(3500)
+    after = page.get_attribute("[data-idps] [aria-pressed=true]", "data-p")
+    if page.get_attribute("[data-play]", "aria-pressed") == "true" or after != "P3" or before != "P2":
+        errors.append(f"[{tag}] 動きを減らす設定で自動で流れた（{before} → {after}）")
+    no_overflow(page, "ideal-320", "理想と比べる", errors)
+    targets(page, "ideal-320", "理想と比べる", errors)
+    shot(page, shots_dir, f"{tag}-i-320")
+    ctx.close()
+
+
 def main() -> None:
     shots_dir = os.environ.get("SHOTS_DIR") or tempfile.mkdtemp(prefix="ui-")
     os.makedirs(shots_dir, exist_ok=True)
@@ -1862,6 +2080,7 @@ def main() -> None:
         check_vision_off(browser, sv.root, sv.base, me["id"], shots_dir, errors)
         check_narrative(browser, shots_dir, errors)
         check_vision_on(browser, shots_dir, errors)
+        check_ideal(browser, sv.root, sv.base, shots_dir, errors)
         browser.close()
     print("スクリーンショット:", shots_dir)
     if errors:

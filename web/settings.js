@@ -3,7 +3,7 @@
   設定（docs/DESIGN_v2.md §10 S）。利き手・距離の単位・テーマ・サーバーの状態・このアプリについて。
   - 利き手と距離の単位はサーバーの選手に持つ（端末をまたいで同じにする）。テーマは端末ごと（localStorage）。
   - 優先（狙いの精度／飛距離）は、動画のチェックの課題の選び方に効く（飛距離なら飛ぶ力の項目を候補の先頭へ。§4.4）。
-  - 段3以降の設定（比べる相手の既定・端末の動画）は、その機能が入ってから足す（効かない設定を並べない）。
+  - 端末の動画（理想と比べるのお手本。段3）: 何本あるかと、一覧・消す・入れる画面（#/refs）への入口。動画は端末の外へ出さない。
 */
 (() => {
   const { $, esc, lab, S, LS, api } = App;
@@ -40,6 +40,7 @@
         ${seg("theme", "表示", [["auto", "自動"], ["light", "ライト"], ["dark", "ダーク"]], themeNow())}
         <div data-err></div>
       </section>
+      <ul class="navlist block" data-refs-entry>${App.navItem("#/refs", "端末の動画", "理想と比べるお手本（この端末の中だけ）")}</ul>
       ${problems(h)}
       <section class="block"><h2>このアプリについて</h2><div class="card">
         <p>画面の版: ${esc(App.APP_VERSION)}${h ? `・計算の版: ${esc(h.physics || "")}${h.commit ? `・${esc(String(h.commit).slice(0, 7))}` : ""}` : ""}</p>
@@ -52,6 +53,10 @@
           <p>保存先: ${h.db_persistent === false ? `<span class="chip warn">△ 一時的</span> 再起動すると入れた記録が消えます` : `<span class="chip good">✓ 残る</span>`}</p>
           <p>スクショの読み取り: ${h.anthropic_key ? `<span class="chip good">✓ 使える</span>` : `<span class="chip none">― 使えない</span>（表の貼り付けと CSV は使えます）`}</p>
           <p>分析のサービス: ${h.analysis === "up" ? `<span class="chip good">✓ 動いている</span>` : h.analysis === "down" ? `<span class="chip warn">△ 止まっている</span>（解説と判定は出せません）` : `<span class="chip none">― 分からない</span>`}</p>` : `<p class="sub">サーバーに届きません。</p>`}</div></details></div></section>`;
+    if (typeof Ideal !== "undefined") Ideal.refsAll().then((rs) => {
+      const sm = $("[data-refs-entry] small", el);
+      if (sm) sm.innerHTML = `この端末の中だけ・${lab("count", rs.length + "本")}（${lab("count", Ideal.MAX_REFS + "本")}まで）`;
+    }).catch(() => {});
     // カタログの版と、人がガイドと突き合わせていない項目の数（§5.2: この札は層2と設定にだけ出す）
     if (window.Video) Video.catalog().then((c) => {
       const n = (c.items || []).length, un = (c.items || []).filter((x) => !x.checked_by).length;
