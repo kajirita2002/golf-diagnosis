@@ -21,6 +21,7 @@ from typing import Any
 
 from .. import config
 from . import by_id, fill, items, stamp, version
+from .budget import calibrated_items
 
 # MediaPipe Pose の33点のうち使うもの（体の左右＝解剖学の左右）
 LM = {
@@ -842,7 +843,8 @@ def _measure_item(ctx: Ctx, it: dict, cam: dict, scale: dict) -> dict:
             if gap <= ctx.pos_err_px(spec["p"]):
                 raise Invalid("combo", need.get("why", ""))
         fault = _fault_for(it, res, c.get("extra") or {}) if res.startswith("out") else None
-    basis = TAP_BASIS if ctx.used_tap else POSE_BASIS
+    # 誤差の予算を実測して人が budget.json に書いた項目だけ「目安」を外す（段5）
+    basis = TAP_BASIS if ctx.used_tap else ("measured" if it["id"] in calibrated_items() else POSE_BASIS)
     return {"res": res, "value": value, "basis": basis, "fault": fault}
 
 

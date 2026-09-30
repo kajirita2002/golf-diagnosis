@@ -22,7 +22,10 @@ COPY web/ web/
 COPY --from=build /out/server /app/server
 COPY deploy/start.sh /app/start.sh
 # /app/data は DB_PATH が無いときの一時的な保存先（書けないと起動で落ちて再起動を繰り返した）
-RUN chmod +x /app/start.sh && useradd -r -u 10001 app && mkdir -p /app/data && chown app /app/data
+# 配るファイルは誰でも読めるようにする。取ってきた手元の権限（0640）のまま入ると、app の利用者が読めず
+# MediaPipe の WASM が 403 になった（体の点が取れない。ローカルの docker build で見つけた）
+RUN chmod +x /app/start.sh && chmod -R a+rX /app/web /app/analysis \
+ && useradd -r -u 10001 app && mkdir -p /app/data && chown app /app/data
 USER app
 ENV WEB_DIR=/app/web ANALYSIS_URL=http://127.0.0.1:8001 PORT=8080 DEFAULT_DB_PATH=/app/data/golf.db
 EXPOSE 8080

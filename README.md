@@ -3,14 +3,20 @@
 TrackMan × 動画 × 個人履歴から「なぜその球になったか」を特定し、**実験で確かめる**ゴルフ診断エンジン。
 設計は [`docs/DESIGN.md`](docs/DESIGN.md)・[`docs/DESIGN_coaching.md`](docs/DESIGN_coaching.md)・[`docs/DESIGN_v2.md`](docs/DESIGN_v2.md)（いまの導線とデザインシステム）。
 
-いまは **Phase 0**（TrackMan の CSV だけ）。動画の解析はまだ入っていない。
+いまは **v2**（`docs/DESIGN_v2.md` の段1〜段4＋段5の一部）。TrackMan（CSV・スクショ）に加えて、
+スマホの動画から PGA スイングガイドのチェックポイントを見る（体の点はブラウザの中で取り、動画はサーバーに送らない）。
+
+- 最初に見えるのは短い言葉だけ（数字・角度・専門用語なし）。根拠は「なぜそう言える？」で開いたときだけ。
+- 姿勢推定で測った項目は、誤差の予算を実測するまで「目安」の札が付く（段5。`checkpoints/budget.py`）。
 
 ## 構成
 
 ```
 api/        Go の API（取り込み・保存・1球ごとの物理分解）
 analysis/   Python の分析サービス（Good 判定・原因の群・ばらつき・前回との比較・実験の評価）
+            checkpoints/ … 動画のチェックポイント（catalog.json・測る・判定・理想の線・見た目・誤差の予算・カタログの直し）
 web/        画面（素の HTML/CSS/JS。殻 index.html・tokens.css・app.js と画面ごとの JS。API が / で配る。docs/DESIGN_v2.md §14）
+web/vendor/ 同梱した MediaPipe（WASM・姿勢のモデル）と mp4box（外部 CDN を使わない。約18MB。web/vendor/README.md）
 testdata/   ダミーの CSV と、実データ（real/。本人の練習・数値だけ）
 scripts/    e2e.py（2つのサービスを立てて通しで確かめる）・ui_check.py（画面をブラウザで操作）
 docs/       設計
@@ -87,6 +93,10 @@ docker build -t golf-diagnosis .
 docker run -p 8080:8080 -e APP_PASSWORD=... -e DB_PATH=postgres://... -e ANTHROPIC_API_KEY=... golf-diagnosis
 ```
 
+- 起動したら `/healthz` が `"status":"ready"` を返す。`web/vendor/`（WASM・モデル）と `analysis/golf_analysis/checkpoints/`（カタログ・線画）は
+  イメージに入る（`.dockerignore` で外していない）。
+- 動画の姿勢推定は利用者のブラウザで動くので、サーバーのメモリには乗らない（無料プランの 512MB に収まる。実測は `docs/DESIGN_v2.md` 段5の実装メモ）。
+
 ## API
 
 | メソッド | パス | 中身 |
@@ -105,6 +115,14 @@ docker run -p 8080:8080 -e APP_PASSWORD=... -e DB_PATH=postgres://... -e ANTHROP
 | GET | `/v1/trackman/report-link?url=` | TrackMan のレポートを10項目・Club data で開くリンク |
 | POST | `/v1/screenshot` | スクショ（multipart の `image`）の表を読んで検算する（取り込みはしない） |
 | POST | `/v1/screenshot/verify` | 直した表（TSV）をもう一度検算する |
+| GET | `/v1/checkpoints` | チェックポイントのカタログ |
+| POST | `/v1/sessions/{id}/swings` | 動画のスイング（体の点・タップ・サムネイル。動画そのものは受けない） |
+| PUT | `/v1/swings/{id}/frames` / `/v1/swings/{id}/taps` | P のコマの直し・クラブのタップ |
+| POST | `/v1/swings/checks` | チェック（判定・課題・見た目の評価） |
+| GET | `/v1/sessions/{id}/checks` / `/v1/swings/{id}/ideal` | チェック一覧・理想との比較の線 |
+| POST | `/v1/players/{id}/plans` | プラン（`kind: motion` で動きのプラン） |
+| POST | `/v1/focus-tests` / GET `/v1/players/{id}/focus-tests` | 10球テスト・経過 |
+| GET | `/v1/checks/compare` / POST `/v1/players/{id}/checkups` | 2日の比べ・TrackMan の再確認 |
 
 ## テスト
 
@@ -117,6 +135,17 @@ cd analysis && uv run pytest -q
 python3 scripts/e2e.py        # 2つのサービスを本当に立てて通しで確かめる
 python3 scripts/ui_check.py   # 画面をブラウザで操作（Playwright。320/360/390px と PC・横溢れ・44px・コントラスト・JSエラー）
 ```
+
+### 較正とカタログの直し（段5）
+
+```sh
+cd analysis
+uv run python -m golf_analysis.checkpoints.review        # カタログの残り（未確認・要確認・ページが節の範囲のまま）
+uv run python -m golf_analysis.checkpoints.review --mark iron.p1.dtl.hands --by 名前 --page 12
+uv run python -m golf_analysis.checkpoints.budget run_a.json run_b.json [--taps taps.json]   # 同じ動画を2回処理した差
+```
+
+`budget` は「目安」を外す候補を出すだけ。外すのは人が `checkpoints/budget.json` に書いた項目だけ（`docs/DESIGN_v2.md` §15 段5）。
 
 ## 約束
 

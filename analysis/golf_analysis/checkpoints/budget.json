@@ -1,0 +1,4 @@
+{
+ "about": "誤差の予算を実測して「目安」を外すと人が決めた項目（docs/DESIGN_v2.md §15 段5）。1件ずつ {id, decided, by, evidence} を足す。budget.py の summarize の candidate は候補で、ここに書くまで札は外れない。",
+ "calibrated": []
+}
