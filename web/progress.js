@@ -35,6 +35,59 @@ const Progress = (() => {
     return `<figure class="fig" data-t="progfig">${s}</svg></figure>`;
   }
 
+  // 十球テストの「◯/10」の推移（§8.5）。8 の線を引く。条件（向き・版）が違う日は線でつながない。合計は描かない
+  function trendSvg(tests, title) {
+    if (!tests.length) return `<p class="sub">まだ十球テストがありません。</p>`;
+    const W = 360, H = 180, L = 36, R = 12, Tp = 12, B = 34;
+    const n = tests.length;
+    const x = (i) => (n === 1 ? (L + W - R) / 2 : L + (i * (W - L - R)) / (n - 1));
+    const y = (v) => Tp + ((10 - v) * (H - Tp - B)) / 10;
+    let s = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" role="img"><title>${esc(title)}</title><desc>十球テストで範囲の中だった回数を日ごとに打った図。点線が合格の線（八）。塗った点が合格、中抜きがまだ、四角が判定できなかった日</desc>`;
+    s += `<line class="g-axis" x1="${L}" y1="${H - B}" x2="${W - R}" y2="${H - B}"/><line class="g-axis" x1="${L}" y1="${Tp}" x2="${L}" y2="${H - B}"/>`;
+    for (const v of [0, 8, 10]) s += `<text class="g-sub t11" x="${L - 4}" y="${y(v) + 4}" text-anchor="end">${v}</text>`;
+    s += `<line class="g-pass" data-t="passline" x1="${L}" y1="${y(8)}" x2="${W - R}" y2="${y(8)}" style="stroke:var(--good);stroke-dasharray:4 4"/>`;
+    for (let i = 1; i < n; i++) {
+      const a = tests[i - 1], b = tests[i];
+      if (a.view === b.view && a.catalog_version === b.catalog_version && a.passed !== null && b.passed !== null) s += `<line class="g-flight g-good" x1="${x(i - 1)}" y1="${y(a.in_range)}" x2="${x(i)}" y2="${y(b.in_range)}"/>`;
+    }
+    tests.forEach((t, i) => {
+      s += `<text class="g-sub t11" x="${x(i)}" y="${H - B + 16}" text-anchor="middle">${esc((t.date || "").slice(5))}</text>`;
+      if (t.passed === null) s += `<rect class="g-miss hollow" data-t="tunk" x="${x(i) - 4}" y="${y(t.in_range) - 4}" width="8" height="8"/>`;
+      else s += `<circle class="${t.passed ? "g-good" : "g-miss hollow"}" data-t="${t.passed ? "tpass" : "tnot"}" cx="${x(i)}" cy="${y(t.in_range)}" r="5"/>`;
+    });
+    return `<figure class="fig trend8" data-t="trend10">${s}</svg></figure>`;
+  }
+  const TW = (t) => (t.passed === true ? "合格" : t.passed === false ? "まだ" : "判定できない");
+  function trendTable(tests) {
+    return `<div class="scroll"><table data-t="trend10tbl"><tr><th class="l">日</th><th>範囲の中</th><th class="l">結果</th><th class="l">撮影</th></tr>${tests.map((t) =>
+      `<tr><td class="l">${esc(t.date || "")}</td><td>${t.in_range}/${t.judged}</td><td class="l">${TW(t)}</td><td class="l">${t.block === "baseline" ? "いつも通り" : "練習の最後"}・${t.view === "fo" ? "正面" : "後ろ"}</td></tr>`).join("")}</table></div>
+      <p class="caption">分母は判定できたスイングの数です。八回以上で合格（ガイドの練習の合格ラインで、確率ではありません）。向きやカタログの版が違う日は線でつなぎません。</p>`;
+  }
+
+  async function motionPlanPart(box, p, r) {
+    const m = r.body.motion || {}, tests = r.body.tests || [];
+    box.innerHTML = `<article class="card" data-t="prog" data-kind="motion"><p class="label">いまのプラン <span class="chip brand">進行中</span> <span class="chip none">動き</span></p><h3>${esc(Practice.planTitle(p))}</h3>
+      <p data-t="progplain"><b>${esc(m.head || "")}</b> ${esc(m.text || "")}</p><p class="sub">${esc(m.next_text || "")}</p>
+      <p class="sub" data-t="progruns">${tests.length ? `十球テスト ${lab("count", tests.length + "回")}・合格 ${lab("count", tests.filter((t) => t.passed === true).length + "回")}` : "まだ十球テストがありません。練習の最後の十球を撮って数えると、ここに出ます。"}</p>
+      <button class="textbtn" data-t="progwhy">推移を見る</button></article>`;
+    box.querySelector("[data-t=progwhy]").addEventListener("click", () => {
+      App.openSheet({ title: "十球テストの推移", label: "progwhy", size: "full", html: trendSvg(tests, "十球テストの推移") + trendTable(tests) });
+    });
+  }
+
+  // 課題ごとの十球テストの推移（プランの外のテストも含めて、項目ごとに1枚）
+  async function focusPart(box) {
+    const r = await App.request("GET", `/v1/players/${S.player.id}/focus-tests`).catch(() => ({ ok: false }));
+    if (!r.ok || !(r.body.tests || []).length) { box.innerHTML = ""; return; }
+    const by = {};
+    for (const t of r.body.tests) (by[t.item_id] = by[t.item_id] || []).push(t);
+    let cat = null;
+    try { cat = await Video.catalog(); } catch { /* 名前が無ければ項目の id のまま */ }
+    const name = (id) => { const it = cat && (cat.items || []).find((x) => x.id === id); return it ? it.title : id; };
+    box.innerHTML = `<h2>十球テストの推移</h2>` + Object.entries(by).map(([id, ts]) => `<article class="card block" data-t="focusitem"><h3>${esc(name(id))}</h3>
+      ${trendSvg(ts, name(id) + "の十球テスト")}<details class="folded"><summary>数字を見る</summary>${trendTable(ts)}</details></article>`).join("");
+  }
+
   // 練習の回数の1行（0回なら数字を出さずに、何をすれば出るかを書く）
   function runsLine(x) {
     if (!x || !x.runs.length) return `<p class="sub" data-t="progruns">まだ練習していません。練習の結果を入れると、ここに変化が出ます。</p>`;
@@ -50,6 +103,7 @@ const Progress = (() => {
     const mine = (rows || []).find((x) => x.plan && x.plan.id === p.id);
     const r = await App.request("GET", `/v1/plans/${p.id}/progress`).catch(() => ({ ok: false, status: 0 }));
     if (!r.ok) { box.innerHTML = App.errorHtml({ what: "進み具合を読めませんでした", next: r.status === 0 ? "電波のあるところで開き直してください。" : ((r.body && r.body.error) || "") }); return; }
+    if (r.body.plan && r.body.plan.kind === "motion") return motionPlanPart(box, p, r);
     const pl = r.body.plan, runs = r.body.runs || [];
     const [key, label] = VAL[pl.goal] || ["mean", "平均"];
     const latest = r.body.latest && r.body.latest.progress;
@@ -114,7 +168,7 @@ const Progress = (() => {
       return;
     }
     if (tab === "plans") {
-      body.innerHTML = `<section data-part="plan"></section><section class="block"><h2>これまでのプラン</h2><div data-part="rec"></div></section>`;
+      body.innerHTML = `<section data-part="plan"></section><section class="block" data-part="focus"></section><section class="block"><h2>これまでのプラン</h2><div data-part="rec"></div></section>`;
       // 読み込みの段（1秒で骨組み・3秒で文）は、あとから埋まる部分にもかける
       const stop = App.loading($("[data-part=plan]", body));
       const stop2 = App.loading($("[data-part=rec]", body));
@@ -124,6 +178,7 @@ const Progress = (() => {
       if (!alive()) return;
       stop2();
       recordPart($("[data-part=rec]", body), got);
+      await focusPart($("[data-part=focus]", body)).catch(() => {});
       return;
     }
     const stop = App.loading(body);
@@ -164,6 +219,50 @@ const Progress = (() => {
     return h || `<p class="sub">共通のクラブがありません。</p>`;
   }
 
+  // TrackMan の2日の再確認（§8.4）: 言葉と言える範囲だけを最初に出す。数字と球数の見積もりは「数字を見る」
+  const VT = { better: "good", worse: "bad", same: "none", unknown: "warn" };
+  async function recheckPart(box, a, b) {
+    box.innerHTML = `<p class="loading-text">再確認しています…</p>`;
+    const key = `golf.checkup.${a}.${b}`;
+    let c = null;
+    try {
+      const id = App.LS.get(key);
+      if (id) c = await api("GET", `/v1/checkups/${id}`).catch(() => null);
+      if (!c) {
+        const plan = Practice.plan();
+        c = await api("POST", `/v1/players/${S.player.id}/checkups`, { baseline_session_id: a, recheck_session_id: b, plan_id: plan && plan.kind !== "motion" ? plan.id : 0 });
+        App.LS.set(key, c.id);
+      }
+    } catch (e) { box.innerHTML = App.errOf(e, { what: "再確認できませんでした" }); return; }
+    const res = (c && c.result) || {};
+    const rows = res.results || [];
+    if (!rows.length) { box.innerHTML = `<h2>前の日と比べた再確認</h2><p class="sub">両方の日に同じクラブの球がありません。</p>`; return; }
+    box.innerHTML = `<h2>前の日と比べた再確認</h2><section class="card" data-t="checkup"><ul class="plainlist">${rows.map((x) =>
+      `<li data-verdict="${esc(x.verdict || x.state || "")}"><b>${esc(x.name)}</b> <span class="chip ${VT[x.verdict] || "brand"}">${esc(x.word)}</span><br><span class="sub">${esc(x.text)}</span></li>`).join("")}</ul>
+      ${(res.notes || []).map((n) => `<p class="note">${esc(n)}</p>`).join("")}
+      <details class="folded" data-t="checkupnums"><summary>数字を見る</summary><ul class="parts">${rows.map((x) => `<li>${esc(LABEL[x.metric] || x.metric)}（${esc(App.clubJa(x.club))}）: ${x.source === "plan" ? "プランの判定をそのまま出しています" :
+        `球 ${x.n ? x.n.join("・") : "—"}${x.need_n ? `・「良くなった」を見分けるには1日 約${x.need_n.better}球、「変わらない」と言うには約${x.need_n.same}球` : ""}${x.diff != null ? `・差 ${fmt(x.metric, x.diff, true)}` : ""}`}</li>`).join("")}</ul>
+      <p class="caption">「変わらない」は、差があっても意味のある大きさより小さいと言える球数を打てたときだけ言います。項目は最初に作った時点で固定しています。</p></details></section>`;
+  }
+
+  // 別の日の動画の比較（§8.5）: 同じ向き・同じカタログの版のときだけ
+  async function vidPart(box, a, b) {
+    const r = await App.request("GET", `/v1/checks/compare?a=${a}&b=${b}`).catch(() => ({ ok: false }));
+    if (!r.ok) { box.innerHTML = ""; return; }
+    const c = r.body;
+    if (!c.comparable) { box.innerHTML = c.reason === "no_video" ? "" : `<h2>動画</h2><p class="sub" data-t="vidreason">${esc(c.text)}</p>`; return; }
+    let cat = null;
+    try { cat = await Video.catalog(); } catch { /* id のまま */ }
+    const name = (id) => { const it = cat && (cat.items || []).find((x) => x.id === id); return it ? it.title : id; };
+    // 最初に出すのは、どちらかの日に範囲の外が多かった項目だけ。ほかは畳む（長い一覧で読ませない）
+    const out = (x) => x.a.out_range > x.a.in_range || x.b.out_range > x.b.in_range;
+    const li = (x) => `<li><b>${esc(name(x.item_id))}</b><br><span class="sub">${esc(x.label)}</span></li>`;
+    const main = (c.items || []).filter(out), rest = (c.items || []).filter((x) => !out(x));
+    box.innerHTML = `<h2>動画</h2><section class="card" data-t="vidcmp">${main.length ? `<ul class="plainlist">${main.map(li).join("")}</ul>` : `<p class="sub">どちらの日も、範囲の外が多い項目はありません。</p>`}
+      ${rest.length ? `<details class="folded"><summary>どちらの日も範囲の中が多い項目（${lab("count", rest.length + "件")}）</summary><ul class="plainlist">${rest.map(li).join("")}</ul></details>` : ""}
+      <p class="caption">十球テストの合格・不合格のほかに、確率や「直った」は言いません。</p></section>`;
+  }
+
   async function renderCompare({ el, query, alive }) {
     el.innerHTML = `<div class="pagehead">${App.backBtn("#/progress?tab=records", "記録ごとへ戻る")}<h1>2日を比べる</h1></div><div data-body></div>`;
     const body = $("[data-body]", el);
@@ -182,8 +281,10 @@ const Progress = (() => {
       if (a.value === b.value) { $("[data-err]", body).innerHTML = `<p class="fielderr">違う日を選んでください</p>`; return; }
       try {
         const r = await api("GET", `/v1/sessions/${b.value}/compare?with=${a.value}`);
-        $("[data-out]", body).innerHTML = renderCompareOut(r);
+        $("[data-out]", body).innerHTML = renderCompareOut(r) + `<section class="block" data-t="recheck"></section><section class="block" data-t="vidcmp"></section>`;
         history.replaceState(null, "", `#/progress/compare?a=${a.value}&b=${b.value}`);
+        recheckPart($("[data-t=recheck]", body), Number(a.value), Number(b.value));
+        vidPart($("[data-t=vidcmp]", body), Number(a.value), Number(b.value));
       } catch (e) { $("[data-err]", body).innerHTML = App.errOf(e, { what: "比べられませんでした" }); }
     });
     if (query.a && query.b) $("[data-go]", body).click();

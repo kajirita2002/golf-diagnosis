@@ -276,6 +276,47 @@ CREATE TABLE IF NOT EXISTS {s}swing_vision (
 	answers_json     TEXT NOT NULL DEFAULT '{}',
 	created_at       TEXT NOT NULL
 );
+-- 別の日の再確認（docs/DESIGN_v2.md §8・§13.2・段4）。plans に列は足さず、動きのプランは motion_plans に行を持つ。
+CREATE TABLE IF NOT EXISTS {s}motion_plans (
+	plan_id             INTEGER PRIMARY KEY REFERENCES {s}plans(id),
+	cp_item_id          TEXT NOT NULL,
+	cp_catalog_version  TEXT NOT NULL,
+	view                TEXT NOT NULL,
+	checkpoint          TEXT NOT NULL,
+	created_at          TEXT NOT NULL
+);
+-- 10球テスト。passed は判定できたスイングが8に満たなければ NULL。result_json は数えた結果（丸・次の手）
+CREATE TABLE IF NOT EXISTS {s}focus_tests (
+	id                {{ID}},
+	player_id         INTEGER NOT NULL REFERENCES {s}players(id),
+	plan_id           INTEGER REFERENCES {s}plans(id),
+	session_id        INTEGER REFERENCES {s}sessions(id),
+	item_id           TEXT NOT NULL,
+	catalog_version   TEXT NOT NULL,
+	view              TEXT NOT NULL DEFAULT '',
+	block             TEXT NOT NULL DEFAULT 'test',
+	swing_ids_json    TEXT NOT NULL,
+	self_rating_json  TEXT NOT NULL DEFAULT '{}',
+	in_range          INTEGER NOT NULL,
+	judged            INTEGER NOT NULL,
+	passed            INTEGER,
+	result_json       TEXT NOT NULL DEFAULT '{}',
+	created_at        TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS focus_tests_player ON {s}focus_tests(player_id, item_id);
+-- TrackMan の2日の再確認。items_json は作った時点で固定（あとから増やさない）
+CREATE TABLE IF NOT EXISTS {s}checkups (
+	id                   {{ID}},
+	player_id            INTEGER NOT NULL REFERENCES {s}players(id),
+	baseline_session_id  INTEGER NOT NULL REFERENCES {s}sessions(id),
+	recheck_session_id   INTEGER NOT NULL REFERENCES {s}sessions(id),
+	plan_id              INTEGER REFERENCES {s}plans(id),
+	scope_json           TEXT NOT NULL,
+	items_json           TEXT NOT NULL,
+	result_json          TEXT,
+	result_key           TEXT,
+	created_at           TEXT NOT NULL
+);
 -- 1日（UTC）・1種類ごとの使った量。上限（LLM_DAILY_LIMIT_*）はここの calls で数える。
 CREATE TABLE IF NOT EXISTS {s}llm_usage (
 	day            TEXT NOT NULL,

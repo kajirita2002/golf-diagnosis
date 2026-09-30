@@ -14,7 +14,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-from . import checkpoints, coaching, config, drills, gist, narrative, video
+from . import checkpoints, checkup, coaching, config, drills, focus_test, gist, narrative, video
 from .checkpoints import judge as cp_judge
 from .checkpoints import measure as cp_measure
 from .checkpoints import vision as cp_vision
@@ -384,6 +384,49 @@ def plan_evaluate(body: PlanEvaluateIn) -> dict:
 def plan_progress(body: PlanProgressIn) -> dict:
     """推移と状態と次の手（§8.6）。"""
     return coaching.progress(body.plan, body.runs, body.history, body.continue_after_stop, _hand(body.handedness))
+
+
+class FocusTestIn(BaseModel):
+    """10球テスト（§8.2）。swings はスイングごとの {state, fault, basis}（10本まで）。"""
+
+    swings: list[dict[str, Any]] = Field(default_factory=list)
+    target_fault: str | None = None
+    self_rating: dict[str, Any] | None = None
+
+
+@app.post("/v1/focus-test/judge")
+def focus_test_judge(body: FocusTestIn) -> dict:
+    """10球テストを数える（Claude を呼ばない・保存しない）。"""
+    try:
+        return focus_test.judge(body.swings, body.target_fault, body.self_rating)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+class MotionProgressIn(BaseModel):
+    tests: list[dict[str, Any]] = Field(default_factory=list)
+
+
+@app.post("/v1/plan/motion-progress")
+def plan_motion_progress(body: MotionProgressIn) -> dict:
+    """動きのプランの状態と次の手（§8.3）。"""
+    return coaching.motion_progress(body.tests)
+
+
+class CheckupIn(BaseModel):
+    """TrackMan の2日の再確認（§8.4）。a = 基準の日、b = 再確認の日。items が null なら既定で作って返す。"""
+
+    a: list[dict[str, Any]] = Field(default_factory=list)
+    b: list[dict[str, Any]] = Field(default_factory=list)
+    items: list[dict[str, Any]] | None = None
+    plan: dict[str, Any] | None = None
+    plan_eval: dict[str, Any] | None = None
+    baseline_is_diagnosis: bool = False
+
+
+@app.post("/v1/checkup")
+def checkup_route(body: CheckupIn) -> dict:
+    return checkup.checkup(body.a, body.b, body.items, body.plan, body.plan_eval, body.baseline_is_diagnosis)
 
 
 @app.post("/v1/experiment")

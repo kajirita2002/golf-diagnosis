@@ -327,6 +327,11 @@ func (c *Client) Drills(ctx context.Context, hand model.Handedness) (json.RawMes
 	return c.do(req)
 }
 
+// Call は分析サービスの口を1つ呼ぶ（段4 の10球テスト・動きのプラン・2日の再確認。形は分析サービスが決める）。
+func (c *Client) Call(ctx context.Context, path string, body any) (json.RawMessage, error) {
+	return c.post(ctx, path, body)
+}
+
 func (c *Client) post(ctx context.Context, path string, body any) (json.RawMessage, error) {
 	b, err := json.Marshal(body)
 	if err != nil {

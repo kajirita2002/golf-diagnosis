@@ -139,6 +139,7 @@ type homePlan struct {
 	TriggerSID int64           `json:"trigger_session_id,omitempty"`
 	Issue      string          `json:"issue"`             // 直す候補の id（要点の候補と突き合わせる）
 	Advance    string          `json:"advance,omitempty"` // 次に進む条件（定型文。数字入りなので画面は「なぜ？」の層で出す）
+	Kind       string          `json:"kind"`              // ball / motion（動きのプランは10球テストの状態を last.progress に入れる）
 }
 
 func (s *Server) home(w http.ResponseWriter, r *http.Request) {
@@ -277,6 +278,17 @@ func (s *Server) homePlan(ctx context.Context, p *model.Plan) (*homePlan, int64,
 	}
 	hp := &homePlan{ID: p.ID, Title: title, Cue: p.Cue, Club: p.Club, NextIndex: len(runs), Total: total, CreatedAt: p.CreatedAt,
 		Last: json.RawMessage("null"), TriggerSID: trig.SessionID, Issue: p.Issue, Advance: advance}
+	hp.Kind = p.Kind
+	if p.Motion != nil {
+		// 動きのプラン: 最後の10球テストの日と状態（分析サービスに届かなければ出さない）
+		if tests, err := s.Store.ListFocusTests(ctx, p.PlayerID, p.Motion.ItemID, p.ID); err == nil && len(tests) > 0 {
+			if prog, err := s.motionProgress(ctx, p); err == nil {
+				hp.Last, _ = json.Marshal(map[string]json.RawMessage{"plain": json.RawMessage("null"), "progress": prog})
+				hp.LastDate = tests[len(tests)-1].Date
+			}
+		}
+		return hp, trig.SessionID, trig.ScopeID, nil
+	}
 	for i := len(runs) - 1; i >= 0; i-- {
 		if string(runs[i].Evaluation) == "null" || len(runs[i].Evaluation) == 0 {
 			continue

@@ -22,6 +22,11 @@ const Practice = (() => {
   const T = { pid: null, data: null, offline: false, savedAt: null, drill: null, run: null, eval: null, sessPick: null };
   const plan = () => (T.data && T.data.plan) || null;
   const hand = () => (T.data && T.data.handedness === "L" ? "L" : "R");
+  // 動きのプラン（docs/DESIGN_v2.md §8.3）: ⑥は10球テスト、①と⑥で「撮る」
+  const isMotion = (p) => !!(p && p.kind === "motion");
+  const testBlock = (p) => (p && p.params && Number.isInteger(p.params.test_block) ? p.params.test_block : 6);
+  const blkName = (p, i, kind) => (isMotion(p) && i === testBlock(p) ? "10球テスト" : BLK[kind] || kind);
+  const films = (p, i) => isMotion(p) && (i === testBlock(p) || i === 1);
   const planTitle = (p) => (p.trigger && p.trigger.plain && p.trigger.plain.title) || (p.trigger && p.trigger.title) || p.issue;
 
   // 409 の existing_id などを読むために、状態の番号と本文を両方返す取り方（圏外は status 0）
@@ -178,11 +183,13 @@ const Practice = (() => {
     const total = st.counts.reduce((a, b) => a + b, 0);
     const blocks = tpl.map((b, i) => {
       const cls = st.done || i < st.idx ? "done" : i === st.idx ? "cur" : "";
-      const extra = b.kind === "intervention" ? `<span class="bcue">「${esc(p.cue)}」</span>` : b.kind === "drill" && T.drill ? `<span class="bcue sub">${esc(T.drill.title)}</span>` : "";
-      return `<li class="${cls} k-${esc(b.kind)}" data-i="${i}"><span class="bno">${no(i)}</span><span class="bk">${esc(BLK[b.kind] || b.kind)}</span><span class="bn">${st.counts[i]}球</span><span class="br sub">${rangeText(rg[i])}</span>${extra}</li>`;
+      let extra = b.kind === "intervention" ? `<span class="bcue">「${esc(p.cue)}」</span>` : b.kind === "drill" && T.drill ? `<span class="bcue sub">${esc(T.drill.title)}</span>` : "";
+      if (isMotion(p) && i === testBlock(p)) extra = `<span class="bcue" data-t="testcue">撮る・課題以外は意識しない</span>`;
+      else if (films(p, i)) extra += `<span class="bcue sub" data-t="film">撮る</span>`;
+      return `<li class="${cls} k-${esc(b.kind)}" data-i="${i}"><span class="bno">${no(i)}</span><span class="bk">${esc(blkName(p, i, b.kind))}</span><span class="bn">${st.counts[i]}球</span><span class="br sub">${rangeText(rg[i])}</span>${extra}</li>`;
     }).join("");
     const started = st.idx > 0 || st.done;
-    const primary = st.recorded || st.done ? `<a class="btn primary block" data-primary href="#/practice/result">練習の結果へ（取り込んで判定する）</a>`
+    const primary = st.recorded || st.done ? `<a class="btn primary block" data-primary href="#/practice/result">${isMotion(p) ? "練習の結果へ（動画で数える）" : "練習の結果へ（取り込んで判定する）"}</a>`
       : `<a class="btn primary block" data-primary href="#/practice/run"><span>${started ? "続きから" : "練習を始める"}（${lab("count", total + "球")}）</span></a>`;
     body.innerHTML = `${offlineNote()}
       <section data-t="head">
@@ -196,7 +203,8 @@ const Practice = (() => {
       <section class="block"><h2>組み方 <span class="caption">${esc(App.clubJa(p.club))}だけで ${total}球</span></h2>
         ${T.data.next_counts_reason === "more_shots" && !todayRun ? `<p class="sub" data-t="more">前回は球が足りなかったので、いつも通りと本番の球を増やしています。</p>` : ""}
         <ol class="tblocks" id="tBlocks">${blocks}</ol>
-        <p class="caption">球の番号は、このクラブで打った順です。打ち直したら練習中の画面で「1球足す」を押します（1球ごとには押しません）。</p></section>
+        <p class="caption">球の番号は、このクラブで打った順です。打ち直したら練習中の画面で「1球足す」を押します（1球ごとには押しません）。</p>
+        ${isMotion(p) ? `<p class="caption" data-t="motionnote">最後の十球を撮って、課題の場所が範囲に入った回を数えます。十回中八回で合格です（ガイドの練習の合格ラインで、確率ではありません）。</p>` : ""}</section>
       <div class="block">${primary}</div>
       <ul class="navlist block">${App.navItem("#/practice/result", "練習が終わったら", "記録を選ぶ・取り込む・判定する")}${App.navItem("#/progress", "経過", "これまでの練習の進み")}</ul>`;
     const fig = body.querySelector("[data-t=drillfig]");
@@ -255,14 +263,17 @@ const Practice = (() => {
       $("[data-t=dots]", root).innerHTML = tpl.map((_, i) => `<span class="${st.done || i < st.idx ? "done" : i === st.idx ? "cur" : ""}"></span>`).join("");
       const now = $("[data-t=now]", root), next = $("[data-t=next]", root);
       if (st.done) {
-        now.innerHTML = `<p class="kind">練習はここまで</p><p class="sub">球を取り込んで、ブロックの区切りを確かめます。</p>`;
-        next.textContent = "取り込んで確かめる";
+        now.innerHTML = isMotion(p) ? `<p class="kind">練習はここまで</p><p class="sub">撮った動画を入れて、十球テストを数えます。</p>`
+          : `<p class="kind">練習はここまで</p><p class="sub">球を取り込んで、ブロックの区切りを確かめます。</p>`;
+        next.textContent = isMotion(p) ? "動画で数える" : "取り込んで確かめる";
       } else {
-        const cue = b.kind === "intervention" ? `「${p.cue}」` : b.kind === "drill" && T.drill ? `ドリル中: 「${T.drill.cue_drill || T.drill.title}」` : b.kind === "baseline" ? "いつも通り（何も意識しない）" : "";
-        now.innerHTML = `<p class="caption">いま ${no(st.idx)}（${st.idx + 1} / ${tpl.length}）</p><p class="kind" data-t="kind">${esc(BLK[b.kind] || b.kind)}</p>
+        let cue = b.kind === "intervention" ? `「${p.cue}」` : b.kind === "drill" && T.drill ? `ドリル中: 「${T.drill.cue_drill || T.drill.title}」` : b.kind === "baseline" ? "いつも通り（何も意識しない）" : "";
+        if (isMotion(p) && st.idx === testBlock(p)) cue = "撮ります。課題以外は意識しません。当たり方も行方も問いません。打ち終えてから、できたと思った回数を一回だけ答えます。";
+        else if (films(p, st.idx)) cue += "（撮ります）";
+        now.innerHTML = `<p class="caption">いま ${no(st.idx)}（${st.idx + 1} / ${tpl.length}）</p><p class="kind" data-t="kind">${esc(blkName(p, st.idx, b.kind))}</p>
           <p class="count" data-t="count">${st.counts[st.idx]}球</p><p class="sub">${rangeText(rg[st.idx])}</p><p class="cueline">${esc(cue)}</p>`;
         const nx = tpl[st.idx + 1];
-        next.textContent = nx ? `次のブロックへ（${no(st.idx + 1)} ${BLK[nx.kind] || nx.kind}）` : "最後のブロックを打ち終えた";
+        next.textContent = nx ? `次のブロックへ（${no(st.idx + 1)} ${blkName(p, st.idx + 1, nx.kind)}）` : "最後のブロックを打ち終えた";
       }
       // 押せないボタンは aria-disabled にして、理由を1行で書く（disabled だけだと、なぜ押せないかが分からない。§11.4）
       const why = [];
@@ -321,6 +332,7 @@ const Practice = (() => {
       body.innerHTML = `${offlineNote()}<p class="sub">動いているプランはありません。</p><a class="btn primary block" data-primary href="#/practice">練習へ</a>`;
       return;
     }
+    if (isMotion(p)) { await renderMotionResult(body, p, alive); return; }
     body.innerHTML = `${offlineNote()}
       <p class="sub">${esc(planTitle(p))}</p>
       <div id="tJudge" class="block"></div>
@@ -599,8 +611,136 @@ const Practice = (() => {
     afterChange(body, await call("PATCH", `/v1/plans/${p.id}`, { status, close_reason: reason }));
   }
 
+
+  // ==== 動きのプランの練習の結果（10球テスト。docs/DESIGN_v2.md §8.2・§10 P2） ====
+  const FEEL = [["too_much", "やりすぎ気味"], ["too_little", "足りない気味"], ["just", "ちょうど"]];
+  const PASS_HEAD = (ps) => (ps === true ? ["合格", "good"] : ps === false ? ["まだ", "none"] : ["判定できません", "warn"]);
+  const MARK = { in_range: ["範囲の中", "in"], out_range: ["範囲の外", "out"], unknown: ["判定できない", "unk"] };
+
+  function selfHtml(st) {
+    const sr = st.self || {};
+    const c = Number.isInteger(sr.count) ? sr.count : null;
+    return `<section class="card block" data-t="self"><h2>打ち終えたら（動画を見る前に一回だけ）</h2>
+      <p class="label" id="selfc">できたと思った回数</p>
+      <div class="stepper" role="group" aria-labelledby="selfc"><button type="button" class="btn" data-self="-1" aria-label="一回減らす">−</button>
+        <output data-t="selfcount" aria-live="polite">${c == null ? "—" : lab("count", c + "回")}</output>
+        <button type="button" class="btn" data-self="1" aria-label="一回増やす">＋</button></div>
+      <fieldset style="border:0;padding:0;margin:var(--s3) 0 0"><legend class="label">感じ</legend>
+        ${FEEL.map(([k, w]) => `<label class="radio"><input type="radio" name="feel" value="${k}" ${sr.feel === k ? "checked" : ""}> <span>${w}</span></label>`).join("")}</fieldset>
+      <p class="caption">答えなくても数えられます。答えると、感覚と実際のずれが分かります。</p></section>`;
+  }
+
+  function ballsHtml(res) {
+    const marks = (res && res.marks) || [];
+    const cells = [];
+    for (let i = 0; i < 10; i++) {
+      const m = marks[i];
+      const [w, c] = m ? MARK[m.state] || MARK.unknown : ["撮っていない", "none"];
+      cells.push(`<li class="ball ${c}" data-mark="${c}"><span class="visually-hidden">${w}</span></li>`);
+    }
+    return `<ol class="tenballs" data-t="balls" aria-label="十回の結果">${cells.join("")}</ol>
+      <p class="caption" data-t="passline">塗った丸が範囲の中、×が範囲の外、点線は判定できなかった回。塗った丸が八つで合格です。</p>`;
+  }
+
+  function focusResultHtml(out) {
+    const t = out.test || {}, res = t.result || {};
+    const [head, tone] = PASS_HEAD(t.passed);
+    const prev = out.previous;
+    const pr = out.progress;
+    const th = out.thumbs || {};
+    const cmp = th.before && th.after ? `<div class="pair" data-t="beforeafter"><figure><img src="${esc(th.before)}" alt="前の同じコマ" loading="lazy"><figcaption class="caption">前 ${lab("p", th.p)}</figcaption></figure>
+      <figure><img src="${esc(th.after)}" alt="今日の範囲に入ったコマ" loading="lazy"><figcaption class="caption">今日 ${lab("p", th.p)}</figcaption></figure></div>` : "";
+    return `<section class="card block" data-focus-result="${t.passed === true ? "passed" : t.passed === false ? "not_yet" : "unknown"}">
+      <p class="status"><b data-t="fhead">${esc(head)}</b> <span class="chip ${tone}">${t.block === "baseline" ? "いつも通りの撮影" : "練習の最後の撮影"}</span>${res.basis_label ? ` <span class="chip none" data-t="visual">${esc(res.basis_label)}</span>` : ""}</p>
+      ${ballsHtml(res)}
+      <p class="t-headline" data-t="fnext">${esc(res.next_text || "")}</p>
+      ${prev ? `<p data-t="prev"><span class="label">前回</span> ${lab("date", App.dateJa(prev.date || "", false))} <span class="chip ${PASS_HEAD(prev.passed)[1]}">${esc(PASS_HEAD(prev.passed)[0])}</span></p>` : ""}
+      ${cmp}
+      ${pr ? `<div class="focuscard" data-t="mstate"><p style="margin:0"><b>${esc(pr.head || "")}</b> ${esc(pr.text || "")}</p><p class="sub" style="margin:var(--s1) 0 0">${esc(pr.next_text || "")}</p></div>` : ""}
+      <button type="button" class="textbtn" data-t="fwhy">${icon("info")}なぜそう言える？</button></section>`;
+  }
+
+  function openFocusWhy(out) {
+    const t = out.test || {}, res = t.result || {};
+    const rows = [`<li>${esc(res.label || "")}</li>`];
+    if (res.self_compare) rows.push(`<li>${esc(res.self_compare)}（一本ずつは突き合わせていません）</li>`);
+    if (res.need_more) rows.push(`<li>合格か決めるには、判定できたスイングがあと${res.need_more}本要ります。合格に要る数は下げません。</li>`);
+    if (res.same_side || res.opposite_side) rows.push(`<li>範囲の外の回のうち、前と同じ向き ${res.same_side}回・反対の向き ${res.opposite_side}回</li>`);
+    rows.push(`<li>${esc(res.why || "")}</li>`);
+    if (res.basis_label) rows.push(`<li>見た目の項目は AI が写真から選んだ答えで数えています。正しさはまだ測っていません。</li>`);
+    if (out.progress && out.progress.why) rows.push(`<li>${esc(out.progress.why)}</li>`);
+    rows.push(`<li>前と後の写真は、同じ向き・同じカタログの版のスイングだけを並べています。</li>`);
+    App.openSheet({ title: "なぜそう言える？", label: "focuswhy", size: "half", html: `<ul class="parts">${rows.join("")}</ul>` });
+  }
+
+  async function renderMotionResult(body, p, alive) {
+    const st = practice();
+    const m = p.motion || {};
+    body.innerHTML = `${offlineNote()}
+      <p class="sub">${esc(planTitle(p))}</p>
+      <div data-t="focusout"></div>
+      ${selfHtml(st)}
+      <section class="card block" data-t="count"><h2>動画で数える</h2>
+        <label class="field"><span>この練習の記録</span><select id="tFSess"></select></label>
+        <a class="btn block" data-t="addvideo" href="#/record">動画を入れる（${esc(m.view === "fo" ? "正面から" : "後ろから")}）</a>
+        <button type="button" class="btn primary block" data-primary data-t="counttest">十球テストを数える</button>
+        <button type="button" class="btn block" data-t="countbase">いつも通りの撮影として数える</button>
+        <div data-t="ferr"></div>
+        <p class="caption">いちばん新しい十本（同じ向き）を数えます。見た目でしか判断できない項目は、先にチェックの画面で見た目を評価してから数えます。</p></section>`;
+    const sel = $("#tFSess", body);
+    const ss = await App.sessions().catch(() => []);
+    if (!alive()) return;
+    const trig = p.trigger && p.trigger.session_id;
+    const usable = ss.filter((x) => x.id !== trig);
+    sel.innerHTML = usable.map((x) => `<option value="${x.id}">${esc(App.dateJa(x.date))}${x.location ? "・" + esc(x.location) : ""}</option>`).join("") || `<option value="">（記録がありません）</option>`;
+    const today = usable.find((x) => x.date === App.localDate());
+    if (today) sel.value = String(today.id);
+    const link = () => {
+      const x = usable.find((y) => String(y.id) === sel.value);
+      $("[data-t=addvideo]", body).href = x ? `#/video/${x.date}?session=${x.id}` : "#/record";
+    };
+    link();
+    sel.addEventListener("change", link);
+    const outBox = $("[data-t=focusout]", body);
+    const show = (out) => {
+      outBox.innerHTML = focusResultHtml(out);
+      $("[data-t=fwhy]", outBox).addEventListener("click", () => openFocusWhy(out));
+    };
+    // 今日もう数えていれば、その結果を最初から出す
+    const tests = (T.data && T.data.motion && T.data.motion.tests) || [];
+    const last = [...tests].reverse().find((x) => x.date === App.localDate());
+    if (last) { const r = await call("GET", `/v1/focus-tests/${last.id}`); if (alive() && r.ok) show(r.body); }
+    body.addEventListener("click", async (ev) => {
+      const b = ev.target.closest("button");
+      if (!b) return;
+      if (b.dataset.self) {
+        const cur = practice();
+        const c = Number.isInteger((cur.self || {}).count) ? cur.self.count : 5;
+        cur.self = { ...(cur.self || {}), count: Math.max(0, Math.min(10, c + Number(b.dataset.self))) };
+        savePractice(cur);
+        $("[data-t=selfcount]", body).innerHTML = lab("count", cur.self.count + "回");
+        return;
+      }
+      if (b.dataset.t !== "counttest" && b.dataset.t !== "countbase") return;
+      if (b.getAttribute("aria-disabled") === "true") return;
+      const err = $("[data-t=ferr]", body);
+      err.innerHTML = "";
+      if (!sel.value) { err.innerHTML = `<p class="fielderr">記録を選んでください（動画を入れた日の記録）</p>`; return; }
+      const cur = practice();
+      const feel = (body.querySelector("input[name=feel]:checked") || {}).value;
+      if (feel) { cur.self = { ...(cur.self || {}), feel }; savePractice(cur); }
+      b.setAttribute("aria-disabled", "true");
+      const r = await call("POST", "/v1/focus-tests", { plan_id: p.id, session_id: Number(sel.value), block: b.dataset.t === "countbase" ? "baseline" : "test", self_rating: cur.self || null });
+      b.removeAttribute("aria-disabled");
+      if (!alive()) return;
+      if (!r.ok) { err.innerHTML = App.errorHtml({ what: "数えられませんでした", next: errText(r) }); return; }
+      show(r.body);
+      outBox.scrollIntoView({ block: "start", behavior: "smooth" });
+    });
+  }
+
   App.route("/practice", renderOverview, { tab: "practice" });
   App.route("/practice/run", renderRunning, { tab: "practice", noTabbar: true });
   App.route("/practice/result", renderResult, { tab: "practice" });
-  return { load, plan: () => plan(), plainOf, planTitle, T };
+  return { load, plan: () => plan(), plainOf, planTitle, T, isMotion };
 })();

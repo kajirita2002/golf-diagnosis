@@ -63,6 +63,17 @@ type Plan struct {
 	CreatedAt     time.Time       `json:"created_at"`
 	ClosedAt      *time.Time      `json:"closed_at,omitempty"`
 	CloseReason   string          `json:"close_reason,omitempty"`
+	// Kind は ball（球のプラン）か motion（動きのプラン。motion_plans に行がある。docs/DESIGN_v2.md §8.3）
+	Kind   string      `json:"kind"`
+	Motion *MotionPlan `json:"motion,omitempty"`
+}
+
+// MotionPlan は動きのプランの固定部分（作った時点で固定。10球テストで取り出す向きと P）。
+type MotionPlan struct {
+	ItemID         string `json:"cp_item_id"`
+	CatalogVersion string `json:"cp_catalog_version"`
+	View           string `json:"view"`
+	Checkpoint     string `json:"checkpoint"`
 }
 
 // PlanRun は練習の日ごとの1回。1セッションに1つまで。

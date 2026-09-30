@@ -2073,10 +2073,121 @@ def check_ideal(browser, root: str, base: str, shots_dir: str, errors: list[str]
     ctx.close()
 
 
+def check_recheck(browser, shots_dir: str, errors: list[str]) -> None:
+    """段4 別の日の再確認: C-1 から動きのプラン → 練習の⑥が十球テスト → 結果の十個の丸・次の手 → 経過の推移 → 2日の再確認。"""
+    tag = "recheck"
+    today = datetime.date.today().isoformat()
+    item = "iron.p2.dtl.head_vs_hands"
+    with Services() as sv:
+        me = call("POST", f"{sv.base}/me")["player"]
+        s0 = call("POST", f"{sv.base}/sessions", {"player_id": me["id"], "date": "2026-09-20", "location": "練習場"})["id"]
+        seed_swings(sv.base, s0, 3)
+        import_csv(sv.base, s0, "trackman_dummy_yesterday.csv")
+        for w, h in ((390, 844), (320, 700)):
+            t2 = f"{tag}-{w}"
+            ctx, page = new_page(browser, w, h, errors, t2, me["id"])
+            # C-1: 範囲の外の課題から、動きのプランを始める（シートの中で作る）
+            goto(page, sv.root, f"/session/{s0}/check/{item}", "[data-title]")
+            if page.locator("[data-motion-plan]").count() != 1:
+                errors.append(f"[{t2}] 課題の項目に「この動きで練習を組む」が無い")
+                ctx.close()
+                continue
+            targets(page, t2, "項目1つ（動きのプラン）", errors)
+            page.click("[data-motion-plan]")
+            page.wait_for_selector("[data-sheet=motionplan].on")
+            shot(page, shots_dir, f"{t2}-1-sheet", full=False)
+            page.click("[data-mp=go]")
+            if w != 390:
+                page.wait_for_selector("[data-sheet=confirm].on")
+                page.click("[data-sheet=confirm] [data-ok]")
+            page.wait_for_selector("#tBlocks")
+            if "10球テスト" not in page.inner_text("#tBlocks") or page.locator("[data-t=film]").count() < 1:
+                errors.append(f"[{t2}] 練習の組み方に十球テストと撮る印が無い: {page.inner_text('#tBlocks')[:200]!r}")
+            no_overflow(page, t2, "練習（動きのプラン）", errors)
+            shot(page, shots_dir, f"{t2}-2-practice")
+            # 練習中: ⑥は十球テスト（撮る・課題以外は意識しない）
+            goto(page, sv.root, "/practice/run", "[data-t=next]")
+            for _ in range(6):
+                page.click("[data-t=next]")
+            if page.inner_text("[data-t=kind]") != "10球テスト" or "意識しません" not in page.inner_text("[data-t=now]"):
+                errors.append(f"[{t2}] 練習中の⑥が十球テストにならない: {page.inner_text('[data-t=now]')[:120]!r}")
+            targets(page, t2, "練習中（十球テスト）", errors)
+            shot(page, shots_dir, f"{t2}-3-run")
+            if w == 390:
+                s1 = call("POST", f"{sv.base}/sessions", {"player_id": me["id"], "date": today, "location": "練習場"})["id"]
+                seed_swings(sv.base, s1, 8, faults=())
+                seed_swings(sv.base, s1, 2)
+                import_csv(sv.base, s1, "trackman_dummy_session.csv")
+            # 練習の結果: 自己評価（打ち終えてから一回だけ）→ 数える → 十個の丸・次の手
+            goto(page, sv.root, "/practice/result", "[data-t=self]")
+            page.click("[data-self='1']")
+            page.click("[data-self='1']")
+            page.check("input[name=feel][value=too_little]")
+            page.click("[data-t=counttest]")
+            try:
+                page.wait_for_selector("[data-focus-result]", timeout=20000)
+            except Exception:  # noqa: BLE001
+                errors.append(f"[{t2}] 十球テストの結果が出ない: {page.inner_text('#view')[:300]!r}")
+                ctx.close()
+                continue
+            if page.locator("[data-t=balls] li").count() != 10:
+                errors.append(f"[{t2}] 丸が十個ない")
+            want = "passed" if page.locator("[data-t=balls] li[data-mark=in]").count() >= 8 else None
+            got = page.get_attribute("[data-focus-result]", "data-focus-result")
+            if want and got != "passed":
+                errors.append(f"[{t2}] 範囲の中が八つ以上なのに合格にならない: {got}")
+            if not page.inner_text("[data-t=fnext]").strip() or page.locator("[data-t=mstate]").count() != 1:
+                errors.append(f"[{t2}] 次の手・プランの状態が出ない")
+            plain_first(page, "[data-focus-result]", t2, "練習の結果（十球テスト）", errors)
+            no_overflow(page, t2, "練習の結果（十球テスト）", errors)
+            targets(page, t2, "練習の結果（十球テスト）", errors)
+            shot(page, shots_dir, f"{t2}-4-result")
+            page.click("[data-t=fwhy]")
+            page.wait_for_selector("[data-sheet=focuswhy].on")
+            if "できたと思ったのは" not in page.inner_text("[data-sheet=focuswhy]") or "確率ではありません" not in page.inner_text("[data-sheet=focuswhy]"):
+                errors.append(f"[{t2}] 「なぜ？」に自己評価との比べ・合格の線の説明が無い")
+            shot(page, shots_dir, f"{t2}-5-why", full=False)
+            page.keyboard.press("Escape")
+            # 経過: 動きのプランの状態と、十球テストの推移（八の線）
+            goto(page, sv.root, "/progress", "[data-t=prog]")
+            page.wait_for_selector("[data-t=trend10]", timeout=15000)
+            if page.locator("[data-t=prog][data-kind=motion]").count() != 1 or page.locator("[data-t=passline]").count() < 1:
+                errors.append(f"[{t2}] 経過に動きのプランと八の線が出ない")
+            no_overflow(page, t2, "経過（十球テスト）", errors)
+            shot(page, shots_dir, f"{t2}-6-progress")
+            # 2日の再確認（TrackMan・言葉と言える範囲）
+            goto(page, sv.root, f"/progress/compare?a={s0}&b={s1}", "[data-t=checkup]", timeout=40000)
+            words = {"良くなった", "悪くなった", "変わらない", "判断できない"}
+            chips = page.locator("[data-t=checkup] .chip").all_inner_texts()
+            if not chips or any(c not in words for c in chips):
+                errors.append(f"[{t2}] 再確認の言葉が四つの言葉ではない: {chips}")
+            plain_first(page, "[data-t=checkup] .plainlist", t2, "2日の再確認", errors)
+            no_overflow(page, t2, "2日の再確認", errors)
+            shot(page, shots_dir, f"{t2}-7-checkup")
+            # 撮り方ガイド: 前回の構えを重ねるボタン（カメラが無い環境では理由を出す）
+            goto(page, sv.root, "/guide/dtl", "[data-cam]")
+            page.click("[data-cam]")
+            page.wait_for_selector("[data-camview] .note, [data-camov]", timeout=10000)
+            no_overflow(page, t2, "撮り方ガイド（重ねる）", errors)
+            shot(page, shots_dir, f"{t2}-8-guide")
+            ctx.close()
+
+
 def main() -> None:
     shots_dir = os.environ.get("SHOTS_DIR") or tempfile.mkdtemp(prefix="ui-")
     os.makedirs(shots_dir, exist_ok=True)
     errors: list[str] = []
+    if os.environ.get("UI_ONLY") == "recheck":
+        with sync_playwright() as pw:
+            exe = os.environ.get("PLAYWRIGHT_CHROMIUM")
+            browser = pw.chromium.launch(executable_path=exe) if exe else pw.chromium.launch()
+            check_recheck(browser, shots_dir, errors)
+            browser.close()
+        print("スクリーンショット:", shots_dir)
+        if errors:
+            sys.exit("失敗:\n  " + "\n  ".join(errors))
+        print("OK")
+        return
     static_checks(errors)
     fake = os.path.join(shots_dir, "fake_screenshot.json")
     fake_screenshot_answer(fake)
@@ -2116,6 +2227,7 @@ def main() -> None:
         check_vision_on(browser, shots_dir, errors)
         check_vision_fail(browser, shots_dir, errors)
         check_ideal(browser, sv.root, sv.base, shots_dir, errors)
+        check_recheck(browser, shots_dir, errors)
         browser.close()
     print("スクリーンショット:", shots_dir)
     if errors:
