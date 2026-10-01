@@ -59,8 +59,8 @@ const Video = (() => {
   function idb() {
     return new Promise((ok, ng) => {
       if (!("indexedDB" in window)) { ng(new Error("IndexedDB がありません")); return; }
-      const r = indexedDB.open("golf-local", 1);
-      r.onupgradeneeded = () => { const db = r.result; for (const n of ["swingFrames", "pose", "refs", "strips"]) if (!db.objectStoreNames.contains(n)) db.createObjectStore(n); };
+      const r = indexedDB.open("golf-local", 2);
+      r.onupgradeneeded = () => { const db = r.result; for (const n of ["swingFrames", "pose", "refs", "strips", "videos"]) if (!db.objectStoreNames.contains(n)) db.createObjectStore(n); };
       r.onsuccess = () => ok(r.result);
       r.onerror = () => ng(r.error);
     });
@@ -363,6 +363,26 @@ const Video = (() => {
     });
     const pickSame = $("[data-pick-same]", body);
     if (pickSame) pickSame.addEventListener("click", () => $("[data-file]", body).click());
+    const resumeKept = $("[data-resume-kept]", body);
+    if (resumeKept) {
+      const p = pending();
+      idbGet("videos", "pending").then((kv) => {
+        if (!kv || !kv.blob || !p || kv.sig !== p.sig) return;
+        resumeKept.hidden = false;
+        resumeKept.addEventListener("click", async () => {
+          const f = new File([kv.blob], kv.name, { type: kv.type, lastModified: kv.lastModified });
+          st.view = p.view || st.view; st.club = p.club || st.club; st.mode = "auto";
+          $("[data-err]", body).innerHTML = `<p class="loading-text" role="status">動画を読み込んでいます…</p>`;
+          try {
+            Object.assign(st, { frames: {}, missing: new Set(), ball: null, taps: {}, cur: "P1", swingId: null, payload: null, auto: null, autoIds: {}, box: undefined });
+            await loadVideo(st, f);
+            stepAuto(el, st, cat);
+          } catch (e) {
+            $("[data-err]", body).innerHTML = App.errorHtml({ what: "取っておいた動画を読めませんでした", saved: "体の点は残っています。", next: "［同じ動画を選ぶ］で選び直すと続きから処理します。", detail: e && e.message });
+          }
+        }, { once: true });
+      });
+    }
     const dropPending = $("[data-drop-pending]", body);
     if (dropPending) {
       dropPending.addEventListener("click", async () => {
@@ -942,7 +962,8 @@ const Video = (() => {
   // 自動で取り出す（段2b・§6.3・§6.4）
   // ======================================================================
   const COARSE_HZ = 10;      // スイングを探す粗い走査（1秒に何コマ）
-  const DENSE_HZ = 120;      // スイングの区間の細かい走査の上限（動画の fps がこれより低ければ全部のコマ）
+  const DENSE_HZ = 120;
+  const SLOWMO_HZ = 60;      // スロー再生と分かった動画の細かい走査（実時間に直して1秒に何コマ）      // スイングの区間の細かい走査の上限（動画の fps がこれより低ければ全部のコマ）
   const POSE_SHORT = 360;    // 体の点を取るときのコマの短辺（§6.3-4。短辺 360〜480px。長辺で縛ると横長の動画は短辺 270px になる）
   const BATCH_FRAMES = 6000; // 一回に送るコマの上限（分析サービスは 10000 まで）。超えるときはスイングの組に分けて送る
   const COARSE_MAX = 9000;   // 粗い走査のコマの上限（1秒に10コマで15分）。これより長い動画は切ってもらう
@@ -1071,11 +1092,19 @@ const Video = (() => {
     return p;
   }
   function setPending(st) {
-    LS.set("golf.videoPending", { date: st.date, session: st.session || st.sid || null, sig: sigOf(st), name: st.file.name || "", view: st.view, club: st.club, at: Date.now() });
+    const sig = sigOf(st);
+    LS.set("golf.videoPending", { date: st.date, session: st.session || st.sid || null, sig, name: st.file.name || "", view: st.view, club: st.club, at: Date.now() });
+    // 画面を離れるとブラウザが処理を止め、閉じてしまうことがある（スマホの決まり）。動画も端末に取っておき、
+    // 次に開いたとき選び直さずに続きから処理する（本人の声「バックグラウンドでいけるようにして」2026-10-01）
+    if (st.file && st.keptSig !== sig) {
+      st.keptSig = sig;
+      idbPut("videos", "pending", { sig, name: st.file.name || "video", type: st.file.type || "", lastModified: st.file.lastModified || 0, blob: st.file }).catch(() => {});
+    }
   }
   async function clearPending(dropCache = false) {
     const p = pending();
     if (dropCache && p && p.sig) await idbDel("pose", p.sig);
+    await idbDel("videos", "pending");
     LS.del("golf.videoPending");
   }
   // 同じ動画で手で選んで送った・探しても見つからなかった: 途中の印を消す（ホームを「続きから」に固定しない）
@@ -1087,7 +1116,8 @@ const Video = (() => {
     const p = pending();
     if (!p || !p.sig) return "";
     return `<section class="note" data-pending aria-labelledby="h-pending"><p id="h-pending" style="margin:0"><b>処理が途中の動画があります</b>（${esc(p.name || "動画")}・${esc(p.view === "fo" ? "正面から" : "後ろから")}）。同じ動画をもう一度選ぶと、取ってある体の点を使って続きから処理します。</p>
-      <button type="button" class="btn primary block" style="margin-top:var(--s2)" data-pick-same>同じ動画を選ぶ</button></section>`;
+      <button type="button" class="btn primary block" style="margin-top:var(--s2)" data-resume-kept hidden>続きから処理する</button>
+      <button type="button" class="btn block" style="margin-top:var(--s2)" data-pick-same>同じ動画を選ぶ</button></section>`;
   }
 
   // ---- ボールのまわり（§6.3-5・§6.4 の P7 の挟み込み） ----
@@ -1227,7 +1257,7 @@ const Video = (() => {
       <progress class="abar" data-abar max="1" value="0" hidden aria-label="この段の進み具合"></progress>
       <p class="caption" data-aprog></p>
       <p class="caption" data-aeta></p>
-      <p class="caption" data-keepopen>このあいだは画面を閉じないでください。閉じたときは、同じ動画をもう一度選ぶと続きから処理します。</p>
+      <p class="caption" data-keepopen>画面を開いたままだと早く終わります。ほかのアプリに切り替えると止まりますが、戻ればそのまま続きから進みます。ブラウザが閉じられても、次に開くと動画を選び直さずに続きから処理できます。</p>
       <div data-err></div>
       <div class="stack"><button type="button" class="btn block" data-stop>止める</button>
         <button type="button" class="btn block" data-manual>手で選ぶ</button></div></section>`;
@@ -1356,7 +1386,9 @@ const Video = (() => {
           const d = roiDiff(ref, firstRef);
           if (d != null) ballSeen.push({ t: Math.round(tp1 * 10000) / 10000, d });
         }
-        const ts = frameTimes(st, sw.window[0], sw.window[1], DENSE_HZ);
+        // スロー再生の動画は、実時間で 60Hz 相当まで間引く（全部のコマを見ると時間ばかりかかる）
+        const hz = r1.slow_motion ? Math.max(10, SLOWMO_HZ / r1.slow_motion) : DENSE_HZ;
+        const ts = frameTimes(st, sw.window[0], sw.window[1], hz);
         const got = await scanAt(st, det, ts, cache, { ballRef: ref, roiOut: roi, onTick: (k, n, ms) => { prog(body, `スイング ${i} / ${all.length}: ${k} / ${n} コマ`, k, n, ms); if (k % 60 === 0) keep(); } });
         denseBy.push(got);
       }

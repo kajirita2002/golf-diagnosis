@@ -268,7 +268,7 @@ def check_home_states(page, errors: list[str]) -> None:
         ("plan", {"sessions_with_shots": 1, "plan": {"next_index": 1, "total": 37, "last": None}, "motion_focus": {"session_id": 4, "item_id": "a"}}, {}),
     ]
     want_label = {"first": "最初の記録を入れる", "finding": "診断を見る", "measure": "くわしいレポートを見る", "found": "くわしいレポートを見る", "plan": "練習を始める",
-                  "stop": "続けるか選ぶ", "passed": "次の項目を見る", "video_resume": "同じ動画を選んで続ける", "setup": "撮り方を合わせる", "video": "チェックを見る", "motion": "この課題を見る"}
+                  "stop": "続けるか選ぶ", "passed": "次の項目を見る", "video_resume": "続きから処理する", "setup": "撮り方を合わせる", "video": "チェックを見る", "motion": "この課題を見る"}
     for key, h, local in cases:
         st = page.evaluate("([h, l]) => App.homeState(h, l)", [h, local])
         if st["key"] != key or st["primary"]["label"] != want_label[key]:
@@ -1640,10 +1640,15 @@ def check_video_auto(browser, root: str, base: str, pid: int, shots_dir: str, er
     if "/video/2026-09-24" not in href:
         errors.append(f"[{tag}] 続きから処理するの行き先が途中の記録でない: {href}")
     shot(page, shots_dir, f"{tag}-3-home-resume")
-    if (page.inner_text("[data-primary]") or "").strip() != "同じ動画を選んで続ける":
+    if (page.inner_text("[data-primary]") or "").strip() != "続きから処理する":
         errors.append(f"[{tag}] ホームの続きのボタンの名前: {page.inner_text('[data-primary]')!r}")
     page.click("[data-primary]")
     page.wait_for_selector("[data-pending] [data-pick-same]", timeout=15000)
+    # 動画は端末に取ってあるので、選び直さずに「続きから処理する」が出る（ブラウザに閉じられても続けられる）
+    try:
+        page.wait_for_selector("[data-pending] [data-resume-kept]:not([hidden])", timeout=10000)
+    except Exception:  # noqa: BLE001
+        errors.append(f"[{tag}] 取っておいた動画で「続きから処理する」が出ない")
     # 途中の知らせは画面の一番上（撮った向きのカードより上）
     if page.evaluate("(() => { const a = document.querySelector('[data-pending]'), b = document.querySelector('[data-view]'); return !!(a && b && (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING)); })()") is not True:
         errors.append(f"[{tag}] 途中の知らせが画面の上にない")

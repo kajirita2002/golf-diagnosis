@@ -20,7 +20,7 @@ const Home = (() => {
       const vp = typeof local.videoPending === "object" ? local.videoPending : {};
       const href = vp.date ? `#/video/${vp.date}${vp.session ? `?session=${vp.session}` : ""}` : "#/record";
       // 押した先で同じ動画を選び直す（動画は端末に置かないので、ファイルを選ぶのは本人）。名前もそう言う
-      return { key: "video_resume", heading: "動画の処理が途中です", primary: { label: "同じ動画を選んで続ける", href } };
+      return { key: "video_resume", heading: "動画の処理が途中です", primary: { label: "続きから処理する", href } };
     }
     if (local.setupMismatch) return { key: "setup", heading: "撮り方を確かめたい", primary: { label: "撮り方を合わせる", href: "#/record" } };
     // 動きの課題（段2c）: プランが無く、動画のチェックで「まずここ」が決まっていれば、それが今日の一点
