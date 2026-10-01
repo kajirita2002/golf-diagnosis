@@ -879,7 +879,7 @@ const Video = (() => {
     const body = freshBody(el);
     const stages = ["コマを用意する", "体の点を取る", "送って測る"];
     body.innerHTML = `<section class="card"><h2 class="visually-hidden">測っています</h2><ol class="stages" data-stages>${stages.map((s) => `<li>${esc(s)}</li>`).join("")}</ol>
-      <p class="caption">このあいだは画面を閉じないでください。</p><div data-err></div></section>`;
+      <p class="caption">画面を開いたままだと早く終わります。ほかのアプリに切り替えても、戻ればそのまま続きから進みます。</p><div data-err></div></section>`;
     enter(el);
     const mark = (i) => { $$("[data-stages] li", body).forEach((li, j) => { li.className = j < i ? "done" : j === i ? "cur" : ""; }); App.say(stages[i] || ""); };
     const bad = outsidePoints(st);
